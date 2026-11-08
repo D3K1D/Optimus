@@ -4,11 +4,16 @@ A Windows PC audit and optimization app. It checks security, performance, storag
 
 ## Install
 
-Download the `.msi` from Releases and run it. Windows 10 or 11, 64-bit. The installer is not signed yet, so Windows may show "Windows protected your PC": choose **More info → Run anyway**.
+Download the `.msi` from [Releases](../../releases/latest) and run it. Windows 10 or 11, 64-bit.
 
-## Build
+- Nothing else to install: the app carries its own .NET runtime, and its screens use Microsoft Edge WebView2, which Windows already has (the installer links to it if it's missing).
+- The installer is not signed yet, so Windows may show "Windows protected your PC": choose **More info → Run anyway**.
+- Installing asks for administrator approval once. The app itself runs as you.
+- To use an AI, the app helps you install or sign in to Claude Code, Codex or ChatGPT, or you can add an API key. It also works without an AI.
 
-Requires the .NET 10 SDK (see `global.json`) and Node.js for the UI tests.
+## Build from source
+
+Only needed for developers: the .NET 10 SDK (see `global.json`), and Node.js for the UI tests.
 
 ```
 dotnet build OptimizationTool.slnx

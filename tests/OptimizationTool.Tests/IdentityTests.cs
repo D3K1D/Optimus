@@ -47,6 +47,17 @@ public class IdentityTests
     }
 
     [Fact]
+    public void PipeOwner_IsThisProcessesDefaultOwner_SoElevatedClientsAcceptIt()
+    {
+        // CurrentUserOnly clients compare the pipe's owner with WindowsIdentity.Owner, which is BUILTIN\Administrators
+        // in an elevated process; owning the pipe as the user made "Run as administrator" fail to connect.
+        using var me = WindowsIdentity.GetCurrent();
+        Assert.Equal(me.Owner, HostServer.CreateSecurity(Me).GetOwner(typeof(SecurityIdentifier)));
+        var admins = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        Assert.Equal(admins, HostServer.CreateSecurity(Me, admins).GetOwner(typeof(SecurityIdentifier)));
+    }
+
+    [Fact]
     public void PipeAcl_GrantsUserAndSystem_DeniesNetwork()
     {
         var rules = HostServer.CreateSecurity(Me).GetAccessRules(true, false, typeof(SecurityIdentifier))

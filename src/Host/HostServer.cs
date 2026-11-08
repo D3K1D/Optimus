@@ -122,16 +122,27 @@ public sealed class HostServer : IAsyncDisposable
         return server;
     }
 
-    /// <summary>Current user full control, SYSTEM full control, NETWORK denied; nothing inherited.</summary>
-    internal static PipeSecurity CreateSecurity(SecurityIdentifier user)
+    /// <summary>
+    /// Current user full control, SYSTEM full control, NETWORK denied; nothing inherited. The owner is this process's
+    /// default owner (<see cref="WindowsIdentity.Owner"/>): that is what a CurrentUserOnly client compares against —
+    /// the user normally, but BUILTIN\Administrators when the app runs elevated ("Run as administrator"), where
+    /// owning the pipe as the user made every client refuse it.
+    /// </summary>
+    internal static PipeSecurity CreateSecurity(SecurityIdentifier user, SecurityIdentifier? owner = null)
     {
         var security = new PipeSecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         security.AddAccessRule(new PipeAccessRule(user, PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(WellKnownSidType.NetworkSid, null), PipeAccessRights.FullControl, AccessControlType.Deny));
-        security.SetOwner(user);
+        security.SetOwner(owner ?? DefaultOwner() ?? user);
         return security;
+    }
+
+    private static SecurityIdentifier? DefaultOwner()
+    {
+        using var me = WindowsIdentity.GetCurrent();
+        return me.Owner;
     }
 
     private NamedPipeServerStream CreatePipe(bool first)
