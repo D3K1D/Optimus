@@ -9,7 +9,7 @@ internal sealed record BridgeOptions
 {
     /// <summary>Pipe to the host. Default: this user's session pipe (PipeNames.ForCurrentSession).</summary>
     public string PipeName { get; init; } = PipeNames.ForCurrentSession();
-    public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(2);
+    public TimeSpan ConnectTimeout { get; init; } = TimeSpan.FromSeconds(5); // slow or busy PCs (and CI) missed 2 s
     public TimeSpan ControlTimeout { get; init; } = TimeSpan.FromSeconds(10);
     /// <summary>One tool.call; longer than a 60 s sample.</summary>
     public TimeSpan CallTimeout { get; init; } = TimeSpan.FromSeconds(75);
