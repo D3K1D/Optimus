@@ -50,7 +50,7 @@ public sealed class StubPipeServer : IAsyncDisposable
                     {
                         Interlocked.Increment(ref Hellos);
                         resp = Incompatible
-                            ? new JsonObject { ["jsonrpc"] = "2.0", ["id"] = req["id"]!.DeepClone(), ["error"] = new JsonObject { ["code"] = -32010, ["message"] = "incompatible_protocol", ["data"] = new JsonObject { ["supported"] = new JsonObject { ["major"] = 2, ["minor"] = 0 }, ["action"] = "Update Optimization Tool" } } }
+                            ? new JsonObject { ["jsonrpc"] = "2.0", ["id"] = req["id"]!.DeepClone(), ["error"] = new JsonObject { ["code"] = -32010, ["message"] = "incompatible_protocol", ["data"] = new JsonObject { ["supported"] = new JsonObject { ["major"] = 2, ["minor"] = 0 }, ["action"] = "Update Optimus" } } }
                             : new JsonObject { ["jsonrpc"] = "2.0", ["id"] = req["id"]!.DeepClone(), ["result"] = new JsonObject { ["protocol"] = new JsonObject { ["major"] = 1, ["minor"] = 0 }, ["server"] = new JsonObject { ["version"] = "stub" }, ["features"] = new JsonArray(), ["connectionId"] = "c-stub" } };
                     }
                     else if (Hold.Contains(method))

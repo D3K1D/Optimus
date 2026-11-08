@@ -18,7 +18,7 @@ public class ProtocolTests
         var error = await c.Fails("session.hello", Rpc.HelloParams(major: 2));
         Assert.Equal(ErrorCodes.IncompatibleProtocol, error.Code);
         Assert.Equal(1, (int)error.ErrorData!["supported"]!["major"]!);
-        Assert.Equal("Update Optimization Tool", error.ErrorData.Str("action"));
+        Assert.Equal("Update Optimus", error.ErrorData.Str("action"));
     }
 
     [Fact]

@@ -48,10 +48,10 @@ internal sealed record BridgeReply(string Text, bool IsError, JsonObject? Struct
 internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
 {
     public static string WaitingMessage(string code) =>
-        $"Waiting for approval in Optimization Tool (code {code}). Ask the user to approve it in the app, then call this tool again.";
+        $"Waiting for approval in Optimus (code {code}). Ask the user to approve it in the app, then call this tool again.";
 
     public const string NotRunningMessage =
-        "Optimization Tool isn't running. Open Optimization Tool to connect, then call this tool again.";
+        "Optimus isn't running. Open Optimus to connect, then call this tool again.";
 
     private static readonly HashSet<string> PairingLostReasons =
         ["not_paired", "unpaired", "pairing_required", "pairing_unknown", "pairing_expired", "unknown_pairing"];
@@ -104,11 +104,11 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         catch (IOException)
         {
             MarkDropped(connection: null);
-            return Error("unavailable", "The connection to Optimization Tool was lost. Call this tool again.");
+            return Error("unavailable", "The connection to Optimus was lost. Call this tool again.");
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return Error("timeout", "Optimization Tool did not answer in time. Call this tool again.");
+            return Error("timeout", "Optimus did not answer in time. Call this tool again.");
         }
         finally { _gate.Release(); }
 
@@ -139,7 +139,7 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         catch (IOException) { throw new HostUnavailableException("unavailable", NotRunningMessage); }
         catch (UnauthorizedAccessException)
         {
-            throw new HostUnavailableException("unavailable", "Optimization Tool's connection belongs to another user. Open Optimization Tool as this user.");
+            throw new HostUnavailableException("unavailable", "Optimus's connection belongs to another user. Open Optimus as this user.");
         }
 
         var connection = new Connection(rpc);
@@ -159,8 +159,8 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
             await rpc.DisposeAsync().ConfigureAwait(false);
             Log.Warn($"hello failed: {(e is JsonRpcException j ? j.Code.ToString() : e.GetType().Name)}");
             throw e is JsonRpcException { Code: -32010 }
-                ? new HostUnavailableException("unavailable", "This Optimization Tool version doesn't support Claude Code or Codex yet. Update Optimization Tool.")
-                : new HostUnavailableException("unavailable", "Optimization Tool refused the connection. Use the bridge installed with the app, then call this tool again.");
+                ? new HostUnavailableException("unavailable", "This Optimus version doesn't support Claude Code or Codex yet. Update Optimus.")
+                : new HostUnavailableException("unavailable", "Optimus refused the connection. Use the bridge installed with the app, then call this tool again.");
         }
 
         Log.Info("connected");
@@ -194,7 +194,7 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
                 case "denied":
                     ResetPairing();
                     Log.Info("pairing denied");
-                    return Error("not_allowed", "The pairing was denied in Optimization Tool. Call this tool again to request a new code.");
+                    return Error("not_allowed", "The pairing was denied in Optimus. Call this tool again to request a new code.");
                 default: // expired, revoked, unknown to this host (e.g. host restarted)
                     ResetPairing();
                     Log.Info($"pairing {status}; re-pairing");
@@ -223,13 +223,13 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         }
         catch (JsonRpcException e)
         {
-            throw new HostUnavailableException(HostCodeName(e), $"Optimization Tool could not start pairing: {Clip(e.Message)}");
+            throw new HostUnavailableException(HostCodeName(e), $"Optimus could not start pairing: {Clip(e.Message)}");
         }
         var pairingId = result?["pairingId"]?.GetValue<string>();
         var approved = result?["status"]?.GetValue<string>() == "approved";
         var code = result?["code"]?.GetValue<string>();
         if (string.IsNullOrEmpty(pairingId) || (!approved && string.IsNullOrEmpty(code)))
-            throw new HostUnavailableException("unavailable", "Optimization Tool returned an invalid pairing.");
+            throw new HostUnavailableException("unavailable", "Optimus returned an invalid pairing.");
         _pairingId = pairingId;
         _code = approved ? null : Clip(code!, 16);
         _approved = approved; // a run token is approved at once: no code, no waiting
@@ -274,12 +274,12 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            return Error("timeout", $"Optimization Tool did not answer within {(int)limit.TotalSeconds} s.");
+            return Error("timeout", $"Optimus did not answer within {(int)limit.TotalSeconds} s.");
         }
         catch (IOException)
         {
             connection.Dropped = true;
-            return Error("unavailable", "The connection to Optimization Tool was lost. Call this tool again.");
+            return Error("unavailable", "The connection to Optimus was lost. Call this tool again.");
         }
         catch (JsonRpcException e)
         {
@@ -290,7 +290,7 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         }
 
         if (result is not JsonObject obj)
-            return Error("unavailable", "Optimization Tool returned an empty result.");
+            return Error("unavailable", "Optimus returned an empty result.");
 
         if (obj["error"] is JsonObject error)
         {
@@ -317,13 +317,13 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
             ResetPairing();
             Log.Info("host lost the pairing; re-pairing");
             await PairAsync(connection, client, ct).ConfigureAwait(false);
-            return _approved ? Error("unavailable", "The connection to Optimization Tool was renewed. Call this tool again.") : Waiting();
+            return _approved ? Error("unavailable", "The connection to Optimus was renewed. Call this tool again.") : Waiting();
         }
         catch (HostUnavailableException e) { return Error(e.Code, e.Message); }
         catch (IOException)
         {
             connection.Dropped = true;
-            return Error("unavailable", "The connection to Optimization Tool was lost. Call this tool again.");
+            return Error("unavailable", "The connection to Optimus was lost. Call this tool again.");
         }
         finally { _gate.Release(); }
     }

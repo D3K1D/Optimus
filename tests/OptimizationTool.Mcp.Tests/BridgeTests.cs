@@ -119,7 +119,7 @@ public sealed class BridgeTests
         var r = await mcp.CallAsync("list_capabilities");
 
         Assert.False(r.IsError);
-        Assert.Equal("Waiting for approval in Optimization Tool (code 4821). Ask the user to approve it in the app, then call this tool again.", Text(r));
+        Assert.Equal("Waiting for approval in Optimus (code 4821). Ask the user to approve it in the app, then call this tool again.", Text(r));
         var hello = host.Last("session.hello")!;
         Assert.Equal("agent", hello["client"]!["kind"]!.GetValue<string>());
         Assert.Equal(1, hello["protocol"]!["major"]!.GetValue<int>());
@@ -253,7 +253,7 @@ public sealed class BridgeTests
         var r = await mcp.CallAsync("list_capabilities");
         Assert.True(r.IsError);
         Assert.Equal("unavailable", Json(r)["error"]!["code"]!.GetValue<string>());
-        Assert.Contains("Open Optimization Tool to connect", Json(r)["error"]!["message"]!.GetValue<string>());
+        Assert.Contains("Open Optimus to connect", Json(r)["error"]!["message"]!.GetValue<string>());
     }
 
     [Fact]

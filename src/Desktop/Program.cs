@@ -19,7 +19,7 @@ internal static class Program
         catch (ArgumentException ex)
         {
             log.Error($"startup: {ex.Message}");
-            MessageBox.Show(ex.Message, "Optimization Tool", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(ex.Message, "Optimus", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 2;
         }
 

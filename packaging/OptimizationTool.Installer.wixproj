@@ -1,5 +1,5 @@
 <Project Sdk="WixToolset.Sdk/7.0.1">
-  <!-- Per-machine MSI for Optimization Tool. Harvests the staging folder written by packaging/publish.ps1.
+  <!-- Per-machine MSI for Optimus (internally OptimizationTool). Harvests the staging folder written by packaging/publish.ps1.
        Build through packaging/build-installer.ps1. See contracts/onboarding.md §1. -->
   <PropertyGroup>
     <!-- One version for the exes and the MSI: Directory.Build.props <Version> unless -p:Version= is given. -->
@@ -21,6 +21,12 @@
          the person building passes -p:AcceptEula=wix7 (build-installer.ps1 -AcceptWixEula) or runs `wix eula accept wix7`.
          Terms: https://docs.firegiant.com/wix/osmf/ -->
   </PropertyGroup>
+
+  <!-- Setup dialogs (WixUI_Minimal) and WixShellExec for "Launch Optimus" on the finish page. Same version as the SDK. -->
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="7.0.1" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="7.0.1" />
+  </ItemGroup>
 
   <Target Name="_OtCheckInputs" BeforeTargets="Build">
     <Error Condition="'$(Version)' == ''" Text="No version: Directory.Build.props has no &lt;Version&gt;; pass -p:Version=x.y.z." />

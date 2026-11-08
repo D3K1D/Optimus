@@ -175,7 +175,7 @@ public sealed class ClientConnectorTests
         Assert.Equal("""{"status":"added"}""", r.ToJsonString());
 
         var view = Assert.Single(_confirm.Shown);
-        Assert.Equal("Add Optimization Tool to Claude Code?", view.Title);
+        Assert.Equal("Add Optimus to Claude Code?", view.Title);
         Assert.Equal("Add", view.Verb);
         Assert.Equal(Bridge, view.BridgePath);
         Assert.Equal($"claude mcp add --scope user optimization-tool -- \"{Bridge}\"", view.Command);
@@ -272,7 +272,7 @@ public sealed class ClientConnectorTests
         _runner.Registered = Bridge;
         var r = (await Call("shell.unregisterClient", """{"client":"claude_code"}"""))["result"]!;
         Assert.Equal("""{"status":"removed"}""", r.ToJsonString());
-        Assert.Equal("Remove Optimization Tool from Claude Code?", Assert.Single(_confirm.Shown).Title);
+        Assert.Equal("Remove Optimus from Claude Code?", Assert.Single(_confirm.Shown).Title);
         Assert.Equal([["mcp", "remove", "--scope", "user", "optimization-tool"], ["mcp", "get", "optimization-tool"]], McpRuns.Select(Args));
         Assert.Null(_runner.Registered);
     }

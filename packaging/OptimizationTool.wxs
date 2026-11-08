@@ -1,24 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Optimization Tool: per-machine MSI (contracts/onboarding.md §1). Built by OptimizationTool.Installer.wixproj from the
-     staging folder packaging/publish.ps1 writes. ProductVersion and StagingDir come from MSBuild (DefineConstants). -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
-  <!-- UpgradeCode: generated once (2026-11-04) and fixed forever. Every version of Optimization Tool keeps this value,
-       so MajorUpgrade finds and replaces the previous install. Never change it. -->
-  <Package Name="Optimization Tool"
-           Manufacturer="Optimization Tool (open source)"
+<!-- Optimus: per-machine MSI (contracts/onboarding.md §1). Built by OptimizationTool.Installer.wixproj from the
+     staging folder packaging/publish.ps1 writes. ProductVersion and StagingDir come from MSBuild (DefineConstants).
+     Shown name is "Optimus"; internal names (install folder, data folders, exe names) stay "Optimization Tool"/"OptimizationTool". -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <!-- UpgradeCode: generated once (2026-11-04) and fixed forever. Every version (0.6.x/0.7.x shipped as "Optimization Tool")
+       keeps this value, so MajorUpgrade finds and replaces the previous install. Never change it. -->
+  <Package Name="Optimus"
+           Manufacturer="Optimus (open source)"
            Version="$(var.ProductVersion)"
            UpgradeCode="425FAA83-AC69-4A47-ABA2-2E4DE58B8060"
            Scope="perMachine"
            Compressed="yes"
            Language="1033">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Optimization Tool is already installed." />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Optimus is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
-    <!-- Add/Remove Programs: icon from the app, no Modify (nothing to choose). -->
+    <!-- Add/Remove Programs: icon from the app, no Modify (nothing to choose; WixUI_Minimal below sets ARPNOMODIFY=1). -->
     <Icon Id="AppIcon.exe" SourceFile="$(var.StagingDir)\OptimizationTool.exe" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.exe" />
-    <Property Id="ARPNOMODIFY" Value="1" />
 
     <!-- WebView2 Evergreen runtime: per-machine (32-bit registry view = WOW6432Node) or per-user. Missing, empty and
          0.0.0.0 all mean not installed (Microsoft's documented check). Not checked on repair or uninstall. -->
@@ -31,13 +32,28 @@
                       Key="Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" />
     </Property>
     <Launch Condition="Installed OR (WV2_MACHINE_PV AND WV2_MACHINE_PV &lt;&gt; &quot;0.0.0.0&quot;) OR (WV2_USER_PV AND WV2_USER_PV &lt;&gt; &quot;0.0.0.0&quot;)"
-            Message="Optimization Tool needs the Microsoft Edge WebView2 Runtime. Download it from https://developer.microsoft.com/microsoft-edge/webview2/ (Evergreen Bootstrapper), then run this installer again." />
+            Message="Optimus needs the Microsoft Edge WebView2 Runtime. Download it from https://developer.microsoft.com/microsoft-edge/webview2/ (Evergreen Bootstrapper), then run this installer again." />
 
     <!-- %ProgramFiles%\Optimization Tool: admin-protected, as the elevation broker requires. -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Optimization Tool" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- Setup UI: welcome + MIT license, progress, finish. The finish page's "Launch Optimus" box (checked by default)
+         runs WixShellExec from the UI sequence, i.e. in the user's own msiexec client process, so the app starts
+         non-elevated (its pipes must not run as admin). /passive and /qn skip the UI sequence: no dialogs, no launch. -->
+    <ui:WixUI Id="WixUI_Minimal" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Optimus" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#OptimizationTool.exe]" />
+    <CustomAction Id="LaunchApp" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" DllEntry="WixShellExec" Impersonate="yes" Return="ignore" />
+    <UI>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 AND NOT Installed" />
+    </UI>
 
     <!-- %ProgramData%\OptimizationTool\receipts: owner Administrators; SYSTEM + Administrators full; Users read;
          protected (no inheritance from ProgramData, where users may create folders). The parent gets the same lock so a
@@ -49,7 +65,7 @@
       </Directory>
     </StandardDirectory>
 
-    <Feature Id="Main" Title="Optimization Tool" AllowAbsent="no">
+    <Feature Id="Main" Title="Optimus" AllowAbsent="no">
       <ComponentGroupRef Id="AppFiles" />
       <ComponentRef Id="DataFolder" />
       <ComponentRef Id="ReceiptsFolder" />
@@ -58,10 +74,12 @@
 
   <Fragment>
     <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
-      <!-- The shell exe on its own, so the Start menu shortcut can point at it. -->
+      <!-- The shell exe on its own, so the Start menu and Desktop shortcuts (all users) can point at it. -->
       <Component Id="MainExe">
         <File Id="OptimizationTool.exe" Source="$(var.StagingDir)\OptimizationTool.exe" KeyPath="yes">
-          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Optimization Tool"
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Optimus"
+                    Description="Audit and tune this PC" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+          <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="Optimus"
                     Description="Audit and tune this PC" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
         </File>
       </Component>

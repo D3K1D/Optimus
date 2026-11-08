@@ -10,7 +10,7 @@ internal static class BridgeServer
 {
     public static McpServerOptions CreateOptions(HostBridge bridge, string version) => new()
     {
-        ServerInfo = new Implementation { Name = ToolCatalog.ServerName, Title = "Optimization Tool", Version = version },
+        ServerInfo = new Implementation { Name = ToolCatalog.ServerName, Title = "Optimus", Version = version },
         ServerInstructions = ToolCatalog.Instructions,
         Capabilities = new ServerCapabilities { Tools = new ToolsCapability { ListChanged = false } },
         Handlers = new McpServerHandlers

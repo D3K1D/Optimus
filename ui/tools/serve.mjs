@@ -32,5 +32,5 @@ async function handle(req, res) {
 for (const host of ['127.0.0.1', '::1']) {
   const srv = createServer((req, res) => { handle(req, res).catch(() => { res.writeHead(500).end(); }); });
   srv.on('error', (e) => { if (host === '127.0.0.1') { console.error(e.message); process.exit(1); } });
-  srv.listen(PORT, host, () => { if (host === '127.0.0.1') console.log(`Optimization Tool UI: http://localhost:${PORT}/  (fixture: ?adapter=fixture, light: ?theme=light)`); });
+  srv.listen(PORT, host, () => { if (host === '127.0.0.1') console.log(`Optimus UI: http://localhost:${PORT}/  (fixture: ?adapter=fixture, light: ?theme=light)`); });
 }

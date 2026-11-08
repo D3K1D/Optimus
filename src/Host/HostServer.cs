@@ -311,7 +311,7 @@ public sealed class HostServer : IAsyncDisposable
             throw new RpcError(ErrorCodes.IncompatibleProtocol, $"Protocol {major}.x is not supported.", new JsonObject
             {
                 ["supported"] = new JsonObject { ["major"] = ProtocolMajor, ["minor"] = ProtocolMinor },
-                ["action"] = "Update Optimization Tool",
+                ["action"] = "Update Optimus",
             });
         var kind = p["client"]?["kind"] is JsonValue kv && kv.TryGetValue<string>(out var k) ? k : null;
         if (kind is null || !Allowlists.ContainsKey(kind))
@@ -320,7 +320,7 @@ public sealed class HostServer : IAsyncDisposable
         {
             _log($"client {connection.Id} rejected as agent: unexpected image");
             _engine.Agent.BridgeRejected(); // the app shows "Setup issue" (m3-agent §9); this connection gets no events
-            throw RpcError.State("untrusted_agent", "Agent clients must be OptimizationTool.Mcp.exe installed with Optimization Tool.");
+            throw RpcError.State("untrusted_agent", "Agent clients must be OptimizationTool.Mcp.exe installed with Optimus.");
         }
 
         connection.ClientKind = kind;

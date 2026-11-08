@@ -35,7 +35,7 @@ internal sealed class MainForm : Form
             approvals: new PlanApproval(new WinFormsPlanPrompt(this)),
             clients: _clients);
 
-        Text = "Optimization Tool";
+        Text = "Optimus";
         BackColor = Ground;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;

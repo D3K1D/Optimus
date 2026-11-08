@@ -60,7 +60,7 @@ public sealed partial class ClientConnector
     /// <summary>Shell-only, sent by the shell after every status (m5-chat §2); never forwarded from the renderer.</summary>
     public const string SetClientMethod = "provider.setClient";
     /// <summary>The fixed first question typed into the client when the app opens it; its tool call starts pairing.</summary>
-    public const string StarterPrompt = "Use Optimization Tool to check my PC.";
+    public const string StarterPrompt = "Use Optimus to check my PC.";
     public const string ServerName = "optimization-tool";
     public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(10);
     public static readonly TimeSpan ChangeTimeout = TimeSpan.FromSeconds(15);
@@ -538,7 +538,7 @@ public sealed partial class ClientConnector
         if (before == Registration.Yes) return Status("added");
 
         var confirmed = await _prompt.ConfirmAsync(new ClientConfirmView(
-            $"Add Optimization Tool to {c.Name}?", "Add", ManualCommand(c.Id), _bridgePath), ct);
+            $"Add Optimus to {c.Name}?", "Add", ManualCommand(c.Id), _bridgePath), ct);
         if (!confirmed)
         {
             log.Info($"shell: register {c.Id} cancelled");
@@ -565,7 +565,7 @@ public sealed partial class ClientConnector
         if (cli is null) return Status("not_installed");
 
         var confirmed = await _prompt.ConfirmAsync(new ClientConfirmView(
-            $"Remove Optimization Tool from {c.Name}?", "Remove",
+            $"Remove Optimus from {c.Name}?", "Remove",
             string.Join(' ', new[] { c.Exe }.Concat(RemoveArgs(c))), _bridgePath), ct);
         if (!confirmed) return Status("cancelled");
 

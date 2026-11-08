@@ -282,7 +282,7 @@ public sealed partial class AgentService
             ["changes"] = plan["rows"]?.AsArray().Count ?? 0, ["expiresAt"] = plan.Text("expiresAt"),
             ["undoSupported"] = plan["undo"]?["supported"]?.GetValue<bool>() ?? false,
             ["ineligible"] = plan["ineligible"] is JsonObject i ? new JsonObject { ["code"] = i.Text("code"), ["message"] = Clean(i.Text("message")) } : null,
-            ["next"] = plan.Text("status") == "awaiting_user" ? "Ask the user to approve or decline it in Optimization Tool, then poll get_operation with this planId." : null,
+            ["next"] = plan.Text("status") == "awaiting_user" ? "Ask the user to approve or decline it in Optimus, then poll get_operation with this planId." : null,
         },
     };
 

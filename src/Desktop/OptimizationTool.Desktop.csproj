@@ -7,7 +7,7 @@
     <AssemblyName>OptimizationTool</AssemblyName>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Product>Optimization Tool</Product>
+    <Product>Optimus</Product>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OptimizationTool.Desktop.Tests" />

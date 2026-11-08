@@ -222,7 +222,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.True(Guid.TryParse(first.Arguments[^1], out _));
         Assert.DoesNotContain(first.Arguments, a => a.Contains("Look over", StringComparison.Ordinal));
         Assert.NotNull(ProcessCommand.ForCli(first.CliPath, first.Arguments, @"C:\Windows")); // the .cmd line builder accepts every token
-        Assert.StartsWith("[prompt-v6]", File.ReadAllText(Path.Combine(runDir, "system.md")));
+        Assert.StartsWith("[prompt-v7]", File.ReadAllText(Path.Combine(runDir, "system.md")));
         Assert.False(File.Exists(Path.Combine(runDir, "mcp.json"))); // the token file goes with the run
         Assert.Contains("The user uses this PC for: Gaming. Goals: Improve PC performance.", first.StandardInput);
         Assert.Contains($"Current report {reportId}:", first.StandardInput);
@@ -293,7 +293,7 @@ public sealed class M5ChatTests : IDisposable
             "--disable", "shell_tool", "--disable", "unified_exec",
             "-c", $"mcp_servers.optimization-tool.command='{AgentSetup.Options().McpExecutablePath}'",
             "-c", $"mcp_servers.optimization-tool.env.OT_RUN_TOKEN='{token}'", "-"], first.Arguments);
-        Assert.StartsWith("[prompt-v6]", first.StandardInput); // the system text, first ask only
+        Assert.StartsWith("[prompt-v7]", first.StandardInput); // the system text, first ask only
         Assert.EndsWith("User: What matters?", first.StandardInput);
         Assert.NotNull(ProcessCommand.ForCli(Path.Combine(_bin, "codex.cmd"), first.Arguments, @"C:\Windows")); // an npm shim could carry it too
 
@@ -620,7 +620,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.StartsWith("The user uses this PC for:", firstAsk);
         Assert.Contains($"Current report {reportId}:", firstAsk);
         Assert.DoesNotContain("fnd-", firstAsk); // no findings list (m5 §4)
-        Assert.StartsWith("[prompt-v6]", provider.Requests.First().System);
+        Assert.StartsWith("[prompt-v7]", provider.Requests.First().System);
         Assert.Contains(provider.Requests.First().Tools, t => t.Name == "add_card");
 
         await Idle(host);

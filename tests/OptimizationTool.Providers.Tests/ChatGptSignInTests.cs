@@ -183,7 +183,7 @@ public sealed class ChatGptSignInTests
         var q = LoopbackCallback.ParseQuery(url.Query.TrimStart('?'));
         Assert.Equal("code", q["response_type"]);
         Assert.Equal("dynamic_agent_client", q["client_id"]);
-        Assert.Equal("Optimization Tool", q["agent_name_hint"]);
+        Assert.Equal("Optimus", q["agent_name_hint"]);
         Assert.Equal("openid profile email offline_access resource.invoke chatgpt.tokens.use.direct", q["scope"]);
         Assert.Equal("https://api.openai.com/v1", q["resource"]);
         Assert.Equal("S256", q["code_challenge_method"]);

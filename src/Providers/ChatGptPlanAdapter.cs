@@ -235,7 +235,7 @@ public sealed class ChatGptPlanAdapter : IProviderAdapter, IToolCapability
                 {
                     ["type"] = "namespace",
                     ["name"] = ToolNamespace,
-                    ["description"] = "Read-only diagnostics from Optimization Tool on this PC.",
+                    ["description"] = "Read-only diagnostics from Optimus on this PC.",
                     ["tools"] = functions,
                 });
                 // Rebuilt (non-replayed) calls need the namespace they were offered under.

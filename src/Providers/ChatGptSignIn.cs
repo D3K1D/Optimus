@@ -29,7 +29,7 @@ public sealed record ChatGptSignInOptions
     public Uri TokenEndpoint { get; init; } = new("https://auth.openai.com/api/accounts/oauth/token");
     public string Resource { get; init; } = "https://api.openai.com/v1";
     public string Scope { get; init; } = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
-    public string AgentNameHint { get; init; } = "Optimization Tool";
+    public string AgentNameHint { get; init; } = "Optimus";
     /// <summary>
     /// How long to wait for the browser to come back to the loopback callback. 3 minutes: a real sign-in takes well
     /// under that, and a callback blocked by a firewall, proxy or a browser on another profile otherwise looks stuck.
@@ -613,7 +613,7 @@ internal sealed class LoopbackCallback : IDisposable
         return new LoopbackCallback(l);
     }
 
-    const string Page = "<!doctype html><meta charset=utf-8><title>Optimization Tool</title><p style=\"font:16px system-ui;margin:40px\">You can close this tab.</p>";
+    const string Page = "<!doctype html><meta charset=utf-8><title>Optimus</title><p style=\"font:16px system-ui;margin:40px\">You can close this tab.</p>";
 
     public async Task<IReadOnlyDictionary<string, string>> WaitAsync(CancellationToken ct)
     {

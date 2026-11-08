@@ -137,7 +137,7 @@ public class BackendBridgeTests
         await using var backend = Connect(stub);
         backend.Start();
         await WaitForState(backend, BackendState.Incompatible);
-        Assert.Equal("Update Optimization Tool", backend.Current.Detail!["action"]!.GetValue<string>());
+        Assert.Equal("Update Optimus", backend.Current.Detail!["action"]!.GetValue<string>());
     }
 
     [Fact]

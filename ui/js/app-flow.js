@@ -1658,7 +1658,7 @@
     var body = null;
     if (bstate === 'incompatible' || (failed && id === 'boot')) {
       body = h('div', { key: 'down', className: 'ot-flow-panel ot-enter' }, h(GlassPanel, { strong: true, className: 'ot-choice ot-frost' },
-        h('h2', { className: 'text-title-2' }, bstate === 'incompatible' ? 'Update Optimization Tool' : 'Backend unavailable'),
+        h('h2', { className: 'text-title-2' }, bstate === 'incompatible' ? 'Update Optimus' : 'Backend unavailable'),
         bstate !== 'incompatible' && h('div', { className: 'ot-choice-foot' }, h(Button, { variant: 'primary', onClick: boot }, 'Retry'))));
     } else if (id === 'login') {
       body = h('div', { key: 'login', className: cls('ot-flow-panel') }, h(LoginPanel, {

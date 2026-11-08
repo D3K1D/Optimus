@@ -353,7 +353,7 @@ public sealed class CliResolutionTests
         Assert.Empty(_confirm.Shown);
         var started = Assert.Single(_opener.Started);
         Assert.Equal(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", started.FileName);
-        Assert.Equal(["-NoProfile", "-NoExit", "-Command", @"& 'C:\Tools\it''s\codex.exe' 'Use Optimization Tool to check my PC.'"], started.ArgumentList);
+        Assert.Equal(["-NoProfile", "-NoExit", "-Command", @"& 'C:\Tools\it''s\codex.exe' 'Use Optimus to check my PC.'"], started.ArgumentList);
         Assert.Empty(_launcher.Started);
     }
 

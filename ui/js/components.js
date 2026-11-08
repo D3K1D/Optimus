@@ -1,4 +1,4 @@
-/* Optimization Tool UI components (React 18, no build step). Production copy of design/design-system/components/bundle.js:
+/* Optimus UI components (React 18, no build step). Production copy of design/design-system/components/bundle.js:
    sample data and AppFlow are removed (AppFlow lives in app-flow.js, data comes from backend.js). Visual output unchanged. */
 (function () {
   var React = window.React, h = React.createElement;
@@ -61,7 +61,7 @@
     // `mono` draws both gears in currentColor (black or white with the theme); `decorative` hides it from assistive tech;
     // `spin` turns the gears slowly while something works (still under reduced motion).
     return h('span', { className: cx('ot-logo', p.mono && 'is-mono', p.spin && 'is-spinning', p.className), style: { width: size, height: size },
-      role: p.decorative ? undefined : 'img', 'aria-label': p.decorative ? undefined : (p.label || 'Optimization Tool'), 'aria-hidden': p.decorative || undefined,
+      role: p.decorative ? undefined : 'img', 'aria-label': p.decorative ? undefined : (p.label || 'Optimus'), 'aria-hidden': p.decorative || undefined,
       dangerouslySetInnerHTML: { __html: markup } });
   }
 
@@ -705,7 +705,7 @@
     return h(GlassPanel, { strong: true, className: cx('ot-login-panel', 'ot-frost', p.className) },
       h('div', { className: 'ot-brand' },
         h(Logo, { size: 30 }),
-        h('span', { className: 'text-callout' }, 'Optimization Tool')),
+        h('span', { className: 'text-callout' }, 'Optimus')),
       h('h1', { className: 'text-title-1' }, 'Choose your AI'),
       h('div', { className: 'ot-provider-grid', role: 'radiogroup', 'aria-label': 'AI help' },
         tiles.map(function (x) {

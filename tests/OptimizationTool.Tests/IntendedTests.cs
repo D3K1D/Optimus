@@ -143,7 +143,7 @@ public class IntendedTests
         await AgentSetup.Ask(c, taskId);
         await AgentSetup.TaskEvent(c, taskId, "agent.message");
         var request = provider.Requests.Single();
-        Assert.Equal("prompt-v6", AgentService.SystemPromptVersion);
+        Assert.Equal("prompt-v7", AgentService.SystemPromptVersion);
         Assert.Contains("intended", request.System);
         var context = ((UserText)request.Messages[0]).Text;
         Assert.Contains("Gaming, Hosting / development", context);

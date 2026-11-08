@@ -167,7 +167,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             return (HelloOutcome.Incompatible, new JsonObject
             {
                 ["supported"] = new JsonObject { ["major"] = 1, ["minor"] = 0 },
-                ["action"] = "Update Optimization Tool",
+                ["action"] = "Update Optimus",
             });
         }
         log.Info("backend: session.hello ok");

@@ -30,7 +30,7 @@ function Find-SignTool {
 }
 function Invoke-Sign([string[]]$paths) {
     $tool = Find-SignTool
-    & $tool sign /sha1 $CertThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 /d "Optimization Tool" @paths
+    & $tool sign /sha1 $CertThumbprint /fd SHA256 /tr $TimestampUrl /td SHA256 /d "Optimus" @paths
     if ($LASTEXITCODE -ne 0) { throw "signtool failed ($LASTEXITCODE)." }
 }
 if ($Sign -and -not $CertThumbprint) { throw "-Sign needs -CertThumbprint (SHA-1 thumbprint of a code-signing cert in the store)." }
