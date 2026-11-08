@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "1.0.0",
+  "synthetic": true,
+  "note": "Synthetic M1 dataset shared by the host's fixture collectors and the UI's in-browser fixture adapter. No data from a real PC. Derived from docs/fixtures/scan-experience.json (e1-e3, c1-c3) and the prototype's sample cards (e4-e8, c4-c8).",
+
+  "categories": [
+    {"id": "security", "label": "Security", "icon": "shield"},
+    {"id": "performance", "label": "Performance", "icon": "bolt"},
+    {"id": "storage", "label": "Storage", "icon": "disk"},
+    {"id": "privacy_telemetry", "label": "Privacy & Telemetry", "icon": "eye"},
+    {"id": "diagnostics", "label": "Diagnostics", "icon": "pulse"},
+    {"id": "customization", "label": "System Customization & Tweaks", "icon": "sliders"},
+    {"id": "misc", "label": "Misc.", "icon": "dots"}
+  ],
+  "scanCategories": [
+    {"id": "security", "label": "Security"},
+    {"id": "performance", "label": "Performance"},
+    {"id": "storage", "label": "Storage"},
+    {"id": "privacy_telemetry", "label": "Privacy"},
+    {"id": "diagnostics", "label": "Diagnostics"},
+    {"id": "customization", "label": "Customization"}
+  ],
+  "scanWaveWords": ["Defender ✓", "Firewall public: OFF", "Power: High performance", "Startup: 14", "C: 11 GiB free", "Diagnostic data: optional", "Kernel-Power 41 ×3", "Display 2: 60 Hz / 165 Hz", "Start suggestions: on"],
+
+  "inventory": {
+    "stepDelayMs": 800,
+    "status": "partial",
+    "steps": [
+      {"name": "Specs", "facts": [{"kind": "computer", "label": "8-core CPU"}, {"kind": "computer", "label": "32 GB memory"}, {"kind": "computer", "label": "Windows 11 Pro"}]},
+      {"name": "Graphics", "facts": [{"kind": "display", "label": "1 GPU"}, {"kind": "driver", "label": "Display driver found"}]},
+      {"name": "Displays", "facts": [{"kind": "display", "label": "2 displays"}, {"kind": "display", "label": "165 Hz panel"}]},
+      {"name": "Devices", "facts": [{"kind": "input", "label": "Mouse detected"}, {"kind": "input", "label": "Keyboard detected"}, {"kind": "input", "label": "USB hub · 4 ports"}]},
+      {"name": "Audio", "facts": [{"kind": "audio", "label": "Speakers detected"}, {"kind": "audio", "label": "Headset detected"}]},
+      {"name": "Network", "facts": [{"kind": "network", "label": "Wi-Fi adapter detected"}, {"kind": "network", "label": "5 GHz"}]},
+      {"name": "Drivers", "facts": [{"kind": "driver", "label": "142 drivers"}, {"kind": "driver", "label": "3 older than 2 yrs"}]}
+    ],
+    "coverage": {"computer": "complete", "displays": "complete", "peripherals": "partial", "drivers": "partial", "network": "complete"},
+    "capabilities": {"displayCount": 2}
+  },
+
+  "collectors": [
+    {"id": "fixture.firewall", "version": "1.0.0", "category": "security", "delayMs": 750, "outcome": "complete",
+     "evidence": [{"key": "e1", "subject": "firewall.profile.public", "source": "Windows Firewall effective profiles", "quality": "measured",
+       "value": {"profile": "Public", "enabled": false, "policyOwner": "unknown"},
+       "display": "Windows reports that the Public firewall profile is off. Policy ownership could not be determined."}]},
+    {"id": "fixture.power", "version": "1.0.0", "category": "performance", "delayMs": 750, "outcome": "complete",
+     "evidence": [{"key": "e2", "subject": "power.active_scheme", "source": "Windows power scheme inventory", "quality": "measured",
+       "value": {"source": "battery", "activeScheme": "High performance", "availableSchemes": ["High performance", "Balanced"]},
+       "display": "High performance is active on battery. Balanced is installed."}]},
+    {"id": "fixture.startup", "version": "1.0.0", "category": "performance", "delayMs": 300, "outcome": "complete",
+     "evidence": [{"key": "e4", "subject": "startup.entries", "source": "Startup apps (registry and Startup folder)", "quality": "measured",
+       "value": {"count": 14, "unusedDays30": 5},
+       "display": "14 apps start at sign-in. 5 were not opened in the last 30 days."}]},
+    {"id": "fixture.volume", "version": "1.0.0", "category": "storage", "delayMs": 750, "outcome": "complete",
+     "evidence": [{"key": "e3", "subject": "volume.system", "source": "Windows volume capacity", "quality": "measured",
+       "value": {"freeGiB": 11, "capacityGiB": 256},
+       "display": "The system volume has 11 GiB free out of 256 GiB."}]},
+    {"id": "fixture.diagdata", "version": "1.0.0", "category": "privacy_telemetry", "delayMs": 750, "outcome": "complete",
+     "evidence": [{"key": "e5", "subject": "privacy.diagnostic_data", "source": "Windows diagnostic data setting", "quality": "measured",
+       "value": {"level": "optional"},
+       "display": "Optional diagnostic data is on."}]},
+    {"id": "fixture.kernelpower", "version": "1.0.0", "category": "diagnostics", "delayMs": 750, "outcome": "complete", "interval": "P30D",
+     "evidence": [{"key": "e6", "subject": "eventlog.system.kernel_power_41", "source": "System event log · Kernel-Power 41", "quality": "measured",
+       "value": {"count": 3, "windowDays": 30},
+       "display": "3 unexpected restarts in the last 30 days."}]},
+    {"id": "fixture.fan", "version": "1.0.0", "category": "diagnostics", "delayMs": 200, "outcome": "timed_out", "timeoutMs": 150,
+     "gap": {"key": "gap-1", "title": "Fan speed", "source": "Sensors", "display": "Fan speed was unavailable."}},
+    {"id": "fixture.display", "version": "1.0.0", "category": "customization", "delayMs": 750, "outcome": "complete",
+     "evidence": [{"key": "e7", "subject": "display.2.refresh", "source": "Display settings", "quality": "measured",
+       "value": {"display": 2, "currentHz": 60, "maxHz": 165},
+       "display": "Display 2 runs at 60 Hz. It supports 165 Hz at this resolution."}]},
+    {"id": "fixture.startmenu", "version": "1.0.0", "category": "customization", "delayMs": 200, "outcome": "complete",
+     "evidence": [{"key": "e8", "subject": "start.suggestions", "source": "Start menu settings", "quality": "measured",
+       "value": {"suggestions": true},
+       "display": "Start shows suggested apps and tips."}]}
+  ],
+
+  "rules": [
+    {"ruleId": "fw.public_off", "version": "1.0.0", "category": "security", "evidence": ["e1"], "severity": "high", "confidence": "high", "actionEligibility": "manual_review",
+     "title": "Public firewall profile is off",
+     "card": {"key": "c1", "text": "Windows says its firewall for public networks is off. Would you like to review the setting?", "options": ["View steps", "Ask about this", "Ignore"],
+       "guide": ["Open Windows Security › Firewall & network protection.", "Choose Public network.", "Turn Microsoft Defender Firewall on."]}},
+    {"ruleId": "power.high_perf_on_battery", "version": "1.0.0", "category": "performance", "evidence": ["e2"], "severity": "low", "confidence": "high", "actionEligibility": "preview_available",
+     "title": "High performance on battery",
+     "card": {"key": "c2", "actionId": "power.select_scheme", "text": "Your laptop uses High performance on battery. Would you like to try Balanced for your quieter-use goal?", "options": ["Preview change", "Ask about this", "Ignore"],
+       "preview": {"rows": [{"label": "On battery", "before": "High performance", "after": "Balanced"}], "details": [["Trade-off", "Slightly lower peak speed"], ["Admin", "No"], ["Undo", "Yes"]]},
+       "receipt": "Balanced is active on battery, read back from Windows. Quieter: not measured yet.", "done": "Switched to Balanced on battery"}},
+    {"ruleId": "storage.system_low", "version": "1.0.0", "category": "storage", "evidence": ["e3"], "severity": "medium", "confidence": "high", "actionEligibility": "manual_review",
+     "title": "System drive space is running low",
+     "card": {"key": "c3", "text": "The system drive has 11 GiB free. Would you like to review storage usage?", "options": ["View steps", "Ask about this", "Ignore"],
+       "guide": ["Open Settings › System › Storage.", "Review Temporary files and Cleanup recommendations.", "Remove what you don’t need."]}},
+    {"ruleId": "startup.many_unused", "version": "1.0.0", "category": "performance", "evidence": ["e4"], "severity": "low", "confidence": "medium", "actionEligibility": "manual_review",
+     "title": "Apps that start at sign-in",
+     "card": {"key": "c4", "text": "14 apps start when you sign in, and 5 haven’t been opened in 30 days. Would you like to review them?", "options": ["View steps", "Ask about this", "Ignore"],
+       "guide": ["Open Task Manager › Startup apps.", "Sort by Startup impact.", "Disable the apps you don’t need at sign-in."]}},
+    {"ruleId": "privacy.optional_diag", "version": "1.0.0", "category": "privacy_telemetry", "evidence": ["e5"], "severity": "low", "confidence": "high", "actionEligibility": "preview_available",
+     "title": "Optional diagnostic data is on",
+     "card": {"key": "c5", "actionId": "privacy.diagnostic_data", "text": "Windows is sending optional diagnostic data. Would you like to turn it off?", "options": ["Preview change", "Ask about this", "Ignore"],
+       "preview": {"rows": [{"label": "Optional data", "before": "On", "after": "Off"}], "details": [["Trade-off", "Fewer tailored tips"], ["Admin", "No"], ["Undo", "Yes"]]},
+       "receipt": "Optional diagnostic data is off, read back from Windows.", "done": "Turned off optional diagnostic data"}},
+    {"ruleId": "reliability.kernel_power", "version": "1.0.0", "category": "diagnostics", "evidence": ["e6"], "severity": "medium", "confidence": "medium", "actionEligibility": "manual_review",
+     "title": "Unexpected restarts",
+     "card": {"key": "c6", "text": "Your PC restarted unexpectedly 3 times this month. Would you like to see what usually causes this?", "options": ["View steps", "Ask about this", "Ignore"],
+       "guide": ["Check for a newer graphics driver from your GPU maker.", "Run Windows Update.", "If it continues, check power and cooling."]}},
+    {"ruleId": "display.below_max_refresh", "version": "1.0.0", "category": "customization", "evidence": ["e7"], "severity": "low", "confidence": "high", "actionEligibility": "preview_available",
+     "title": "Display 2 below its refresh rate",
+     "card": {"key": "c7", "actionId": "display.set_refresh", "text": "Your second display runs at 60 Hz but supports 165 Hz. Would you like to review it?", "options": ["Preview change", "Ask about this", "Ignore"],
+       "preview": {"rows": [{"label": "Display 2", "before": "60 Hz", "after": "165 Hz"}], "details": [["Trade-off", "Slightly more power"], ["Admin", "No"], ["Undo", "Yes"]]},
+       "receipt": "Display 2 is at 165 Hz, read back from Windows.", "done": "Set Display 2 to 165 Hz"}},
+    {"ruleId": "start.suggestions_on", "version": "1.0.0", "category": "misc", "evidence": ["e8"], "severity": "info", "confidence": "high", "actionEligibility": "preview_available",
+     "title": "Start suggestions are on",
+     "card": {"key": "c8", "actionId": "start.suggestions", "text": "Start shows suggested apps and tips. Would you like to hide them?", "options": ["Preview change", "Ask about this", "Ignore"],
+       "preview": {"rows": [{"label": "Suggestions", "before": "On", "after": "Off"}], "details": [["Trade-off", "None"], ["Admin", "No"], ["Undo", "Yes"]]},
+       "receipt": "Start suggestions are hidden, read back from Windows.", "done": "Hid Start suggestions"}}
+  ],
+
+  "queuePolicy": {
+    "note": "Port of the prototype's buildQueue: security first; goals and usage order the rest. perf = goals contain 'performance' or 'optimi', or uses contain 'gam'. custom = goals contain 'custom' or uses contain 'gam'. Matching is case-insensitive substring over the joined list.",
+    "order": ["c1", {"if": "perf", "then": ["c2", "c4"]}, "c3", {"if": "custom", "then": ["c7"]}, "c5", "c6", {"if": "!perf", "then": ["c2", "c4"]}, {"if": "!custom", "then": ["c7"]}, "c8"],
+    "targetedFront": "For a targeted intent, only cards whose category is in intentCategories[intent] are included, in the order above."
+  },
+  "intentCategories": {
+    "audit.security": ["security"], "audit.updates": ["security"], "audit.network": ["security"],
+    "audit.background": ["performance"], "audit.startup": ["performance"], "audit.gaming": ["performance"],
+    "audit.exports": ["performance", "storage"], "audit.storage": ["storage"], "audit.privacy": ["privacy_telemetry"],
+    "audit.reliability": ["diagnostics"], "audit.devices": ["diagnostics"], "audit.customization": ["customization"], "audit.displays": ["customization"]
+  },
+  "categoryCollectors": "A scan plans every collector whose category is in its intent's categories (all collectors for audit.full). The 'misc' rule's evidence comes from a customization collector, so misc cards appear in audit.full and audit.customization/audit.displays.",
+  "focus": [
+    ["storage|space|disk|drive|room|clean", "storage"],
+    ["secur|safe|firewall|virus|protect|wi-?fi|network", "security"],
+    ["slow|fast|speed|startup|boot|performance|battery|quiet|game|gaming|fps", "performance"],
+    ["privacy|telemetry|track|diagnostic data", "privacy_telemetry"],
+    ["restart|crash|error|driver|freeze|device", "diagnostics"],
+    ["monitor|hz|display|look|custom|personali", "customization"]
+  ],
+  "fullAuditPattern": "^\\s*(begin|start|run)( a)?( new)? scan",
+
+  "starters": [
+    {"id": "s02", "text": "Check whether my PC is protected.", "intent": "audit.security"},
+    {"id": "g01", "text": "Is Windows up to date?", "intent": "audit.updates"},
+    {"id": "s03", "text": "What keeps running when my PC is idle?", "intent": "audit.background"},
+    {"id": "s04", "text": "Show me what starts when I sign in.", "intent": "audit.startup"},
+    {"id": "s05", "text": "Where could I free up disk space?", "intent": "audit.storage"},
+    {"id": "s06", "text": "Check my Windows privacy settings.", "intent": "audit.privacy"},
+    {"id": "s07", "text": "Has Windows reported recurring errors?", "intent": "audit.reliability"},
+    {"id": "s08", "text": "Are any of my devices reporting a problem?", "intent": "audit.devices"},
+    {"id": "s09", "text": "Which Windows settings can I personalize?", "intent": "audit.customization"},
+    {"id": "s10", "text": "Review my network and firewall settings.", "intent": "audit.network"},
+    {"id": "s11", "text": "Could background tasks be slowing down my games?", "intent": "audit.gaming", "needsUse": "gam"},
+    {"id": "s12", "text": "What settings are in use across my two displays?", "intent": "audit.displays", "needsInventory": {"displayCount": 2}},
+    {"id": "p01", "text": "Check what might slow video exports.", "intent": "audit.exports", "needsUse": "edit"}
+  ],
+  "starterOrdering": "Port of buildStarters: eligible = needsUse substring-matches joined uses (case-insensitive) and needsInventory predicates hold on the inventory capabilities. Output: first general starter, then each personal starter followed by the next general one, then remaining generals. basis = 'profile' for needsUse, 'inventory' for needsInventory, else 'general'.",
+
+  "askTemplates": [
+    {"card": "c1", "pattern": "who|owner|turned", "reply": "The report shows the setting is off. Its owner is unknown."},
+    {"card": "*", "pattern": ".*", "reply": "From the report: {display}"}
+  ],
+
+  "mockAiSummary": [
+    {"text": "The Public firewall profile is off. Review the setting before using public Wi‑Fi.", "evidence": ["e1"]},
+    {"text": "High performance is active on battery. Balanced is available to try for your quieter-use goal.", "evidence": ["e2"]},
+    {"text": "The system drive has 11 GiB free. Windows Storage can help you review what is using space.", "evidence": ["e3"]},
+    {"text": "Three unexpected restarts in 30 days are worth a look; the report has the event details.", "evidence": ["e6"]}
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/finding.schema.json",
+  "title": "finding.get result",
+  "description": "Result of finding.get (protocol-v1 §9): the finding, its cited and counter evidence, the coverage of its rule's inputs, and the rule.",
+  "type": "object",
+  "required": ["finding", "evidence", "coverage", "rule"],
+  "properties": {
+    "finding": { "$ref": "report.schema.json#/$defs/finding" },
+    "evidence": { "type": "array", "items": { "$ref": "evidence.schema.json" } },
+    "coverage": { "type": "array", "items": { "$ref": "scan.schema.json#/$defs/coverage" } },
+    "rule": {
+      "type": "object",
+      "required": ["id", "version", "inputs"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" },
+        "inputs": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

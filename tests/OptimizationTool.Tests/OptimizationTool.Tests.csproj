@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OptimizationTool.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.13.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.0.2" />
+    <PackageReference Include="JsonSchema.Net" Version="7.3.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Transport\OptimizationTool.Transport.csproj" />
+    <ProjectReference Include="..\..\src\Engine\OptimizationTool.Engine.csproj" />
+    <ProjectReference Include="..\..\src\Host\OptimizationTool.Host.csproj" />
+    <ProjectReference Include="..\..\src\Windows\OptimizationTool.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\contracts\schemas\*.schema.json" Link="schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+</Project>

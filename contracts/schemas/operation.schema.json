@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/operation.schema.json",
+  "title": "Operation",
+  "description": "Result of action.approve, operation.get and operation.list entries (m4-actions §3). One per approved plan; its journal is in steps.",
+  "type": "object",
+  "required": ["operationId", "planId", "actionId", "state", "receipt", "undo", "error", "steps"],
+  "properties": {
+    "operationId": { "type": "string", "pattern": "^op-[0-9a-f]{16}$" },
+    "planId": { "type": "string", "pattern": "^plan-" },
+    "actionId": { "type": "string" },
+    "state": { "enum": ["prepared", "attempted", "verified", "failed", "indeterminate", "rolled_back_failed"] },
+    "progress": { "type": ["string", "null"], "description": "Provider operations: the handler's latest progress line while running." },
+    "result": { "type": "string", "description": "Provider operations: updated | already_current | no_threats | threats_found." },
+    "manualUri": { "type": "string" },
+    "receipt": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/receipt" }] },
+    "undo": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["available", "reason"],
+      "properties": { "available": { "type": "boolean" }, "reason": { "enum": [null, "changed_since", "not_supported", "not_verified"] } } }] },
+    "error": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"] }] },
+    "reconciled": { "type": "boolean" },
+    "note": { "type": "string" },
+    "steps": { "type": "array", "items": { "type": "object", "required": ["state", "at", "detail"] } }
+  },
+  "$defs": {
+    "receipt": {
+      "type": "object",
+      "required": ["receiptId", "verifiedAt", "observed", "text", "benefit"],
+      "properties": {
+        "receiptId": { "type": "string", "pattern": "^rcpt-" },
+        "verifiedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+        "observed": { "type": "object" },
+        "text": { "type": "string" },
+        "benefit": { "const": "unmeasured" }
+      }
+    }
+  }
+}

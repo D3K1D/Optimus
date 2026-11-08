@@ -1,0 +1,36 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore OptimizationTool.slnx
+
+      - name: Build
+        run: dotnet build OptimizationTool.slnx --no-restore --configuration Release
+
+      - name: Test
+        # Live tests read this machine; they run on a dev PC, not on CI (contracts/m2-collectors.md §3).
+        run: dotnet test OptimizationTool.slnx --no-build --configuration Release --filter "Category!=Live" --logger "trx;LogFileName=results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/TestResults/*.trx"

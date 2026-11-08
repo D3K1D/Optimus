@@ -1,0 +1,7 @@
+/* Geist and Geist Mono (SIL OFL 1.1), vendored from the npm package geist@1.9.0. See vendor/README.md. */
+@font-face { font-family: "Geist"; font-style: normal; font-weight: 400; font-display: swap; src: url("../vendor/fonts/Geist-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Geist"; font-style: normal; font-weight: 500; font-display: swap; src: url("../vendor/fonts/Geist-Medium.woff2") format("woff2"); }
+@font-face { font-family: "Geist"; font-style: normal; font-weight: 600; font-display: swap; src: url("../vendor/fonts/Geist-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "Geist"; font-style: normal; font-weight: 700; font-display: swap; src: url("../vendor/fonts/Geist-Bold.woff2") format("woff2"); }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 400; font-display: swap; src: url("../vendor/fonts/GeistMono-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Geist Mono"; font-style: normal; font-weight: 500; font-display: swap; src: url("../vendor/fonts/GeistMono-Medium.woff2") format("woff2"); }

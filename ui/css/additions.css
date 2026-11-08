@@ -1,0 +1,178 @@
+/* M2 additions in the existing visual language (no new materials, no live blur, no per-row effects). */
+
+/* Report: per-category coverage mark, findings first, informational details beneath. */
+.ot-rgroup { content-visibility: auto; contain-intrinsic-size: auto 220px; }
+.ot-rgroup-head .ot-cov { margin-left: var(--space-2); padding: 1px 8px; border-radius: var(--radius-pill); border: 1px solid var(--grid-major); color: var(--ink-muted); letter-spacing: 0; text-transform: none; }
+.ot-rgroup-head .ot-cov.is-partial { color: var(--exposure); border-color: currentColor; }
+.ot-rgroup-head .ot-cov.is-none { border-style: dashed; border-color: var(--ink-faint); }
+.ot-rsub { display: flex; align-items: center; gap: 6px; margin: var(--space-3) 0 2px; padding: 0 8px; }
+.ot-rsub span { color: var(--ink-faint); }
+.ot-rrow.is-info { padding-top: 6px; padding-bottom: 6px; }
+.ot-rrow.is-info .ot-rrow-title { font-weight: 400; }
+.ot-rsub + .ot-rrow { border-top: 0; }
+.ot-rrow.is-empty .text-callout { font-style: italic; }
+.ot-rrow.is-fixed .ot-rrow-title { font-weight: 500; color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--ink-faint); }
+.ot-rmore { align-self: flex-start; margin: 4px 0 0 4px; }
+.ot-tag { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: var(--radius-pill); border: 1px solid var(--grid-major); font-family: var(--font-mono); font-size: 11px; line-height: 16px; font-weight: 500; color: var(--ink-muted); vertical-align: 1px; }
+.ot-tag.is-new { color: var(--accent); border-color: currentColor; }
+
+/* Finding details: the rule's inputs and their coverage. */
+.ot-why-cov { display: flex; flex-wrap: wrap; gap: 4px 12px; padding-top: var(--space-2); border-top: 1px solid var(--glass-stroke); }
+
+/* Ignore: a compact scope choice under the actions. */
+.ot-ignore-choice { display: flex; flex-wrap: wrap; gap: var(--space-2); padding-top: var(--space-2); }
+
+/* Connection pill: without its Change button the text keeps the same breathing room as the left side. */
+.ot-pill.is-bare { padding-right: 16px; }
+.ot-pill-text { padding-right: 2px; }
+
+/* Starters: three suggestions side by side (wrapping when narrow), category icon, controls beneath, every starter in the list. */
+.ot-starter { max-width: 1040px; }
+.ot-starter-row { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 10px; }
+@media (max-width: 640px) { .ot-starter-row { flex-direction: column; } }
+
+/* Evidence card a citation chip opens. */
+.ot-peek-wrap { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: var(--space-4); background: rgba(8, 9, 12, 0.35); }
+.ot-peek { width: min(460px, 100%); display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-5); }
+.ot-peek-head { display: flex; align-items: center; gap: var(--space-2); }
+.ot-peek-head .ot-btn { margin-left: auto; }
+.ot-peek-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+/* The controls pill keeps even room above and below: the "all" list's expander must not pull what follows up into it. */
+.ot-starter .ot-starter-controls { margin-top: var(--space-4); }
+.ot-starter > .ot-expand { margin-top: 0; }
+.ot-starter .ot-starter-all { padding-top: var(--space-4); }
+.ot-starter + .ot-reportbar { margin-top: var(--space-4); }
+.ot-suggest-icon { flex: none; color: var(--cat, var(--ink-muted)); }
+.ot-starter-all { max-width: 760px; }
+
+/* M3: connection, pairing, grant, activity and answers — existing materials only. */
+.ot-copy { display: flex; align-items: center; gap: var(--space-2); min-width: 0; padding: 6px 6px 6px 12px; border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); }
+.ot-copy code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; color: var(--ink); }
+.ot-frost .ot-copy { background: var(--frost-btn-well); box-shadow: none; }
+.ot-frost .ot-copy code { color: var(--frost-btn-ink); }
+.ot-connect-steps li.ot-connect-cmd { grid-template-columns: 1fr; padding-left: 40px; }
+.ot-waiting::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--accent); vertical-align: 2px; animation: ot-pulse 1.6s ease-in-out infinite; }
+.ot-pair { gap: var(--space-3); }
+.ot-pair.is-inline { display: flex; flex-direction: column; }
+.ot-pair-code { font-size: 28px; line-height: 34px; font-weight: 500; letter-spacing: 0.2em; }
+.ot-share-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.ot-grant-sheet { width: 100%; max-width: 680px; margin-top: var(--space-4); padding: var(--space-5); gap: var(--space-4); }
+.ot-grant-sheet .ot-grant-cols { gap: var(--space-5); }
+.ot-grant-sheet .ot-grant-row { padding: 6px 0; }
+.ot-activity.is-compact { width: 100%; max-width: 680px; margin-top: var(--space-4); padding: var(--space-5); gap: var(--space-4); }
+.ot-activity.is-compact .ot-activity-head { align-items: center; }
+.ot-activity.is-compact .ot-step { padding-bottom: var(--space-3); }
+.ot-activity.is-compact .ot-step-title { font-weight: 500; }
+.ot-step.is-hit .ot-step-title { color: var(--accent); }
+.ot-answers ul { list-style: none; padding-left: 0; gap: var(--space-3); }
+.ot-answer { display: flex; flex-direction: column; gap: 4px; }
+.ot-answer .ot-cite, .ot-reply .ot-cite { height: 22px; padding: 0 8px; margin-left: 4px; }
+.ot-turn { display: inline-flex; align-items: center; gap: 8px; }
+@media (prefers-reduced-motion: reduce) { .ot-waiting::after, .ot-turn .ot-live-dot { animation: none; } }
+.ot-answers { --cat: var(--accent); }
+
+/* §9 connection detail under the pill. */
+.ot-pill-open { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
+.ot-pill-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.ot-conn-wrap { position: absolute; top: 72px; right: 24px; z-index: 4; width: min(420px, calc(100% - 48px)); }
+.ot-conn { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-conn-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+.ot-conn .ot-choice-foot { flex-wrap: wrap; }
+.ot-answer-fail { display: flex; align-items: center; gap: var(--space-3); }
+
+/* Activity progress: the latest row flashes once; meters ease (the track's own transition). */
+@keyframes ot-fresh { from { background: var(--tint-hover); } to { background: transparent; } }
+.ot-activity .ot-step.is-fresh { animation: ot-fresh 2s ease-out; border-radius: var(--radius-sm); }
+@media (prefers-reduced-motion: reduce) { .ot-activity .ot-step.is-fresh { animation: none; } .ot-track > span { transition: none; } }
+
+/* M4: plan cards and blocked plans. */
+.ot-plan-blocked { display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-plan .ot-diff { margin-top: 2px; }
+.ot-insight-preview .ot-turn { margin-top: var(--space-2); }
+
+/* v1.4: up to three cards. 3 across when wide, 2 when medium, stacked when narrow (CSS only). The open card spans
+   the row; the others sit beneath it. Only the first card keeps live blur; the others use a fuller fill. */
+.ot-cards { width: 100%; max-width: 1120px; margin-top: var(--space-5); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--space-4); align-items: start; }
+.ot-cards.n-1 { max-width: 680px; }
+.ot-cards.n-2 { max-width: 900px; }
+.ot-cards > .ot-insight { max-width: none; margin-top: 0; }
+.ot-cards > .ot-insight:not(:first-child) { -webkit-backdrop-filter: none; backdrop-filter: none; background: color-mix(in srgb, var(--cat) 14%, var(--glass-fill-strong)); }
+.ot-cards.has-open > .ot-insight.is-open { grid-column: 1 / -1; order: -1; }
+.ot-welcome { margin-bottom: var(--space-3); color: var(--ink-muted); }
+.ot-welcome-bar .text-mono-sm { margin-right: var(--space-2); }
+
+/* M5: the AI's note under a card's text, the AI tag on cards it added, the first-look page. */
+.ot-tag.is-ai { color: var(--accent); border-color: currentColor; text-transform: none; letter-spacing: 0; }
+.ot-note { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-md); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
+.ot-note > .ot-icon { margin-top: 2px; flex: none; color: var(--accent); }
+.ot-note-by { display: block; color: var(--ink-muted); margin-bottom: 2px; }
+.ot-aiscan { width: 100%; max-width: 680px; display: flex; flex-direction: column; gap: var(--space-4); }
+.ot-aiscan > .ot-activity, .ot-aiscan > .ot-answers { width: 100%; max-width: none; margin: 0; }
+/* Answers keep the AI's own line breaks (numbered points). */
+.ot-answer > .text-callout, .ot-reply > span { white-space: pre-line; }
+
+/* An answer on the main page: Close at the top right; the AI's follow-ups as a wrapping row of buttons. */
+.ot-answers { position: relative; }
+.ot-answers-close { position: absolute; top: 8px; right: 8px; }
+.ot-answers > ul { padding-right: 28px; }
+.ot-followups { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--glass-stroke); }
+.ot-rich-table { border-collapse: collapse; margin: 6px 0; font-size: 13px; white-space: normal; }
+.ot-rich-table th, .ot-rich-table td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--glass-stroke); vertical-align: top; }
+.ot-rich-table th { color: var(--ink-muted); font-weight: 600; }
+
+/* Working: the gear logo turns slowly in place of the spark (reduced motion: still, by the components.css rule). */
+.ot-logo.is-spinning .ot-gear-b, .ot-logo.is-spinning .ot-gear-s { animation-play-state: running; animation-duration: 9s; }
+.ot-busy-logo { margin-top: 1px; }
+.ot-turn .ot-busy-logo { margin-top: 0; }
+.ot-answer-busy { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+
+/* One page (m5 §9): Welcome back above the box, one toolbar under it, its lists dropping down beneath the toolbar
+   (an intentional overlay: it never moves the page), then one panel per question, newest first, then the deck. */
+.ot-welcome-block { display: flex; flex-direction: column; align-items: center; margin-bottom: var(--space-4); }
+.ot-welcome-block .ot-welcome { margin-bottom: var(--space-2); }
+.ot-welcome-block .ot-welcome-bar { margin-top: 0; }
+.ot-toolwrap { position: relative; z-index: 3; width: 100%; max-width: 760px; display: flex; flex-direction: column; align-items: center;
+  container: tools / inline-size; }
+/* One row always: flat buttons with a hairline edge (no glow); when the row would not fit, labels give way to icons
+   (each keeps its name as tooltip and accessible name). */
+.ot-toolbar { margin-top: var(--space-4); flex-wrap: nowrap; gap: var(--space-2); max-width: 100%; }
+.ot-toolbar .ot-btn { flex: none; gap: 6px; padding: 0 12px; }
+.ot-toolbar .ot-btn-neu { box-shadow: none; border: 1px solid var(--glass-stroke); }
+@container tools (max-width: 700px) {
+  .ot-toolbar .ot-tb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ot-toolbar .ot-btn { width: 40px; padding: 0; justify-content: center; }
+}
+.ot-toolbar .ot-btn.is-on, .ot-toolbar .ot-btn[aria-pressed="true"] { color: var(--accent); }
+.ot-icon-btn, .ot-answer-x, .ot-insight-fold, .ot-history-del { flex: none; width: 36px; padding: 0; }
+.ot-popover { position: absolute; top: calc(100% + var(--space-2)); left: 0; right: 0; margin: 0 auto; width: min(100%, 520px);
+  padding: var(--space-2); border-radius: var(--radius-lg); background: var(--glass-fill-strong); }
+.ot-popover:focus { outline: none; }
+.ot-popover-scroll { max-height: min(60vh, 420px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ot-menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ot-menu-item { width: 100%; min-height: 40px; display: flex; align-items: flex-start; gap: var(--space-2); padding: 9px 12px; border: 0; border-radius: var(--radius-md);
+  background: transparent; color: var(--ink); font: inherit; font-size: 14px; line-height: 20px; text-align: left; cursor: pointer; }
+.ot-menu-item > .ot-icon { margin-top: 2px; }
+.ot-menu-item > span { min-width: 0; overflow-wrap: anywhere; }
+.ot-menu-item:hover, .ot-menu-item.is-on { background: var(--tint-hover); }
+.ot-menu-item:focus-visible, .ot-answer-panel:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-menu-empty { margin: 0; padding: 10px 12px; }
+.ot-history-row { display: flex; align-items: center; gap: 4px; }
+.ot-history-row .ot-menu-item { flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
+.ot-history-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+.ot-answer-panel { display: flex; flex-direction: column; gap: var(--space-2); }
+.ot-answer-panel:focus { outline: none; }
+.ot-answer-head { display: flex; align-items: flex-start; gap: var(--space-2); }
+.ot-answer-title { flex: 1; min-width: 0; margin: 0; padding-top: 6px; overflow-wrap: anywhere; }
+.ot-answer-panel .ot-answer > .text-callout { overflow-wrap: anywhere; }
+.ot-answer-panel .ot-followups { margin-top: var(--space-1); }
+.ot-followups .ot-suggest-chip { max-width: 100%; height: auto; min-height: 34px; padding: 6px 14px; white-space: normal; text-align: left; }
+.ot-followups .ot-suggest-chip:disabled { color: var(--ink-faint); cursor: default; }
+.ot-insight-meta { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+/* The deck: a click on a card makes it the main card (top, full width, full content); folded cards clamp long text. */
+.ot-cards > .ot-insight.is-focusable:not(.is-open) { cursor: pointer; }
+.ot-cards > .ot-insight:not(.is-open) .ot-note > span,
+.ot-cards > .ot-insight:not(.is-open) .ot-reply > span,
+.ot-cards > .ot-insight:not(.is-open) .ot-insight-obs {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
+.ot-cards > .ot-insight:not(.is-open) .ot-reply > span .ot-rich-table { display: none; }

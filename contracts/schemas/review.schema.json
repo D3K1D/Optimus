@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/review.schema.json",
+  "title": "Review results",
+  "description": "review.preview / submit / export / import results (m3-agent §4). Validate against the matching $defs entry.",
+  "$defs": {
+    "preview": {
+      "type": "object",
+      "required": ["previewId", "expiresAt", "digest", "payload", "bytes", "fieldClasses"],
+      "properties": {
+        "previewId": { "type": "string", "pattern": "^prev-" },
+        "expiresAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "payload": {
+          "type": "object",
+          "required": ["v", "reportId", "findings", "untrusted"],
+          "properties": { "findings": { "type": "array", "items": { "$ref": "tool-result.schema.json#/$defs/projectedFinding" } } }
+        },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "fieldClasses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label", "count", "shared"],
+            "properties": {
+              "id": { "enum": ["findings", "measurements", "names", "paths_accounts_addresses"] },
+              "label": { "type": "string" }, "count": { "type": "integer", "minimum": 0 },
+              "shared": { "type": "boolean" }, "locked": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "submit": {
+      "type": "object",
+      "required": ["lines", "usage", "dropped"],
+      "properties": {
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } },
+        "usage": { "type": "object", "required": ["inputTokens", "outputTokens"] },
+        "dropped": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "export": {
+      "type": "object",
+      "required": ["reviewId", "json"],
+      "properties": { "reviewId": { "type": "string", "pattern": "^r-" }, "json": { "type": "string" } }
+    },
+    "import": {
+      "type": "object",
+      "required": ["lines", "rejected"],
+      "properties": {
+        "lines": { "type": "array", "items": {
+          "type": "object", "required": ["findingId", "text", "uncertainty", "evidenceIds"],
+          "properties": { "findingId": { "type": "string", "pattern": "^fnd-" }, "text": { "type": "string", "maxLength": 2000 },
+                          "uncertainty": { "type": ["string", "null"] }, "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } } } } },
+        "rejected": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "line": {
+      "type": "object",
+      "required": ["text", "evidenceIds"],
+      "properties": { "text": { "type": "string" }, "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-[0-9a-f]{16}$" } } }
+    }
+  }
+}

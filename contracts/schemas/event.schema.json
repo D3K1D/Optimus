@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/event.schema.json",
+  "title": "Event envelope",
+  "description": "events.notify params and events.read events[] (protocol-v1 §5, m3-agent §4 Events). seq is monotonic per stream, from 1.",
+  "type": "object",
+  "required": ["stream", "seq", "type", "at", "payload"],
+  "properties": {
+    "stream": { "type": "string", "pattern": "^(scan:scan-|inventory:inv-|task:task-|user$)" },
+    "seq": { "type": "integer", "minimum": 1 },
+    "type": { "type": "string" },
+    "at": { "$ref": "scan.schema.json#/$defs/timestamp" },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "scan.progress" } } },
+      "then": { "properties": { "payload": {
+        "required": ["done", "total", "current"],
+        "properties": { "done": { "type": "integer" }, "total": { "type": "integer" }, "current": { "type": ["string", "null"] },
+          "collector": { "oneOf": [{ "type": "null" }, { "$ref": "scan.schema.json#/$defs/current" }] } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "scan.coverage" } } },
+      "then": { "properties": { "payload": {
+        "required": ["collectorId", "status"],
+        "properties": { "collectorId": { "type": "string" }, "status": { "$ref": "scan.schema.json#/$defs/coverage/properties/status" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "scan.finished" } } },
+      "then": { "properties": { "payload": {
+        "required": ["status", "reportId"],
+        "properties": {
+          "status": { "enum": ["complete", "complete_with_gaps", "cancelled", "interrupted", "failed"] },
+          "reportId": { "type": ["string", "null"] } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "inventory.fact" } } },
+      "then": { "properties": { "payload": {
+        "required": ["kind", "label", "group"],
+        "properties": { "kind": { "type": "string" }, "label": { "type": "string" }, "group": { "type": "string" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "inventory.finished" } } },
+      "then": { "properties": { "payload": {
+        "required": ["status"],
+        "properties": { "status": { "enum": ["complete", "partial", "cancelled"] } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.turn" } } },
+      "then": { "properties": { "payload": {
+        "required": ["turnId", "n", "status"],
+        "properties": {
+          "turnId": { "type": "string", "pattern": "^turn-" }, "n": { "type": "integer", "minimum": 0 },
+          "status": { "enum": ["started", "finished", "failed"] },
+          "code": { "type": "string", "description": "failed only: auth|quota|rate_limited|overloaded|incomplete|network|bad_request|timeout|cancelled|unavailable|revoked|expired|exhausted|internal|interrupted (m5: the host stopped mid-ask; written on restart or by agent.cancel)|client_error (m5 headless: the CLI exited with no answer)" },
+          "usage": { "type": "object", "required": ["inputTokens", "outputTokens"],
+                     "properties": { "inputTokens": { "type": "integer" }, "outputTokens": { "type": "integer" } } } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.tool" } } },
+      "then": { "properties": { "payload": {
+        "required": ["invocationId", "turnId", "tool", "arguments", "status", "bytes", "evidenceIds", "origin"],
+        "properties": {
+          "invocationId": { "type": "string", "pattern": "^call-" }, "turnId": { "type": ["string", "null"] },
+          "tool": { "type": "string" }, "arguments": { "type": "object" },
+          "status": { "enum": ["running", "complete", "error", "denied"] },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } },
+          "origin": { "enum": ["in_app", "claude_code", "codex"] } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.message" } } },
+      "then": { "properties": { "payload": {
+        "required": ["turnId", "text", "citations", "dropped"],
+        "properties": {
+          "turnId": { "type": "string" }, "text": { "type": "string" },
+          "citations": { "type": "array", "items": { "type": "string", "pattern": "^ev-[0-9a-f]{16}$" } },
+          "dropped": { "type": "integer", "minimum": 0 },
+          "followUps": { "type": "array", "maxItems": 3, "items": { "type": "string", "minLength": 3, "maxLength": 120 } } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.question" } } },
+      "then": { "properties": { "payload": {
+        "required": ["turnId", "text", "cardId"],
+        "properties": {
+          "turnId": { "type": "string", "pattern": "^turn-" }, "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "cardId": { "type": ["string", "null"] } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.task" } } },
+      "then": { "properties": { "payload": {
+        "required": ["status", "used"],
+        "properties": { "status": { "$ref": "agent-task.schema.json#/properties/status" }, "used": { "$ref": "agent-task.schema.json#/properties/used" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "action.plan" } } },
+      "then": { "properties": { "payload": {
+        "required": ["planId", "status", "requestedBy"],
+        "properties": { "planId": { "type": "string", "pattern": "^plan-" }, "status": { "$ref": "action-plan.schema.json#/properties/status" },
+                        "requestedBy": { "$ref": "action-plan.schema.json#/properties/requestedBy" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "operation.state" } } },
+      "then": { "properties": { "payload": {
+        "required": ["operationId", "planId", "state"],
+        "properties": {
+          "operationId": { "type": "string", "pattern": "^op-" }, "planId": { "type": "string", "pattern": "^plan-" },
+          "state": { "$ref": "operation.schema.json#/properties/state" },
+          "receipt": { "$ref": "operation.schema.json#/$defs/receipt" },
+          "progress": { "type": "string" }, "manualUri": { "type": "string" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "provider.status" } } },
+      "then": { "properties": { "payload": {
+        "required": ["kind", "status", "detail", "since"],
+        "properties": {
+          "kind": { "enum": ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"] },
+          "status": { "$ref": "provider-list.schema.json#/$defs/status" },
+          "detail": { "$ref": "provider-list.schema.json#/$defs/detail" },
+          "code": { "type": "string", "pattern": "^[0-9]{4}$" },
+          "since": { "$ref": "scan.schema.json#/$defs/timestamp" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.pairing" } } },
+      "then": { "properties": { "payload": {
+        "required": ["pairingId", "client", "code", "status"],
+        "properties": {
+          "pairingId": { "type": "string", "pattern": "^pair-" }, "client": { "enum": ["claude_code", "codex", "unknown"] },
+          "code": { "type": "string", "pattern": "^[0-9]{4}$" }, "status": { "enum": ["pending", "approved", "denied", "expired"] } } } } }
+    }
+  ]
+}

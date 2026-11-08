@@ -1,0 +1,128 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Windows WebView2 shell. Hosts the packaged UI (ui/) and bridges it to the per-user backend pipe.
+       See contracts/protocol-v1.md §1, §2 and §7. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>OptimizationTool</AssemblyName>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Product>Optimization Tool</Product>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OptimizationTool.Desktop.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <_OtUiDir>$(MSBuildThisFileDirectory)..\..\ui\</_OtUiDir>
+    <_OtHostProject>$(MSBuildThisFileDirectory)..\Host\OptimizationTool.Host.csproj</_OtHostProject>
+    <_OtMcpProject>$(MSBuildThisFileDirectory)..\Mcp\OptimizationTool.Mcp.csproj</_OtMcpProject>
+    <_OtWithHost Condition="Exists('$(_OtHostProject)') and '$(OtSkipHost)' != 'true'">true</_OtWithHost>
+    <_OtWithMcp Condition="Exists('$(_OtMcpProject)') and '$(OtSkipMcp)' != 'true'">true</_OtWithMcp>
+    <_OtBrokerProject>$(MSBuildThisFileDirectory)..\Broker\OptimizationTool.Broker.csproj</_OtBrokerProject>
+    <_OtWithBroker Condition="Exists('$(_OtBrokerProject)') and '$(OtSkipBroker)' != 'true'">true</_OtWithBroker>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" PrivateAssets="all" />
+    <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
+    <!-- Build-order only: the companion exes are copied next to OptimizationTool.exe by _OtCopyCompanions below.
+         Conditional so this project builds before they exist. -p:OtSkipHost / OtSkipMcp / OtSkipBroker=true opt out.
+         The broker (requireAdministrator manifest) is only copied, never run by the build. -->
+    <ProjectReference Include="$(_OtHostProject)" Condition="'$(_OtWithHost)' == 'true'"
+                      ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="$(_OtMcpProject)" Condition="'$(_OtWithMcp)' == 'true'"
+                      ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="$(_OtBrokerProject)" Condition="'$(_OtWithBroker)' == 'true'"
+                      ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+
+  <!-- WinForms only: the WebView2 package also references its WPF control, which pulls WindowsBase 5.0 (MSB3277). -->
+  <Target Name="_OtDropWebView2Wpf" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Publish puts WebView2Loader.dll only under runtimes\win-x64\native, where a self-contained app doesn't look for it
+       (DllNotFoundException at startup). Build output already has a copy next to the exe; give publish the same. -->
+  <Target Name="_OtWebView2LoaderNextToExe" AfterTargets="Publish">
+    <Copy SourceFiles="$(PublishDir)runtimes\win-x64\native\WebView2Loader.dll" DestinationFolder="$(PublishDir)"
+          Condition="Exists('$(PublishDir)runtimes\win-x64\native\WebView2Loader.dll') And !Exists('$(PublishDir)WebView2Loader.dll')" />
+  </Target>
+
+  <!-- Packaged UI: ui/** -> <output>/ui/**. Tolerates a missing ui/ folder (empty glob). -->
+  <ItemGroup Condition="Exists('$(_OtUiDir)')">
+    <None Include="$(_OtUiDir)**\*"
+          Exclude="$(_OtUiDir)tests\**;$(_OtUiDir)tools\**;$(_OtUiDir)**\node_modules\**;$(_OtUiDir)**\.*;$(_OtUiDir)**\.*\**"
+          LinkBase="ui" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+  <!-- Companion exes: the whole output (exe, dll, runtimeconfig, deps, dependencies) of the host, the MCP bridge and the
+       elevation broker is copied next to OptimizationTool.exe. The shell launches the host by a fixed absolute path; the
+       host finds OptimizationTool.Mcp.exe (m3-agent.md §1) and OptimizationTool.Broker.exe (m4-actions.md §5) beside itself.
+       Shared files: first copy wins, in the order host, MCP, broker; later companions only add files not already there.
+       A shared DLL whose bytes differ from the copy that won (e.g. two package versions) is reported as a warning. -->
+  <Target Name="_OtResolveCompanions">
+    <MSBuild Projects="$(_OtHostProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" Condition="'$(_OtWithHost)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_OtHostTargetPath" />
+    </MSBuild>
+    <MSBuild Projects="$(_OtMcpProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" Condition="'$(_OtWithMcp)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_OtMcpTargetPath" />
+    </MSBuild>
+    <MSBuild Projects="$(_OtBrokerProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" Condition="'$(_OtWithBroker)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_OtBrokerTargetPath" />
+    </MSBuild>
+    <PropertyGroup>
+      <_OtHostOutDir>@(_OtHostTargetPath->'%(RootDir)%(Directory)')</_OtHostOutDir>
+      <_OtMcpOutDir>@(_OtMcpTargetPath->'%(RootDir)%(Directory)')</_OtMcpOutDir>
+      <_OtBrokerOutDir>@(_OtBrokerTargetPath->'%(RootDir)%(Directory)')</_OtBrokerOutDir>
+      <!-- Never overwrite the shell's own files. -->
+      <_OtOwn>$(AssemblyName).exe;$(AssemblyName).dll;$(AssemblyName).pdb;$(AssemblyName).deps.json;$(AssemblyName).runtimeconfig.json</_OtOwn>
+    </PropertyGroup>
+    <ItemGroup Condition="'$(_OtHostOutDir)' != ''">
+      <_OtHostFiles Include="$(_OtHostOutDir)**\*" Exclude="$(_OtHostOutDir)ui\**;$([MSBuild]::Escape('$(_OtHostOutDir)'))$(_OtOwn.Replace(';', ';$(_OtHostOutDir)'))" />
+      <_OtHostFiles>
+        <Rel>%(_OtHostFiles.RecursiveDir)%(_OtHostFiles.Filename)%(_OtHostFiles.Extension)</Rel>
+      </_OtHostFiles>
+    </ItemGroup>
+    <ItemGroup Condition="'$(_OtMcpOutDir)' != ''">
+      <_OtMcpFiles Include="$(_OtMcpOutDir)**\*" Exclude="$(_OtMcpOutDir)ui\**;$([MSBuild]::Escape('$(_OtMcpOutDir)'))$(_OtOwn.Replace(';', ';$(_OtMcpOutDir)'))" />
+      <_OtMcpFiles>
+        <Rel>%(_OtMcpFiles.RecursiveDir)%(_OtMcpFiles.Filename)%(_OtMcpFiles.Extension)</Rel>
+      </_OtMcpFiles>
+      <_OtMcpOnly Include="@(_OtMcpFiles)" />
+      <_OtMcpOnly Remove="@(_OtHostFiles)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
+    </ItemGroup>
+    <ItemGroup Condition="'$(_OtBrokerOutDir)' != ''">
+      <_OtBrokerFiles Include="$(_OtBrokerOutDir)**\*" Exclude="$(_OtBrokerOutDir)ui\**;$([MSBuild]::Escape('$(_OtBrokerOutDir)'))$(_OtOwn.Replace(';', ';$(_OtBrokerOutDir)'))" />
+      <_OtBrokerFiles>
+        <Rel>%(_OtBrokerFiles.RecursiveDir)%(_OtBrokerFiles.Filename)%(_OtBrokerFiles.Extension)</Rel>
+      </_OtBrokerFiles>
+      <_OtBrokerOnly Include="@(_OtBrokerFiles)" />
+      <_OtBrokerOnly Remove="@(_OtHostFiles)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
+      <_OtBrokerOnly Remove="@(_OtMcpOnly)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
+    </ItemGroup>
+    <!-- DLLs a later companion also ships but did not get to copy: compared against the copy that won. -->
+    <ItemGroup>
+      <_OtShared Include="@(_OtMcpFiles)" Condition="'%(_OtMcpFiles.Extension)' == '.dll'" />
+      <_OtShared Remove="@(_OtMcpOnly)" />
+      <_OtSharedBroker Include="@(_OtBrokerFiles)" Condition="'%(_OtBrokerFiles.Extension)' == '.dll'" />
+      <_OtSharedBroker Remove="@(_OtBrokerOnly)" />
+      <_OtShared Include="@(_OtSharedBroker)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_OtCopyCompanions" AfterTargets="Build" DependsOnTargets="_OtResolveCompanions">
+    <Copy SourceFiles="@(_OtHostFiles)" DestinationFiles="@(_OtHostFiles->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_OtMcpOnly)" DestinationFiles="@(_OtMcpOnly->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_OtBrokerOnly)" DestinationFiles="@(_OtBrokerOnly->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="_OtCheckSharedFiles" AfterTargets="_OtCopyCompanions" Condition="'@(_OtShared)' != ''" Outputs="%(_OtShared.Identity)">
+    <GetFileHash Files="@(_OtShared)"><Output TaskParameter="Hash" PropertyName="_OtSourceHash" /></GetFileHash>
+    <GetFileHash Files="@(_OtShared->'$(OutDir)%(Rel)')"><Output TaskParameter="Hash" PropertyName="_OtWinnerHash" /></GetFileHash>
+    <Warning Condition="'$(_OtSourceHash)' != '$(_OtWinnerHash)'"
+             Text="Companion exes ship different copies of @(_OtShared->'%(Rel)'); the first copy (host, then MCP) is used for all. Align the package versions." />
+  </Target>
+</Project>

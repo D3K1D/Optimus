@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/hello.schema.json",
+  "title": "session.hello result",
+  "description": "Result of session.hello (protocol-v1 §2). Readers ignore unknown fields.",
+  "type": "object",
+  "required": ["protocol", "server", "features", "connectionId", "eventCursor"],
+  "properties": {
+    "protocol": { "$ref": "#/$defs/protocolVersion" },
+    "server": {
+      "type": "object",
+      "required": ["version"],
+      "properties": { "version": { "type": "string", "minLength": 1 } }
+    },
+    "features": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "connectionId": { "type": "string", "pattern": "^c-[0-9a-f]+$" },
+    "eventCursor": { "$ref": "#/$defs/eventCursor" }
+  },
+  "$defs": {
+    "protocolVersion": {
+      "type": "object",
+      "required": ["major", "minor"],
+      "properties": {
+        "major": { "type": "integer", "minimum": 0 },
+        "minor": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "eventCursor": {
+      "type": "object",
+      "required": ["stream", "seq"],
+      "properties": {
+        "stream": { "type": "string", "minLength": 1 },
+        "seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "request": {
+      "description": "session.hello params.",
+      "type": "object",
+      "required": ["protocol", "client"],
+      "properties": {
+        "protocol": { "$ref": "#/$defs/protocolVersion" },
+        "client": {
+          "type": "object",
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["desktop", "test"] },
+            "version": { "type": "string" }
+          }
+        },
+        "features": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  }
+}

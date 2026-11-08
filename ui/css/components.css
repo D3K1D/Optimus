@@ -1,0 +1,520 @@
+/* Optimization Tool components. Copied from design/design-system/components/bundle.css; the Google Fonts @import is replaced by css/fonts.css (local). */
+
+.ot-app { font-family: var(--font-sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+.ot-app *, .ot-app *::before, .ot-app *::after { box-sizing: border-box; }
+.ot-app h1, .ot-app h2, .ot-app h3, .ot-app p, .ot-app ol, .ot-app dl, .ot-app dd { margin: 0; }
+.ot-muted { color: var(--ink-muted); }
+.ot-error { color: var(--threat); }
+.ot-icon { flex: none; display: block; }
+
+.ot-btn, .ot-provider, .ot-seg-opt, .ot-field-btn, .ot-chip, .ot-field input, .ot-field textarea { font: inherit; color: inherit; }
+.ot-btn:focus-visible, .ot-provider:focus-visible, .ot-seg-opt:focus-visible, .ot-chip:focus-visible,
+.ot-field-btn:focus-visible, .ot-toggle input:focus-visible + .ot-toggle-track {
+  outline: 2px solid var(--focus-ring); outline-offset: 3px;
+}
+
+/* Raised controls neither lift on hover nor sink on press: they stay put and change only
+   their selected ring or colour. */
+
+/* Backgrounds */
+.ot-grid {
+  background-color: var(--ground);
+  background-image:
+    linear-gradient(var(--grid-major) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-major) 1px, transparent 1px),
+    linear-gradient(var(--grid-minor) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-minor) 1px, transparent 1px);
+  background-size:
+    var(--grid-major-size) var(--grid-major-size), var(--grid-major-size) var(--grid-major-size),
+    var(--grid-minor-size) var(--grid-minor-size), var(--grid-minor-size) var(--grid-minor-size);
+  background-position: -1px -1px;
+}
+.ot-wave { position: absolute; inset: 0; overflow: hidden; background: var(--ground); }
+.ot-wave-canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ot-wave-sheen { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, var(--ground) 0%, transparent 26%, transparent 80%, var(--ground) 100%); opacity: .9; }
+
+/* Materials */
+.ot-glass {
+  background: var(--glass-fill); border: 1px solid var(--glass-stroke); border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(160%); backdrop-filter: blur(var(--glass-blur)) saturate(160%);
+}
+.ot-glass-strong { background: var(--glass-fill-strong); -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(170%); backdrop-filter: blur(var(--glass-blur-strong)) saturate(170%); }
+.ot-neu { background: var(--surface); border-radius: var(--radius-lg); box-shadow: var(--shadow-neu); padding: var(--space-5); }
+.ot-neu-inset { background: var(--ground); box-shadow: var(--shadow-neu-inset); }
+
+/* Expand: animated height for content that appears or swaps */
+.ot-expand { overflow: hidden; height: 0; margin-top: calc(-1 * var(--space-4)); transition: height .38s cubic-bezier(.2,.8,.2,1); }
+.ot-expand-inner { display: flow-root; }
+.ot-expand-content { padding-top: var(--space-4); animation: ot-fade .32s cubic-bezier(.2,.8,.2,1) both; }
+.ot-fade { animation: ot-fade .32s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes ot-fade { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+/* Buttons */
+.ot-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  border: 0; border-radius: var(--radius-pill); cursor: pointer; font-weight: 600; white-space: nowrap;
+  transition: background-color .16s, color .16s;
+}
+.ot-btn-sm { height: 36px; padding: 0 14px; font-size: 13px; }
+.ot-btn-md { height: 44px; padding: 0 20px; font-size: 15px; }
+.ot-btn-lg { height: 52px; padding: 0 26px; font-size: 16px; }
+.ot-btn-primary { background: var(--action); color: var(--on-action); box-shadow: var(--shadow-neu-sm); }
+.ot-btn-neu { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-neu-sm); }
+.ot-btn-ghost { background: transparent; color: var(--ink); }
+.ot-btn-ghost:hover { background: var(--tint-hover); }
+.ot-btn:disabled { color: var(--ink-faint); background: var(--ground); box-shadow: none; cursor: default; }
+
+/* Provider option: selection is a ring and a filled check, not a press */
+.ot-provider {
+  display: grid; grid-template-columns: 44px 1fr 22px; align-items: center; gap: 14px; width: 100%; min-height: 76px;
+  padding: var(--space-4); text-align: left; cursor: pointer;
+  background: var(--surface); border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-neu-sm);
+  transition: box-shadow .2s cubic-bezier(.2,.8,.2,1);
+}
+.ot-provider.is-selected { box-shadow: var(--shadow-neu-sm), 0 0 0 2px var(--accent); }
+.ot-provider-glyph { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); display: grid; place-items: center; color: var(--ink); font-family: var(--font-mono); font-weight: 600; transition: color .2s; }
+.ot-provider.is-selected .ot-provider-glyph { color: var(--accent); }
+.ot-provider-text { display: flex; flex-direction: column; gap: 2px; }
+.ot-provider-check { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--control-stroke); display: grid; place-items: center; color: var(--on-accent); transition: background-color .2s, border-color .2s; }
+.ot-provider.is-selected .ot-provider-check { background: var(--accent); border-color: var(--accent); }
+
+/* Segmented control */
+.ot-seg { display: inline-flex; gap: 4px; padding: 4px; border-radius: var(--radius-pill); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); align-self: flex-start; }
+.ot-seg-opt { height: 34px; padding: 0 16px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--ink-muted); cursor: pointer; transition: background-color .16s, box-shadow .16s, color .16s; }
+.ot-seg-opt:hover { color: var(--ink); }
+.ot-seg-opt.is-selected { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-neu-xs); font-weight: 600; }
+
+/* Toggle */
+.ot-toggle { display: inline-flex; align-items: center; gap: 12px; cursor: pointer; color: var(--ink); }
+.ot-toggle.is-disabled { cursor: default; }
+.ot-toggle input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.ot-toggle-track { position: relative; flex: none; width: 46px; height: 28px; border-radius: var(--radius-pill); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); border: 1px solid var(--control-stroke); transition: background-color .16s; }
+.ot-toggle-knob { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--surface); box-shadow: var(--shadow-neu-xs); transition: transform .16s cubic-bezier(.2,.8,.2,1); }
+.ot-toggle input:checked + .ot-toggle-track { background: var(--accent); border-color: var(--accent); }
+.ot-toggle input:checked + .ot-toggle-track .ot-toggle-knob { transform: translateX(18px); background: var(--on-accent); }
+
+/* Fields */
+.ot-fieldset { display: flex; flex-direction: column; gap: var(--space-2); }
+.ot-field { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 6px 0 14px; border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); border: 1px solid var(--control-stroke); }
+/* Text boxes show no blue ring when typing: the caret and a neutral border shift are the cue. */
+.ot-field:focus-within { border-color: var(--ink-muted); }
+.ot-field.is-error { border-color: var(--threat); }
+.ot-field input, .ot-field textarea { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none; color: var(--ink); }
+.ot-field input::placeholder, .ot-field textarea::placeholder { color: var(--ink-faint); }
+.ot-field-area { height: auto; padding: 12px 14px; align-items: stretch; }
+.ot-field-area textarea { resize: none; }
+.ot-field-btn { width: 36px; height: 36px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-muted); display: grid; place-items: center; cursor: pointer; }
+.ot-field-btn:hover { background: var(--tint-hover); color: var(--ink); }
+
+/* Chips */
+.ot-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ot-chip { height: 32px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: var(--surface); box-shadow: var(--shadow-neu-xs); color: var(--ink); cursor: pointer; transition: background-color .16s; }
+.ot-chip:hover { background: var(--ground); }
+
+/* Badge */
+.ot-badge { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--radius-pill); font-family: var(--font-sans); font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; }
+.ot-badge-threat { color: var(--threat); background: var(--threat-tint); }
+.ot-badge-exposure { color: var(--exposure); background: var(--exposure-tint); }
+.ot-badge-reliability { color: var(--reliability); background: var(--reliability-tint); }
+.ot-badge-performance { color: var(--performance); background: var(--performance-tint); }
+.ot-badge-verified { color: var(--verified); background: var(--verified-tint); }
+.ot-badge-gap { color: var(--ink-muted); background: transparent; border: 1px dashed var(--ink-muted); }
+
+/* Finding */
+.ot-finding { display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-finding-gap { background: transparent; box-shadow: none; border: 1.5px dashed var(--control-stroke); }
+.ot-finding-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ot-finding-meta { padding-top: var(--space-1); }
+.ot-finding-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; margin-top: auto; padding-top: var(--space-3); }
+.ot-finding-undo { display: inline-flex; align-items: center; gap: 6px; }
+.ot-finding-actions { display: flex; gap: var(--space-2); margin-left: auto; }
+
+/* Scan progress */
+.ot-progress { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); align-self: start; }
+.ot-progress-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ot-track { height: 8px; border-radius: var(--radius-pill); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); overflow: hidden; }
+.ot-track > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width .4s cubic-bezier(.2,.8,.2,1); }
+.ot-track-rainbow > span { background: linear-gradient(90deg, var(--wave-1), var(--wave-2), var(--wave-3), var(--wave-4), var(--wave-5), var(--wave-6), var(--wave-7), var(--wave-8)); }
+.ot-progress-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ot-progress-row { display: grid; grid-template-columns: 22px 1fr auto; align-items: center; gap: var(--space-3); padding: 9px 0; border-top: 1px solid var(--grid-major); }
+.ot-progress-row:first-child { border-top: 0; }
+.ot-progress-dot { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--ink-muted); }
+.ot-progress-row.is-done .ot-progress-dot { background: var(--action); color: var(--on-action); box-shadow: none; }
+.ot-progress-row.is-running .ot-progress-dot::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.ot-progress-row.is-unavailable .ot-progress-dot { background: transparent; box-shadow: none; border: 1px dashed var(--ink-muted); }
+.ot-progress-row.is-queued .text-callout { color: var(--ink-muted); }
+
+/* Connection pill */
+/* Sized to its content: any AI name fits on one line (long ones truncate), no outer glow. */
+.ot-pill { display: inline-flex; align-items: center; gap: 10px; height: 40px; max-width: 320px; padding: 0 4px 0 14px; border-radius: var(--radius-pill); box-shadow: none; }
+.ot-pill-text { display: flex; flex-direction: column; justify-content: center; min-width: 0; line-height: 1.15; }
+.ot-pill-text > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ot-pill .ot-btn-sm { flex: none; height: 32px; padding: 0 12px; }
+.ot-pill-dot { flex: none; }
+.ot-pill-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--verified); box-shadow: 0 0 0 3px var(--verified-tint); }
+.ot-pill.is-live .ot-pill-dot { background: var(--accent); animation: ot-pulse 1.6s ease-in-out infinite; }
+.ot-pill.is-local .ot-pill-dot { background: var(--ink-muted); box-shadow: 0 0 0 3px var(--tint-hover); }
+.ot-pill.is-expired .ot-pill-dot { background: var(--exposure); box-shadow: 0 0 0 3px var(--exposure-tint); }
+@keyframes ot-pulse { 50% { box-shadow: 0 0 0 6px var(--verified-tint); } }
+
+/* Brand + top bar */
+.ot-brand { display: inline-flex; align-items: center; gap: 10px; color: var(--ink); }
+.ot-logo { display: inline-block; flex: none; line-height: 0; }
+.ot-logo > svg { width: 100%; height: 100%; display: block; overflow: visible; }
+/* Hovering the logo turns the gears: big one clockwise, small one counter-clockwise at twice the speed
+   (12 teeth to 6), so they stay meshed. Leaving pauses them where they are. */
+/* Black-and-white mark: both gears in currentColor, the small one lighter so the pair still reads as two. */
+.ot-logo.is-mono path { fill: currentColor; stroke: currentColor; }
+.ot-logo.is-mono .ot-gear-s { opacity: .55; }
+.ot-logo .ot-gear-b { animation: ot-gear-cw 6s linear infinite paused; }
+.ot-logo .ot-gear-s { animation: ot-gear-ccw 6s linear infinite paused; }
+.ot-logo:hover .ot-gear-b, .ot-logo:hover .ot-gear-s { animation-play-state: running; }
+@keyframes ot-gear-cw { to { transform: rotate(360deg); } }
+@keyframes ot-gear-ccw { to { transform: rotate(-720deg); } }
+
+/* Permission grant */
+.ot-grant { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-5); }
+.ot-grant.is-compact { padding: var(--space-5); gap: var(--space-4); }
+.ot-grant-head { display: flex; flex-direction: column; gap: 4px; }
+.ot-grant-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6); }
+.ot-grant.is-compact .ot-grant-cols { grid-template-columns: 1fr; gap: var(--space-4); }
+.ot-grant-cols section { display: flex; flex-direction: column; gap: var(--space-2); }
+.ot-grant-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 10px 0; border-top: 1px solid var(--grid-major); }
+.ot-grant-text { display: flex; flex-direction: column; gap: 2px; }
+.ot-grant-lock { display: inline-flex; align-items: center; gap: 6px; }
+.ot-grant-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.ot-grant-foot > span { max-width: 420px; }
+.ot-grant-actions { display: flex; gap: var(--space-3); }
+
+/* Agent activity */
+.ot-activity { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-5); }
+.ot-activity-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.ot-activity-head h2 { margin-top: 6px; max-width: 520px; }
+.ot-live { display: inline-flex; align-items: center; gap: 8px; color: var(--accent); }
+.ot-live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: ot-pulse 1.6s ease-in-out infinite; }
+.ot-steps { list-style: none; padding: 0; display: flex; flex-direction: column; }
+.ot-step { position: relative; display: grid; grid-template-columns: 26px 1fr auto; gap: var(--space-3); padding: 0 0 var(--space-5); }
+.ot-step::before { content: ''; position: absolute; left: 12px; top: 28px; bottom: 2px; width: 2px; background: var(--grid-major); }
+.ot-step:last-child::before { display: none; }
+.ot-step-mark { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--ink-muted); }
+.ot-step.is-done .ot-step-mark { background: var(--action); color: var(--on-action); box-shadow: none; }
+.ot-step.is-verified .ot-step-mark { background: var(--verified); color: var(--on-accent); box-shadow: none; }
+.ot-step.is-awaiting .ot-step-mark { background: var(--exposure-tint); color: var(--exposure); box-shadow: 0 0 0 2px var(--exposure); }
+.ot-step.is-client .ot-step-mark { background: transparent; box-shadow: none; border: 1px dashed var(--ink-muted); }
+.ot-step.is-running .ot-step-mark::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: ot-pulse 1.6s ease-in-out infinite; }
+.ot-step.is-queued .ot-step-title { color: var(--ink-muted); }
+.ot-step-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ot-step-top { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.ot-step-title { font-weight: 600; }
+.ot-origin { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface); box-shadow: var(--shadow-neu-xs); color: var(--ink); }
+.ot-origin.is-client { background: transparent; box-shadow: none; border: 1px dashed var(--ink-muted); color: var(--ink-muted); }
+.ot-step-state { color: var(--ink-muted); white-space: nowrap; padding-top: 2px; }
+.ot-step.is-awaiting .ot-step-state { color: var(--exposure); }
+.ot-step.is-verified .ot-step-state { color: var(--verified); }
+.ot-meters { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--space-5); }
+.ot-meter { display: flex; flex-direction: column; gap: 6px; }
+.ot-meter-label { display: flex; justify-content: space-between; }
+
+/* Approval */
+.ot-approval { display: flex; flex-direction: column; gap: var(--space-3); box-shadow: var(--shadow-neu), 0 0 0 2px var(--exposure); }
+.ot-approval-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ot-diff { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-4); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); }
+.ot-diff-row { display: grid; grid-template-columns: 96px 1fr 16px 1fr; align-items: center; gap: var(--space-3); }
+.ot-diff-before { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--ink-faint); }
+.ot-diff-after { color: var(--ink); font-weight: 500; }
+.ot-approval-details { display: grid; grid-template-columns: 96px 1fr; gap: 8px var(--space-3); }
+.ot-approval-foot { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-2); }
+.ot-approval-actions { display: flex; justify-content: flex-end; gap: var(--space-3); }
+
+/* Opening screen */
+/* The screen keeps one size so the wave behind it never resizes; the panel scrolls inside it. */
+.ot-login { position: relative; height: 100vh; overflow: hidden; font-family: var(--font-sans); color: var(--ink); }
+/* Centred; auto margins keep it centred when it fits and scrollable from the top when it doesn't. */
+.ot-login-scroll { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: var(--space-6) var(--space-4); scrollbar-width: thin; scrollbar-color: var(--control-stroke) transparent; }
+.ot-login-scroll > *, .ot-flow-stage.is-login > * { margin-block: auto; }
+.ot-login-panel { position: relative; width: 100%; max-width: 640px; padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
+/* Frosted white glass, like privacy film: a milky white tint and a moderate blur, so what is behind
+   shows as soft shapes and colour. A faint grain and a lighter top keep it from looking like flat paint. */
+.ot-glass.ot-frost { overflow: hidden; background: var(--glass-fill-frost); border-color: var(--frost-stroke); box-shadow: none;
+  -webkit-backdrop-filter: blur(var(--glass-blur-frost)) saturate(115%); backdrop-filter: blur(var(--glass-blur-frost)) saturate(115%); }
+/* Only the panel is frosted. What sits on it is near-white (lightly see-through, like the Connect button) with
+   dark text, casts no shadow, and blurs its own backdrop so the panel's grain doesn't show through. */
+.ot-frost .ot-provider, .ot-frost .ot-btn-neu, .ot-frost .ot-connect-num {
+  background: var(--frost-btn); color: var(--frost-btn-ink); box-shadow: none;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.ot-frost .ot-provider.is-selected { box-shadow: 0 0 0 2px var(--accent); }
+.ot-frost .ot-provider-glyph, .ot-frost .ot-provider.is-selected .ot-provider-glyph { background: var(--frost-btn-well); color: var(--frost-btn-ink); box-shadow: none; }
+.ot-frost .ot-provider .ot-muted { color: var(--frost-btn-ink); }
+.ot-frost .ot-detail { background: var(--frost-tile); border-color: var(--frost-stroke); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.ot-frost .ot-btn { box-shadow: none; }
+.ot-frost .ot-btn:disabled { opacity: .45; }
+/* API key controls on frost: the same transparent white with dark text. */
+.ot-frost .ot-detail .ot-btn-ghost { background: var(--frost-btn); color: var(--frost-btn-ink); }
+.ot-frost .ot-seg { background: var(--frost-btn); box-shadow: none; }
+.ot-frost .ot-seg-opt, .ot-frost .ot-seg-opt:hover { color: var(--frost-btn-ink); }
+.ot-frost .ot-seg-opt.is-selected { background: var(--frost-btn-solid); box-shadow: none; }
+.ot-frost .ot-field { background: var(--frost-btn); border-color: var(--frost-stroke); box-shadow: none; color: var(--frost-btn-ink); }
+.ot-frost .ot-field:focus-within { border-color: var(--frost-btn-ink); }
+.ot-frost .ot-field input, .ot-frost .ot-field .ot-muted, .ot-frost .ot-field-btn { color: var(--frost-btn-ink); }
+.ot-frost .ot-field input::placeholder { color: var(--frost-btn-hint); }
+.ot-frost .ot-field-btn:hover { background: var(--frost-btn-well); }
+.ot-frost .ot-toggle-track { background: var(--frost-btn); border-color: var(--frost-stroke); box-shadow: none; }
+.ot-frost .ot-toggle-knob { background: var(--frost-btn-solid); box-shadow: 0 0 0 1px var(--frost-btn-well); }
+/* Setup panels share the frost: answer rows and the "Something else…" box in the same transparent white. */
+.ot-glass.ot-frost { position: relative; }
+.ot-frost .ot-check { background: var(--frost-btn); color: var(--frost-btn-ink); box-shadow: none;
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.ot-frost .ot-check.is-on { box-shadow: 0 0 0 2px var(--accent); }
+.ot-frost .ot-ask { background: var(--frost-btn); border-color: var(--frost-stroke); box-shadow: none; }
+.ot-frost .ot-ask:focus-within { border-color: var(--frost-btn-ink); }
+.ot-frost .ot-ask input { color: var(--frost-btn-ink); }
+.ot-frost .ot-ask input::placeholder { color: var(--frost-btn-hint); }
+.ot-frost .ot-ask-send:disabled { color: var(--frost-btn-hint); }
+.ot-frost .ot-spec-dot { background: var(--frost-btn); box-shadow: none; }
+.ot-frost .is-done > .ot-spec-dot { background: var(--accent); }
+.ot-frost::before, .ot-frost::after { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.ot-frost::before {
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .5 0 0 0 0 .5 0 0 0 0 .5 0 0 0 1.1 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+  background-size: 180px 180px; opacity: var(--frost-grain); mix-blend-mode: overlay; }
+.ot-frost::after { background: linear-gradient(180deg, var(--frost-light) 0%, transparent 45%); }
+.ot-frost > * { position: relative; z-index: 1; }
+.ot-login-panel > .ot-brand { margin-bottom: var(--space-2); }
+.ot-login-back { margin-right: auto; }
+.ot-provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-top: var(--space-2); }
+/* An odd tile out (five tiles with ChatGPT) spans the row instead of leaving a hole. */
+.ot-provider-grid > .ot-provider:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.ot-detail { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-lg); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
+.ot-detail-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
+.ot-install-row { justify-content: flex-start; gap: var(--space-2); }
+.ot-connect-steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-connect-steps li { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: var(--space-3); }
+.ot-connect-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--ink); }
+/* Claude Code / Codex setup: one row per step; only the current step is bright and shows its extras. */
+.ot-connect-steps li.ot-cstep { grid-template-columns: 28px minmax(0, 1fr); align-items: start; }
+.ot-cstep:not(.is-now):not(.is-done) { opacity: .5; }
+.ot-cs-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding-top: 4px; }
+.ot-cs-title { font-weight: 600; font-size: 14px; color: var(--ink); }
+.ot-cs-sub { font-weight: 400; }
+.ot-frost .ot-cstep.is-done .ot-connect-num, .ot-cstep.is-done .ot-connect-num { background: var(--accent); color: var(--on-accent); box-shadow: none; }
+.ot-frost .ot-cstep.is-now .ot-connect-num, .ot-cstep.is-now .ot-connect-num { box-shadow: 0 0 0 2px var(--accent); }
+.ot-cs-body > .ot-copy, .ot-cs-body > .ot-pair { margin-top: var(--space-1); }
+.ot-connected-line { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; }
+.ot-connected-line .ot-icon { color: var(--accent); }
+.ot-shares { display: flex; gap: var(--space-3); align-items: flex-start; padding-top: var(--space-2); color: var(--ink); }
+.ot-shares .ot-icon { margin-top: 2px; color: var(--ink-muted); }
+.ot-login-actions { display: flex; justify-content: flex-end; gap: var(--space-3); padding-top: var(--space-2); }
+@media (max-width: 640px) { .ot-provider-grid { grid-template-columns: 1fr; } .ot-login-panel { padding: var(--space-5); } .ot-grant-cols { grid-template-columns: 1fr; } }
+
+
+/* ---------- App flow ---------- */
+.ot-flow { position: relative; height: 100vh; min-height: 640px; overflow: hidden; font-family: var(--font-sans); color: var(--ink); }
+.ot-flow-top { position: absolute; top: 20px; left: 24px; right: 24px; z-index: 3; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
+.ot-flow-top > * { pointer-events: auto; }
+/* Top-aligned (m5 §6): the box sits high, and cards and panels grow downward; the gutter is kept so nothing shifts when it scrolls. */
+.ot-flow-stage { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: clamp(88px, 13vh, 140px) var(--space-4) var(--space-7); scrollbar-width: thin; scrollbar-color: var(--control-stroke) transparent; }
+.ot-flow-stage.is-login { padding: var(--space-6) var(--space-4); }
+/* Content scrolling up fades out under the top bar (a strip of ground, not a mask: masks would stop the glass from blurring the sea) */
+.ot-flow-top::before { content: ''; position: absolute; left: -24px; right: -24px; top: -20px; height: 100px; z-index: -1; background: linear-gradient(to bottom, var(--ground) 45%, transparent); pointer-events: none; }
+.ot-flow-panel { width: 100%; display: flex; justify-content: center; }
+.ot-flow-main { width: 100%; display: flex; flex-direction: column; align-items: center; }
+
+/* Rising out of the sea, and sinking back into it */
+.ot-enter { animation: ot-rise .7s cubic-bezier(.2,.8,.2,1) backwards; }
+.ot-sink { animation: ot-sink .65s cubic-bezier(.4,0,.6,1) both; pointer-events: none; }
+@keyframes ot-rise { from { opacity: 0; transform: translateY(36px) scale(.98); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+@keyframes ot-sink { from { opacity: 1; transform: none; filter: none; } to { opacity: 0; transform: translateY(56px) scale(.97); filter: blur(10px); } }
+
+/* Glass fades as one layer. Opacity or filter on anything *around* a glass surface switches its blur off until the
+   animation ends (then it pops back), so glass surfaces animate themselves — opacity and position only — and their
+   wrappers stay still. Blur, tint and grain then fade in and out together. */
+@keyframes ot-pane-in { from { opacity: 0; transform: translateY(28px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes ot-pane-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(40px) scale(.98); } }
+.ot-flow-panel.ot-enter, .ot-flow-panel.ot-sink, .ot-flow-main.ot-sink, .ot-flow-top.ot-enter, .ot-flow-top.ot-sink { animation: none; }
+.ot-flow-panel.ot-enter > *, .ot-flow-top.ot-enter > * { animation: ot-pane-in .7s cubic-bezier(.2,.8,.2,1) backwards; }
+.ot-flow-panel.ot-sink > *, .ot-flow-main.ot-sink > *, .ot-flow-top.ot-sink > * { animation: ot-pane-out .65s cubic-bezier(.4,0,.6,1) forwards; pointer-events: none; }
+/* Inside frost the login details just slide open; a fade here would pop the tiles' smoothing at the end. */
+.ot-frost .ot-expand-content { animation: none; }
+
+/* Setup panels */
+.ot-choice { width: 100%; max-width: 560px; padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
+.ot-choice-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.ot-choice-foot { display: flex; justify-content: flex-end; gap: var(--space-3); }
+
+.ot-check { display: flex; align-items: center; gap: 12px; min-height: 52px; width: 100%; padding: 10px 16px; border: 0; border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-neu-xs); color: var(--ink); text-align: left; cursor: pointer; transition: box-shadow .2s cubic-bezier(.2,.8,.2,1); }
+.ot-check.is-on { box-shadow: var(--shadow-neu-xs), 0 0 0 2px var(--accent); }
+.ot-check:disabled { cursor: default; color: var(--ink-faint); }
+.ot-check:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.ot-check-box { flex: none; width: 22px; height: 22px; border-radius: 7px; border: 1.5px solid var(--control-stroke); display: grid; place-items: center; color: var(--on-accent); transition: background-color .2s, border-color .2s; }
+.ot-check-box.is-round { border-radius: 50%; }
+.ot-check.is-on .ot-check-box { background: var(--accent); border-color: var(--accent); }
+
+.ot-ask { display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 4px 0 16px; border-radius: var(--radius-pill); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); border: 1px solid var(--control-stroke); }
+.ot-ask:focus-within { border-color: var(--ink-muted); }
+.ot-ask input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none; color: var(--ink); font: inherit; }
+.ot-ask input::placeholder { color: var(--ink-faint); }
+.ot-ask-send { flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent); cursor: pointer; transition: background-color .16s, color .16s; }
+.ot-ask-send:disabled { background: transparent; color: var(--ink-faint); cursor: default; }
+.ot-ask-send:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.ot-spec-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ot-spec-row { display: grid; grid-template-columns: 20px 92px 1fr; align-items: center; gap: var(--space-3); padding: 8px 0; border-top: 1px solid var(--grid-major); }
+.ot-spec-row:first-child { border-top: 0; }
+.ot-spec-row.is-queued .text-callout { color: var(--ink-muted); }
+.ot-spec-found { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: ot-fade .4s both; }
+.ot-spec-dot { flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--on-accent); }
+.is-done > .ot-spec-dot, .is-verified > .ot-spec-dot { background: var(--accent); box-shadow: none; }
+.is-running > .ot-spec-dot::after { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: ot-pulse 1.6s ease-in-out infinite; }
+
+/* Prompt box and suggestions. Chips and scan pills use a fuller fill instead of live blur: a dozen blurred
+   elements over the animated sea would cost far more than they add. */
+/* Solid, slim bar: an opaque surface (no see-through glass) with a hairline rim and a soft drop shadow */
+.ot-promptbox { width: 100%; max-width: 640px; }
+.ot-promptbox-inner { display: flex; align-items: center; gap: 10px; height: 48px; padding: 0 6px 0 14px; border-radius: var(--radius-pill);
+  background: var(--surface); border: 1px solid var(--control-stroke); box-shadow: var(--shadow-glass); transition: border-color .16s, box-shadow .16s; }
+.ot-promptbox-inner:focus-within { border-color: var(--ink-muted); }
+.ot-promptbox-mark { color: var(--ink); }
+.ot-promptbox-input { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; outline: none; color: var(--ink); font: inherit; font-size: 15px; }
+.ot-promptbox-input::placeholder { color: var(--ink-muted); }
+.ot-promptbox-send { flex: none; width: 36px; height: 36px; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--action); color: var(--on-action); cursor: pointer; transition: opacity .16s; }
+.ot-promptbox-send:disabled { opacity: .3; cursor: default; }
+.ot-promptbox-send:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+.ot-suggest { width: 100%; max-width: 780px; display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: var(--space-6); }
+.ot-suggest-chip { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px; border: 1px solid var(--glass-stroke); border-radius: var(--radius-pill); background: var(--glass-fill-strong); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer;
+  animation: ot-rise .9s cubic-bezier(.2,.8,.2,1) backwards; transition: background-color .16s; }
+.ot-suggest-chip:hover { background: var(--surface); }
+.ot-suggest-chip.is-primary { background: var(--action); color: var(--on-action); border-color: transparent; font-weight: 600; }
+.ot-suggest-chip:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+.ot-scanstat { width: 100%; max-width: 680px; margin-top: var(--space-6); display: flex; flex-direction: column; align-items: center; gap: var(--space-4); }
+.ot-scanstat-echo { font-style: italic; }
+.ot-scanstat-cats { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ot-scanstat-cat { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 6px; border-radius: var(--radius-pill); background: var(--glass-fill-strong); border: 1px solid var(--glass-stroke); color: var(--ink); }
+.ot-scanstat-cat.is-queued { color: var(--ink-muted); }
+.ot-scanstat .ot-track { width: 100%; }
+
+.ot-reportbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--space-3); margin-top: var(--space-5); }
+.ot-summary-inline { width: 100%; max-width: 680px; margin-top: var(--space-4); padding: var(--space-4) var(--space-5); border-radius: var(--radius-lg); }
+.ot-summary-inline ul, .ot-summary ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; }
+.ot-toast { margin-top: var(--space-3); color: var(--accent); }
+.ot-skip { margin-top: var(--space-2); }
+
+/* Follow-up cards: one at a time, tinted by category over the sea */
+.cat-security { --cat: var(--cat-security); }
+.cat-performance { --cat: var(--cat-performance); }
+.cat-storage { --cat: var(--cat-storage); }
+.cat-privacy_telemetry { --cat: var(--cat-privacy); }
+.cat-diagnostics { --cat: var(--cat-diagnostics); }
+.cat-customization { --cat: var(--cat-customize); }
+.cat-misc { --cat: var(--cat-misc); }
+.ot-insight { width: 100%; max-width: 680px; margin-top: var(--space-5); padding: var(--space-5); border-radius: var(--radius-xl); display: flex; flex-direction: column; gap: var(--space-4);
+  background: color-mix(in srgb, var(--cat) 14%, var(--glass-fill)); border: 1px solid color-mix(in srgb, var(--cat) 55%, transparent);
+  box-shadow: var(--shadow-glass); -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(140%); backdrop-filter: blur(var(--glass-blur-strong)) saturate(140%);
+  animation: ot-pane-in .7s cubic-bezier(.2,.8,.2,1) backwards; }
+.ot-insight.is-leaving { animation: ot-pane-out .42s cubic-bezier(.4,0,.6,1) forwards; pointer-events: none; }
+.ot-insight-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ot-insight-cat { display: inline-flex; align-items: center; gap: 6px; color: var(--cat); }
+.ot-insight-claim { margin: 0; }
+.ot-insight-opts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); }
+.ot-cites { display: flex; flex-wrap: wrap; gap: 6px; }
+.ot-cite { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--radius-pill); border: 1px dashed color-mix(in srgb, var(--cat) 70%, transparent); background: transparent; color: var(--ink-muted); font: inherit; cursor: pointer; }
+.ot-cite:hover { color: var(--ink); }
+.ot-cite:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-reply { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-md); background: var(--glass-fill); border: 1px solid var(--glass-stroke); animation: ot-fade .32s both; }
+.ot-reply .ot-icon { margin-top: 1px; color: var(--accent); }
+
+.ot-changes { width: 100%; max-width: 680px; margin-top: var(--space-5); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.ot-changes-head { display: flex; align-items: baseline; justify-content: space-between; }
+.ot-changes-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.ot-change-row { display: grid; grid-template-columns: 20px 1fr auto; align-items: center; gap: var(--space-3); padding: 8px 4px; }
+.ot-change-row.is-queued .text-callout { color: var(--ink-muted); }
+.ot-change-state { color: var(--verified); }
+
+/* Report sheet: grid paper sliding up over the sea */
+.ot-sheet-wrap { position: absolute; inset: 0; z-index: 5; }
+.ot-sheet { position: absolute; inset: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--ground); animation: ot-sheet-up .5s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes ot-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+.ot-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: 14px 24px 14px 12px; background: var(--glass-fill-strong); border-bottom: 1px solid var(--grid-major);
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong)); backdrop-filter: blur(var(--glass-blur-strong)); }
+.ot-sheet-title { display: flex; align-items: center; gap: 10px; }
+.ot-sheet-actions { display: flex; align-items: center; gap: var(--space-2); }
+.ot-sheet-body { flex: 1; min-height: 0; }
+.ot-sheet-scroll { height: 100%; overflow-y: auto; padding: var(--space-6) var(--space-5) var(--space-8); display: flex; flex-direction: column; align-items: center; gap: var(--space-5); scrollbar-width: thin; }
+.ot-sheet-scroll > * { width: 100%; max-width: 960px; }
+.ot-summary { padding: var(--space-4) var(--space-5); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-neu-sm); animation: ot-fade .32s both; }
+.ot-summary-head { display: flex; align-items: center; gap: 6px; color: var(--accent); margin-bottom: 8px; }
+.ot-rgroup { display: flex; flex-direction: column; padding: var(--space-4) var(--space-5); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-neu-sm); }
+.ot-rgroup-head { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--cat); }
+.ot-rgroup-head .ot-muted { margin-left: auto; }
+.ot-rrow { display: grid; grid-template-columns: 52px 1fr 170px; align-items: center; gap: var(--space-3); padding: 9px 8px; border-top: 1px solid var(--grid-major); border-radius: var(--radius-sm); }
+.ot-rrow:nth-child(2) { border-top: 0; }
+.ot-rrow-main { display: flex; flex-direction: column; gap: 2px; }
+.ot-rrow-title { font-weight: 600; }
+.ot-rrow.is-gap .ot-rrow-title { font-style: italic; color: var(--ink-muted); }
+.ot-rrow.is-hit { box-shadow: 0 0 0 2px var(--accent); background: var(--tint-hover); }
+.ot-rrow-src { text-align: right; }
+@media (max-width: 640px) {
+  .ot-choice-grid { grid-template-columns: 1fr; }
+  .ot-rrow { grid-template-columns: 44px 1fr; }
+  .ot-rrow-src { grid-column: 2; text-align: left; }
+  /* The report head wraps: title row first, Summarize below it, nothing past the edge. */
+  .ot-sheet-head { flex-wrap: wrap; row-gap: var(--space-2); padding-right: 12px; }
+  .ot-sheet-title { flex-wrap: wrap; row-gap: 2px; min-width: 0; }
+  .ot-sheet-title .text-mono-sm { white-space: nowrap; }
+  .ot-sheet-actions { margin-left: 4px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-live-dot, .ot-pill.is-live .ot-pill-dot, .ot-step.is-running .ot-step-mark::after, .is-running > .ot-spec-dot::after,
+  .ot-logo .ot-gear-b, .ot-logo .ot-gear-s { animation: none; }
+  .ot-expand { transition: none; }
+  .ot-expand-content, .ot-fade, .ot-enter, .ot-sink, .ot-suggest-chip, .ot-insight, .ot-insight.is-leaving, .ot-reply, .ot-summary,
+  .ot-sheet, .ot-spec-found { animation: none; }
+  .ot-flow-panel.ot-enter > *, .ot-flow-top.ot-enter > *, .ot-flow-panel.ot-sink > *, .ot-flow-main.ot-sink > *, .ot-flow-top.ot-sink > * { animation: none; }
+  .ot-sink, .ot-insight.is-leaving, .ot-flow-panel.ot-sink > *, .ot-flow-main.ot-sink > *, .ot-flow-top.ot-sink > * { opacity: 0; }
+}
+
+/* ---------- Spec-aligned pieces (docs/scan-experience.md) ---------- */
+/* One starter at a time, with pause / next / all */
+.ot-starter { width: 100%; max-width: 680px; margin-top: var(--space-6); display: flex; flex-direction: column; align-items: center; }
+.ot-starter-row { min-height: 40px; display: flex; align-items: center; justify-content: center; gap: var(--space-3); flex-wrap: wrap; }
+.ot-starter-controls { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--radius-pill); background: var(--glass-fill-strong); border: 1px solid var(--glass-stroke); }
+.ot-starter-btn { width: 32px; height: 32px; border: 0; border-radius: 50%; display: grid; place-items: center; background: transparent; color: var(--ink-muted); cursor: pointer; }
+.ot-starter-btn:hover, .ot-starter-btn.is-on { color: var(--ink); background: var(--tint-hover); }
+.ot-starter-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-starter-all { list-style: none; margin: 0; padding: var(--space-4) 0 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.ot-suggest-chip.is-small { height: 34px; padding: 0 14px; font-size: 13px; animation: none; }
+
+/* Scan progress line with Stop */
+.ot-scanstat-line { display: flex; align-items: center; justify-content: center; gap: var(--space-3); }
+
+/* Card: observation, "Why am I seeing this?", guide, preview, receipt, actions */
+.ot-insight-obs { margin: 0; color: var(--ink-muted); }
+.ot-why { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; margin-left: -10px; border: 0; border-radius: var(--radius-pill); background: transparent; color: var(--cat); font: inherit; font-size: 13px; font-weight: 500; opacity: .9; cursor: pointer; }
+.ot-why:hover { background: var(--tint-hover); }
+.ot-why:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-why-body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
+.ot-why-row { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+.ot-guide { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
+.ot-insight-preview { display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
+.ot-receipt .ot-btn { margin-left: auto; }
+.ot-insight-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ot-insight-actions:empty { display: none; }
+.ot-reply-connect { display: flex; margin: var(--space-1) 0 0 -10px; }
+.ot-insight-quiet { display: flex; flex-wrap: wrap; gap: 2px; margin: calc(-1 * var(--space-1)) 0 0 -10px; }
+.ot-insight-quiet .ot-btn { color: var(--ink-muted); }
+
+/* Share preview before an AI summary */
+.ot-share { width: 100%; max-width: 680px; margin-top: var(--space-4); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-share-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.ot-share-list li { display: flex; align-items: center; gap: 10px; color: var(--ink); }
+.ot-share-list li .ot-icon { color: var(--verified); }
+.ot-share-list li.is-locked .ot-icon { color: var(--ink-muted); }
+.ot-share-list li.is-locked .text-mono-sm { margin-left: auto; }
+.ot-summary-inline li .ot-cite { height: 22px; padding: 0 8px; margin-left: 4px; }
+
+/* Completion rows */
+.ot-change-end { display: inline-flex; align-items: center; gap: var(--space-2); }
+.ot-change-row.is-ignored .text-callout, .ot-change-row.is-declined .text-callout { color: var(--ink-muted); }

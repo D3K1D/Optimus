@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/compare.schema.json",
+  "title": "report.compare result",
+  "description": "Result of report.compare (protocol-v1 §9), by fingerprint. resolved only lists findings whose rule was evaluated in the newer report.",
+  "type": "object",
+  "required": ["new", "resolved", "unchanged"],
+  "properties": {
+    "new": { "type": "array", "items": { "$ref": "report.schema.json#/$defs/finding" } },
+    "resolved": { "type": "array", "items": { "$ref": "report.schema.json#/$defs/finding" } },
+    "unchanged": { "type": "array", "items": { "$ref": "report.schema.json#/$defs/fingerprint" } }
+  }
+}

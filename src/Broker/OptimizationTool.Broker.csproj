@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- WinExe: no console window flashes when UAC launches the broker. -->
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>OptimizationTool.Broker</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
+    <!-- Same handler code as the host, so the broker re-resolves the plan from live state itself. -->
+    <ProjectReference Include="..\Engine\OptimizationTool.Engine.csproj" />
+    <ProjectReference Include="..\Windows\OptimizationTool.Windows.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OptimizationTool.Broker.Tests" />
+  </ItemGroup>
+</Project>

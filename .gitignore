@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+node_modules/
+artifacts/
+*.db
+*.db-wal
+*.db-shm
+
+.claude/
+.codex-bridge/

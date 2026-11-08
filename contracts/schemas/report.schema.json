@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/report.schema.json",
+  "title": "Report",
+  "description": "Result of report.get (protocol-v1 §6, §9 v1.1): an immutable report revision; finding dispositions are current. Readers ignore unknown fields.",
+  "type": "object",
+  "required": ["reportId", "scanId", "revision", "status", "generatedAt", "intent", "counts", "categories", "baseReportId", "comparison",
+               "evidence", "findings", "rules", "coverage", "gaps"],
+  "properties": {
+    "reportId": { "type": "string", "pattern": "^report-[0-9a-f]{16}$" },
+    "scanId": { "type": "string", "pattern": "^scan-" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "status": { "enum": ["complete", "complete_with_gaps", "partial"] },
+    "generatedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+    "intent": { "type": "string", "pattern": "^audit\\." },
+    "counts": {
+      "type": "object",
+      "required": ["findings", "gaps"],
+      "properties": {
+        "findings": { "type": "integer", "minimum": 0 },
+        "gaps": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "categories": { "type": "array", "items": { "$ref": "#/$defs/category" } },
+    "baseReportId": { "type": ["string", "null"], "pattern": "^report-" },
+    "comparison": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["new", "resolved", "unchanged"],
+          "properties": {
+            "new": { "type": "array", "items": { "$ref": "#/$defs/fingerprint" } },
+            "resolved": { "type": "array", "items": { "$ref": "#/$defs/fingerprint" } },
+            "unchanged": { "type": "integer", "minimum": 0 }
+          }
+        }
+      ]
+    },
+    "evidence": { "type": "array", "items": { "$ref": "evidence.schema.json" } },
+    "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
+    "rules": { "type": "array", "items": { "$ref": "#/$defs/ruleOutcome" } },
+    "coverage": { "type": "array", "items": { "$ref": "scan.schema.json#/$defs/coverage" } },
+    "gaps": { "type": "array", "items": { "$ref": "#/$defs/gap" } }
+  },
+  "$defs": {
+    "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{16}$" },
+    "finding": {
+      "type": "object",
+      "required": ["id", "ruleId", "ruleVersion", "fingerprint", "subject", "category", "title", "severity", "confidence", "evidenceIds",
+                   "counterevidence", "actionEligibility", "settingsUri", "disposition"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^fnd-[0-9a-f]{16}$" },
+        "ruleId": { "type": "string" },
+        "ruleVersion": { "type": "string" },
+        "fingerprint": { "$ref": "#/$defs/fingerprint" },
+        "subject": { "type": ["string", "null"] },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "severity": { "enum": ["info", "low", "medium", "high", "critical"] },
+        "confidence": { "enum": ["low", "medium", "high"] },
+        "evidenceIds": { "type": "array", "minItems": 1, "items": { "type": "string", "pattern": "^ev-" } },
+        "counterevidence": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } },
+        "actionEligibility": { "enum": ["manual_review", "preview_available"] },
+        "settingsUri": { "type": ["string", "null"], "pattern": "^(ms-settings|windowsdefender):" },
+        "disposition": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["status", "scope", "expiresAt"],
+              "properties": {
+                "status": { "enum": ["ignored", "snoozed", "intended"] },
+                "scope": { "enum": ["finding", "rule"] },
+                "expiresAt": { "oneOf": [{ "type": "null" }, { "$ref": "scan.schema.json#/$defs/timestamp" }] }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "category": {
+      "description": "One row per planned category. status from its collectors' coverage; rules counts tell clear from not evaluable.",
+      "type": "object",
+      "required": ["id", "label", "status", "checked", "planned", "findings"],
+      "properties": {
+        "id": { "type": "string" },
+        "label": { "type": "string" },
+        "status": { "enum": ["complete", "partial", "none"] },
+        "checked": { "type": "integer", "minimum": 0 },
+        "planned": { "type": "integer", "minimum": 0 },
+        "findings": { "type": "integer", "minimum": 0 },
+        "rules": {
+          "type": "object",
+          "required": ["finding", "clear", "insufficient", "inapplicable"],
+          "properties": {
+            "finding": { "type": "integer", "minimum": 0 },
+            "clear": { "type": "integer", "minimum": 0 },
+            "insufficient": { "type": "integer", "minimum": 0 },
+            "inapplicable": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "ruleOutcome": {
+      "type": "object",
+      "required": ["id", "version", "category", "inputs", "status", "reason", "findings"],
+      "properties": {
+        "id": { "type": "string" },
+        "version": { "type": "string" },
+        "category": { "type": "string" },
+        "inputs": { "type": "array", "items": { "type": "string" } },
+        "status": { "enum": ["finding", "clear", "insufficient", "inapplicable"] },
+        "reason": { "type": ["string", "null"] },
+        "findings": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "required": ["id", "category", "title", "display", "source", "collectorId", "status"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^gap-[0-9a-f]{16}$" },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "display": { "type": "string" },
+        "source": { "type": "string" },
+        "collectorId": { "type": "string" },
+        "status": { "enum": ["partial", "denied", "unsupported", "timed_out", "failed", "skipped", "cancelled"] }
+      }
+    }
+  }
+}

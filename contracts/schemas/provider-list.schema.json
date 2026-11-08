@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/provider-list.schema.json",
+  "title": "provider.list result",
+  "description": "Result of provider.list (m3-agent §4, §9); entries also returned by provider.connect/disconnect. Never contains a key.",
+  "type": "object",
+  "required": ["providers", "diagnostics"],
+  "properties": {
+    "providers": { "type": "array", "items": { "$ref": "#/$defs/provider" } },
+    "diagnostics": {
+      "description": "The §3.3 diagnostics available on this machine, for the grant sheet.",
+      "type": "array",
+      "items": { "type": "object", "required": ["id", "description", "arguments"],
+        "properties": { "id": { "type": "string" }, "description": { "type": "string" }, "arguments": { "type": "object" } } }
+    }
+  },
+  "$defs": {
+    "status": { "enum": ["local", "not_configured", "checking", "connected", "error", "waiting", "pending", "paired", "active", "client_closed"],
+      "description": "m3-agent §9 connection states." },
+    "detail": { "oneOf": [{ "type": "null" }, { "enum": ["auth", "quota", "network", "unavailable", "not_eligible", "bridge_rejected", "pairing_expired", "denied", "never_seen", "idle", "signed_out", "storage", "callback_timeout", "cancelled", "not_saved"] }] },
+    "provider": {
+      "type": "object",
+      "required": ["kind", "label", "mode", "status", "models", "defaultModel", "detail", "since"],
+      "properties": {
+        "kind": { "enum": ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"] },
+        "label": { "type": "string" },
+        "mode": { "enum": ["api_key", "browser_sign_in", "native_mcp", "local"] },
+        "status": { "$ref": "#/$defs/status" },
+        "models": { "type": "array", "items": { "type": "string" } },
+        "defaultModel": { "type": ["string", "null"] },
+        "detail": { "$ref": "#/$defs/detail" },
+        "since": { "$ref": "scan.schema.json#/$defs/timestamp" },
+        "code": { "type": "string", "pattern": "^[0-9]{4}$", "description": "pending only: the pairing code." },
+        "pairingId": { "type": "string", "pattern": "^pair-", "description": "Native clients: the pending pairing (status pending) or the approved one (paired, active, client_closed), for agent.approvePairing / agent.start." },
+        "capabilities": { "type": "object", "required": ["tools"], "properties": { "tools": { "type": "boolean", "description": "false: explain-only (Report review available)." } } },
+        "registration": { "type": "object", "required": ["claude", "codex"],
+          "properties": { "claude": { "type": "string" }, "codex": { "type": "string" } } }
+      }
+    }
+  }
+}

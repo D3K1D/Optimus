@@ -1,0 +1,209 @@
+{
+  "schemaVersion": 1,
+  "synthetic": true,
+  "note": "UI-only additions on top of contracts/fixtures/m1-simulated-audit.json so the website demo can show the protocol v1.1 (M2) features offline. Not read by the backend. No data from a real PC.",
+  "settingsUri": {
+    "c1": "windowsdefender://network",
+    "c2": "ms-settings:powersleep",
+    "c3": "ms-settings:storagesense",
+    "c4": "ms-settings:startupapps",
+    "c5": "ms-settings:privacy-feedback",
+    "c6": "ms-settings:troubleshoot",
+    "c7": "ms-settings:display-advanced",
+    "c8": "ms-settings:personalization-start",
+    "c9": "ms-settings:storagesense",
+    "c10": "windowsdefender://threat"
+  },
+  "sensitivity": {
+    "e4": "local",
+    "x1": "local"
+  },
+  "collectors": [
+    {
+      "id": "fixture.defender",
+      "version": "1.0.0",
+      "category": "security",
+      "delayMs": 500,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e11",
+          "subject": "security.defender.signatures",
+          "source": "Microsoft Defender status",
+          "quality": "measured",
+          "value": {
+            "mode": "primary",
+            "signatureAgeDays": 9,
+            "lastQuickScanDays": 6
+          },
+          "display": "Defender is on. Its definitions are 9 days old."
+        }
+      ]
+    },
+    {
+      "id": "fixture.sampler",
+      "version": "1.0.0",
+      "category": "performance",
+      "label": "Measuring",
+      "skippable": true,
+      "durationSeconds": 8,
+      "evidence": [
+        {
+          "key": "e10",
+          "subject": "perf.sample.cpu",
+          "source": "Performance sample",
+          "quality": "measured",
+          "value": {
+            "cpuPercentAvg": 12,
+            "intervalSeconds": 8,
+            "samples": 8
+          },
+          "display": "CPU averaged 12% over 8 s."
+        }
+      ]
+    },
+    {
+      "id": "fixture.apps",
+      "version": "1.0.0",
+      "category": "storage",
+      "delayMs": 400,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "x1",
+          "subject": "apps.installed.count",
+          "source": "Installed apps",
+          "quality": "reported",
+          "value": {
+            "count": 86,
+            "withSize": 61
+          },
+          "display": "86 apps installed. 61 report a size."
+        },
+        {
+          "key": "x2",
+          "subject": "volume.c.media",
+          "source": "Windows volume capacity",
+          "quality": "reported",
+          "value": {
+            "mediaType": "SSD"
+          },
+          "display": "The system volume is on an SSD."
+        },
+        {
+          "key": "x3",
+          "subject": "storage.temp",
+          "source": "Storage Sense",
+          "quality": "estimated",
+          "value": {
+            "tempBytes": 4294967296
+          },
+          "display": "About 4 GiB of temporary files."
+        },
+        {
+          "key": "x4",
+          "subject": "storage.recyclebin",
+          "source": "Recycle Bin",
+          "quality": "measured",
+          "value": {
+            "bytes": 1288490189
+          },
+          "display": "The Recycle Bin holds about 1.2 GiB."
+        },
+        {
+          "key": "x5",
+          "subject": "storage.sense",
+          "source": "Storage Sense",
+          "quality": "measured",
+          "value": {
+            "enabled": false
+          },
+          "display": "Storage Sense is off."
+        }
+      ]
+    },
+    {
+      "id": "fixture.volume.d",
+      "version": "1.0.0",
+      "category": "storage",
+      "delayMs": 300,
+      "outcome": "complete",
+      "onlyOnRescan": true,
+      "evidence": [
+        {
+          "key": "e9",
+          "subject": "volume.d",
+          "source": "Windows volume capacity",
+          "quality": "measured",
+          "value": {
+            "freeGiB": 9,
+            "capacityGiB": 512
+          },
+          "display": "Volume D: has 9 GiB free out of 512 GiB."
+        }
+      ]
+    }
+  ],
+  "rules": [
+    {
+      "ruleId": "av.signatures_stale",
+      "version": "1.0.0",
+      "category": "security",
+      "evidence": [
+        "e11"
+      ],
+      "severity": "medium",
+      "confidence": "high",
+      "actionEligibility": "preview_available",
+      "title": "Defender definitions are out of date",
+      "card": {
+        "key": "c10",
+        "actionId": "defender.update_signatures",
+        "text": "Defender’s definitions are 9 days old. Would you like to update them?",
+        "options": [
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ],
+        "guide": [
+          "Open Windows Security › Virus & threat protection.",
+          "Choose Protection updates.",
+          "Select Check for updates."
+        ]
+      }
+    },
+    {
+      "ruleId": "storage.volume_low",
+      "version": "1.0.0",
+      "category": "storage",
+      "evidence": [
+        "e9"
+      ],
+      "severity": "low",
+      "confidence": "high",
+      "actionEligibility": "manual_review",
+      "title": "Volume D: space is running low",
+      "card": {
+        "key": "c9",
+        "text": "Volume D: has 9 GiB free. Would you like to review what is using it?",
+        "options": [
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ],
+        "guide": [
+          "Open Settings › System › Storage.",
+          "Choose Storage used on other drives.",
+          "Remove what you don’t need."
+        ]
+      }
+    }
+  ],
+  "rescan": {
+    "note": "A rescan simulates change: the Start suggestions (e8) and optional diagnostic data (e5) evidence is no longer observed, so c8 and c5 are resolved (Privacy shows Nothing found), and volume D: appears (c9 new).",
+    "skipEvidence": [
+      "e8",
+      "e5"
+    ]
+  }
+}

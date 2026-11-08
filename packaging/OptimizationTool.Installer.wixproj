@@ -1,0 +1,29 @@
+<Project Sdk="WixToolset.Sdk/7.0.1">
+  <!-- Per-machine MSI for Optimization Tool. Harvests the staging folder written by packaging/publish.ps1.
+       Build through packaging/build-installer.ps1. See contracts/onboarding.md §1. -->
+  <PropertyGroup>
+    <!-- One version for the exes and the MSI: Directory.Build.props <Version> unless -p:Version= is given. -->
+    <Version Condition="'$(Version)' == ''">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(_OtRepoRoot)Directory.Build.props')), '&lt;Version&gt;\s*([^&lt;\s]+)\s*&lt;/Version&gt;').Groups[1].Value)</Version>
+    <StagingDir Condition="'$(StagingDir)' == ''">$(_OtRepoRoot)artifacts\publish\OptimizationTool</StagingDir>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>OptimizationTool-$(Version)-x64</OutputName>
+    <OutputPath>$(_OtRepoRoot)artifacts\installer\</OutputPath>
+    <IntermediateOutputPath>$(_OtRepoRoot)artifacts\pkg-build\wix\obj\$(Configuration)\</IntermediateOutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <DefineConstants>ProductVersion=$(Version);StagingDir=$(StagingDir)</DefineConstants>
+    <!-- No cultures subfolder in the output: one en-US package. -->
+    <SuppressCultureFolder>true</SuppressCultureFolder>
+    <!-- Known false positives for a perMachine (ALLUSERS=1) package: ICE43/ICE57 assume the Start menu folder is per-user;
+         here it resolves to the all-users Start menu. ICE60 flags .NET runtime DLLs that carry a version but no language. -->
+    <SuppressIces>ICE43;ICE57;ICE60</SuppressIces>
+    <!-- WiX v7 requires its OSMF EULA to be accepted before it builds. This project never accepts it on anyone's behalf:
+         the person building passes -p:AcceptEula=wix7 (build-installer.ps1 -AcceptWixEula) or runs `wix eula accept wix7`.
+         Terms: https://docs.firegiant.com/wix/osmf/ -->
+  </PropertyGroup>
+
+  <Target Name="_OtCheckInputs" BeforeTargets="Build">
+    <Error Condition="'$(Version)' == ''" Text="No version: Directory.Build.props has no &lt;Version&gt;; pass -p:Version=x.y.z." />
+    <Error Condition="!Exists('$(StagingDir)\OptimizationTool.exe')" Text="Staging folder $(StagingDir) is empty; run packaging\publish.ps1 first." />
+  </Target>
+</Project>

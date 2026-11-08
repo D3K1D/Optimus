@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>OptimizationTool.Host</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
+    <ProjectReference Include="..\Engine\OptimizationTool.Engine.csproj" />
+    <ProjectReference Include="..\Windows\OptimizationTool.Windows.csproj" />
+    <ProjectReference Include="..\Providers\OptimizationTool.Providers.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OptimizationTool.Tests" />
+  </ItemGroup>
+</Project>

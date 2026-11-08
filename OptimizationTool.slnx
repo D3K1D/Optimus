@@ -1,0 +1,33 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Transport/OptimizationTool.Transport.csproj" />
+    <Project Path="src/Engine/OptimizationTool.Engine.csproj" />
+    <Project Path="src/Host/OptimizationTool.Host.csproj" />
+    <Project Path="src/Desktop/OptimizationTool.Desktop.csproj" />
+  </Folder>
+  <Folder Name="/src/Broker/">
+    <Project Path="src/Broker/OptimizationTool.Broker.csproj" />
+  </Folder>
+  <Folder Name="/src/Engine/" />
+  <Folder Name="/src/Mcp/">
+    <Project Path="src/Mcp/OptimizationTool.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/src/Providers/">
+    <Project Path="src/Providers/OptimizationTool.Providers.csproj" />
+  </Folder>
+  <Folder Name="/src/Transport/" />
+  <Folder Name="/src/Windows/">
+    <Project Path="src/Windows/OptimizationTool.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OptimizationTool.Broker.Tests/OptimizationTool.Broker.Tests.csproj" />
+    <Project Path="tests/OptimizationTool.Mcp.Tests/OptimizationTool.Mcp.Tests.csproj" />
+    <Project Path="tests/OptimizationTool.Providers.Tests/OptimizationTool.Providers.Tests.csproj" />
+    <Project Path="tests/OptimizationTool.Tests/OptimizationTool.Tests.csproj" />
+    <Project Path="src/Desktop.Tests/OptimizationTool.Desktop.Tests.csproj" />
+    <Project Path="tests/OptimizationTool.Windows.Tests/OptimizationTool.Windows.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/TestClient/OptimizationTool.TestClient.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/onboarding.schema.json",
+  "title": "Onboarding",
+  "description": "Result of onboarding.get and onboarding.save (protocol-v1 §6). Readers ignore unknown fields.",
+  "type": "object",
+  "required": ["revision", "step", "profile", "resume"],
+  "properties": {
+    "revision": { "type": "integer", "minimum": 1 },
+    "step": { "enum": ["provider", "use", "goal", "specs", "complete"] },
+    "profile": {
+      "type": "object",
+      "required": ["provider", "uses", "customUse", "goals", "customGoal", "inventoryConsent"],
+      "properties": {
+        "provider": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["value", "label"],
+              "properties": {
+                "value": { "enum": ["local", "later", "claude-code", "codex", "api", "chatgpt"] },
+                "label": { "type": "string", "minLength": 1 }
+              }
+            }
+          ]
+        },
+        "uses": { "type": "array", "items": { "type": "string", "maxLength": 100 } },
+        "customUse": { "type": "string", "maxLength": 200 },
+        "goals": { "type": "array", "items": { "type": "string", "maxLength": 100 } },
+        "customGoal": { "type": "string", "maxLength": 200 },
+        "inventoryConsent": { "enum": ["unset", "granted", "skipped"] }
+      }
+    },
+    "resume": {
+      "type": "object",
+      "required": ["inventoryId", "scanId", "reportId"],
+      "properties": {
+        "inventoryId": { "type": ["string", "null"], "pattern": "^inv-" },
+        "scanId": { "type": ["string", "null"], "pattern": "^scan-" },
+        "reportId": { "type": ["string", "null"], "pattern": "^report-" }
+      }
+    }
+  }
+}

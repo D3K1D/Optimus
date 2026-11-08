@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/followup.schema.json",
+  "title": "Followup",
+  "description": "Result of followup.get, followup.respond, finding.setDisposition and finding.clearDisposition (protocol-v1 §6, §9). card is null when the queue is empty.",
+  "type": "object",
+  "required": ["reportId", "revision", "total", "pendingCount", "card", "decisions"],
+  "properties": {
+    "reportId": { "type": "string", "pattern": "^report-" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "total": { "type": "integer", "minimum": 0 },
+    "pendingCount": { "type": "integer", "minimum": 0 },
+    "card": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/card" }] },
+    "upcoming": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/card" }, "description": "v1.4: the next queued cards after card; any of the three can be answered." },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["cardId", "findingId", "status", "title"],
+        "properties": {
+          "cardId": { "type": "string", "pattern": "^card-" },
+          "findingId": { "type": ["string", "null"], "pattern": "^fnd-", "description": "null for an AI card (m5) without a finding." },
+          "status": { "enum": ["ignored", "snoozed", "later", "intended", "declined", "done", "verified", "restored"], "description": "later: put off in this report (restorable; a new scan builds a fresh deck)." },
+          "title": { "type": "string" },
+          "operationId": { "type": ["string", "null"], "pattern": "^op-", "description": "M4: the verified change behind this decision." },
+          "undo": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["available"], "properties": { "available": { "type": "boolean" } } }] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "card": {
+      "type": "object",
+      "required": ["id", "findingId", "category", "title", "text", "evidenceIds", "options", "guide", "preview", "actionId", "settingsUri", "reply"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^card-[0-9a-f]{16}$" },
+        "findingId": { "type": ["string", "null"], "pattern": "^fnd-", "description": "null for an AI card (m5) without a finding." },
+        "origin": { "enum": ["report", "ai"], "description": "m5-chat §5: ai = added by add_card." },
+        "sourceTaskId": { "type": ["string", "null"], "pattern": "^task-", "description": "m5-chat §5: the task that added an AI card (agent.get it for the evidence); null for report cards." },
+        "note": { "type": ["string", "null"], "description": "m5-chat §5: the AI note (note_card), plain untrusted text." },
+        "noteBy": { "type": ["string", "null"], "description": "The provider label that wrote the note." },
+        "why": { "type": "string", "description": "AI cards: the add_card why text." },
+        "category": { "type": "string" },
+        "title": { "type": "string" },
+        "text": { "type": "string" },
+        "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } },
+        "options": { "type": "array", "items": { "type": "string" } },
+        "guide": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string" } }] },
+        "preview": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["rows", "details"],
+              "properties": {
+                "rows": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["label", "before", "after"],
+                    "properties": { "label": { "type": "string" }, "before": { "type": "string" }, "after": { "type": "string" } }
+                  }
+                },
+                "details": {
+                  "type": "array",
+                  "items": { "type": "array", "prefixItems": [{ "type": "string" }, { "type": "string" }], "minItems": 2, "maxItems": 2 }
+                }
+              }
+            }
+          ]
+        },
+        "actionId": { "type": ["string", "null"] },
+        "settingsUri": { "type": ["string", "null"], "pattern": "^(ms-settings|windowsdefender):" },
+        "reply": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["question", "text", "evidenceIds"],
+              "properties": {
+                "question": { "type": "string" },
+                "text": { "type": "string" },
+                "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Optimization Tool: per-machine MSI (contracts/onboarding.md §1). Built by OptimizationTool.Installer.wixproj from the
+     staging folder packaging/publish.ps1 writes. ProductVersion and StagingDir come from MSBuild (DefineConstants). -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- UpgradeCode: generated once (2026-11-04) and fixed forever. Every version of Optimization Tool keeps this value,
+       so MajorUpgrade finds and replaces the previous install. Never change it. -->
+  <Package Name="Optimization Tool"
+           Manufacturer="Optimization Tool (open source)"
+           Version="$(var.ProductVersion)"
+           UpgradeCode="425FAA83-AC69-4A47-ABA2-2E4DE58B8060"
+           Scope="perMachine"
+           Compressed="yes"
+           Language="1033">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Optimization Tool is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Add/Remove Programs: icon from the app, no Modify (nothing to choose). -->
+    <Icon Id="AppIcon.exe" SourceFile="$(var.StagingDir)\OptimizationTool.exe" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.exe" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <!-- WebView2 Evergreen runtime: per-machine (32-bit registry view = WOW6432Node) or per-user. Missing, empty and
+         0.0.0.0 all mean not installed (Microsoft's documented check). Not checked on repair or uninstall. -->
+    <Property Id="WV2_MACHINE_PV">
+      <RegistrySearch Id="Wv2Machine" Root="HKLM" Bitness="always32" Type="raw" Name="pv"
+                      Key="SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" />
+    </Property>
+    <Property Id="WV2_USER_PV">
+      <RegistrySearch Id="Wv2User" Root="HKCU" Type="raw" Name="pv"
+                      Key="Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" />
+    </Property>
+    <Launch Condition="Installed OR (WV2_MACHINE_PV AND WV2_MACHINE_PV &lt;&gt; &quot;0.0.0.0&quot;) OR (WV2_USER_PV AND WV2_USER_PV &lt;&gt; &quot;0.0.0.0&quot;)"
+            Message="Optimization Tool needs the Microsoft Edge WebView2 Runtime. Download it from https://developer.microsoft.com/microsoft-edge/webview2/ (Evergreen Bootstrapper), then run this installer again." />
+
+    <!-- %ProgramFiles%\Optimization Tool: admin-protected, as the elevation broker requires. -->
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="Optimization Tool" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- %ProgramData%\OptimizationTool\receipts: owner Administrators; SYSTEM + Administrators full; Users read;
+         protected (no inheritance from ProgramData, where users may create folders). The parent gets the same lock so a
+         user can't pre-create or own it. Permanent: uninstall leaves receipts (and %LOCALAPPDATA%\OptimizationTool,
+         which the installer never touches). The broker re-applies this ACL on every run (src/Broker/WindowsBroker.cs). -->
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="OtDataFolder" Name="OptimizationTool">
+        <Directory Id="ReceiptsFolder" Name="receipts" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Optimization Tool" AllowAbsent="no">
+      <ComponentGroupRef Id="AppFiles" />
+      <ComponentRef Id="DataFolder" />
+      <ComponentRef Id="ReceiptsFolder" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="AppFiles" Directory="INSTALLFOLDER">
+      <!-- The shell exe on its own, so the Start menu shortcut can point at it. -->
+      <Component Id="MainExe">
+        <File Id="OptimizationTool.exe" Source="$(var.StagingDir)\OptimizationTool.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Optimization Tool"
+                    Description="Audit and tune this PC" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
+        </File>
+      </Component>
+      <!-- Everything else in the staging folder (host, MCP bridge, broker, runtime, ui/), subfolders included. -->
+      <Files Include="$(var.StagingDir)\**">
+        <Exclude Files="$(var.StagingDir)\OptimizationTool.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <Component Id="DataFolder" Directory="OtDataFolder" Guid="6C1E9F7B-2D7A-4F4C-9B0E-5A3D8E1F2C41" Permanent="yes">
+      <CreateFolder>
+        <PermissionEx Sddl="O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+      </CreateFolder>
+    </Component>
+    <Component Id="ReceiptsFolder" Directory="ReceiptsFolder" Guid="B8F43D2A-7E15-4C9B-A6D0-3F2E9C8B1A57" Permanent="yes">
+      <CreateFolder>
+        <PermissionEx Sddl="O:BAG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)" />
+      </CreateFolder>
+    </Component>
+  </Fragment>
+</Wix>

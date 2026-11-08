@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/evidence.schema.json",
+  "title": "Evidence",
+  "description": "One observation, the citation target (evidence.get, report.evidence[]). ID = ev- + first 16 hex of SHA-256(scanId NUL collectorId NUL subject).",
+  "type": "object",
+  "required": ["id", "category", "source", "observedAt", "interval", "display", "value", "collectorId", "collectorVersion", "quality", "sensitivity"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^ev-[0-9a-f]{16}$" },
+    "category": { "type": "string" },
+    "source": { "type": "string", "minLength": 1 },
+    "observedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+    "interval": { "type": ["string", "null"] },
+    "display": { "type": "string" },
+    "value": {},
+    "collectorId": { "type": "string" },
+    "collectorVersion": { "type": "string" },
+    "quality": { "enum": ["measured", "reported", "vendor_reported", "estimated", "unavailable"] },
+    "subject": { "type": "string", "description": "Typed subject key (v1.1, live and fixture scans); absent in reports stored before v1.1." },
+    "sensitivity": { "enum": ["public", "local"], "description": "local: shown on this PC only (normalized paths, process images)." }
+  }
+}

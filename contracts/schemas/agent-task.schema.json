@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/agent-task.schema.json",
+  "title": "Task",
+  "description": "Result of agent.start, agent.get (adds activity and evidence), agent.stop, and agent.active tasks[] (m3-agent §2, §4).",
+  "type": "object",
+  "required": ["taskId", "goal", "recipient", "scope", "grant", "status", "used", "createdAt", "lastActivityAt", "pairing"],
+  "properties": {
+    "taskId": { "type": "string", "pattern": "^task-[0-9a-f]{16}$" },
+    "goal": { "type": "string", "maxLength": 500 },
+    "recipient": {
+      "type": "object",
+      "required": ["kind", "label", "model"],
+      "properties": {
+        "kind": { "enum": ["anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"] },
+        "label": { "type": "string" },
+        "model": { "type": ["string", "null"] },
+        "mode": { "const": "headless", "description": "m5-chat §3: an MCP kind asked in-app (the host runs the CLI); absent otherwise." }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "required": ["reportId", "findingIds"],
+      "properties": {
+        "reportId": { "type": "string", "pattern": "^report-" },
+        "findingIds": { "oneOf": [{ "type": "null" }, { "type": "array", "items": { "type": "string", "pattern": "^fnd-" } }] }
+      }
+    },
+    "grant": { "$ref": "#/$defs/grant" },
+    "clientSession": { "type": ["string", "null"], "description": "m5-chat §3, headless tasks only: the Claude Code session or Codex thread ID the next ask resumes." },
+    "status": { "enum": ["active", "stopped", "expired", "exhausted", "failed"] },
+    "used": {
+      "type": "object",
+      "required": ["diagnosticCalls", "bytesShared", "turns", "inputTokens", "outputTokens"],
+      "properties": {
+        "diagnosticCalls": { "type": "integer", "minimum": 0 }, "bytesShared": { "type": "integer", "minimum": 0 },
+        "turns": { "type": "integer", "minimum": 0 }, "inputTokens": { "type": "integer", "minimum": 0 }, "outputTokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "createdAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+    "lastActivityAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+    "pairing": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["pairingId", "client", "companionPid"],
+          "properties": {
+            "pairingId": { "type": "string", "pattern": "^pair-" },
+            "client": { "enum": ["claude_code", "codex", "unknown"] },
+            "companionPid": { "type": "integer" }
+          }
+        }
+      ]
+    },
+    "activity": { "type": "array", "description": "agent.get only: the last 100 task events.",
+      "items": { "type": "object", "required": ["seq", "type", "at", "payload"] } },
+    "evidence": { "type": "array", "description": "agent.get only: this task's own diagnostic evidence as the model received it.",
+      "items": { "$ref": "tool-result.schema.json#/$defs/projectedEvidence" } }
+  },
+  "$defs": {
+    "grant": {
+      "type": "object",
+      "required": ["diagnostics", "share", "limits", "idleExpirySeconds"],
+      "properties": {
+        "diagnostics": { "type": "array", "items": { "enum": ["power.inventory", "process.sample", "startup.list", "events.recent", "storage.volumes",
+                                                              "network.listeners", "display.modes", "devices.problems", "security.status"] } },
+        "share": { "type": "object", "required": ["names"], "properties": { "names": { "type": "boolean" } } },
+        "limits": {
+          "type": "object",
+          "required": ["diagnosticCalls", "resultBytes", "totalBytes", "turns", "turnSeconds", "maxSampleSeconds"],
+          "properties": {
+            "diagnosticCalls": { "type": "integer", "minimum": 0, "maximum": 50 },
+            "resultBytes": { "type": "integer", "minimum": 1024, "maximum": 262144 },
+            "totalBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 },
+            "turns": { "type": "integer", "minimum": 1, "maximum": 20 },
+            "turnSeconds": { "type": "integer", "minimum": 5, "maximum": 300 },
+            "maxSampleSeconds": { "type": "integer", "minimum": 5, "maximum": 120 }
+          }
+        },
+        "idleExpirySeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
+        "canRequestChanges": { "type": "boolean", "description": "M4: the task may ask (request_action) for catalog changes the user approves. Default false." }
+      }
+    }
+  }
+}

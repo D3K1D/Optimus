@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>OptimizationTool.Engine</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- The single synthetic M1 dataset, shared with the UI's fixture adapter. -->
+    <EmbeddedResource Include="..\..\contracts\fixtures\m1-simulated-audit.json" LogicalName="m1-simulated-audit.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OptimizationTool.Tests" />
+  </ItemGroup>
+</Project>

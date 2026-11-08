@@ -1,0 +1,9 @@
+<Project>
+  <!-- Stops the repo-root Directory.Build.props (TargetFramework, RuntimeIdentifier, ...) from reaching the WiX project,
+       and keeps WiX's obj/ out of packaging/. The version is read from the root props by the .wixproj itself. -->
+  <PropertyGroup>
+    <_OtRepoRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</_OtRepoRoot>
+    <BaseIntermediateOutputPath>$(_OtRepoRoot)artifacts\pkg-build\wix\obj\</BaseIntermediateOutputPath>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
