@@ -142,7 +142,7 @@ public class ProtocolTests
     {
         await using var host = TestHost.Start();
         var c = await host.ConnectAsync();
-        Assert.Equal(4, (int)c.Hello!["protocol"]!["minor"]!); // server is 1.4; the test client says 1.0
+        Assert.Equal(5, (int)c.Hello!["protocol"]!["minor"]!); // server is 1.5; the test client says 1.0
         Assert.Contains("scan.fixture", c.Hello["features"]!.AsArray().Select(x => (string)x!));
         Assert.StartsWith("c-", c.Hello.Str("connectionId"));
         Assert.Equal("user", c.Hello["eventCursor"].Str("stream"));

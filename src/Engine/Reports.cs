@@ -193,7 +193,41 @@ internal sealed class ReportBuilder(Fixture fixture, AuditCatalog catalog)
 
 internal sealed class ReportService(Store store)
 {
-    public JsonNode Get(string reportId) => store.Read(db => WithDispositions(db, Load(db, reportId)));
+    /// <summary>report.get stays well under the 1 MiB frame cap (protocol §1), leaving room for the JSON-RPC envelope.</summary>
+    internal const int MaxReportBytes = 768 * 1024;
+
+    public JsonNode Get(string reportId) => Bound(store.Read(db => WithDispositions(db, Load(db, reportId))), MaxReportBytes);
+
+    /// <summary>
+    /// Keeps a large report openable: when it serializes past <paramref name="maxBytes"/>, evidence no finding cites is
+    /// dropped from the end until it fits, and evidenceOmitted counts what was left out (each still opens with
+    /// evidence.get). Cited evidence is always kept. A report that fits is returned unchanged, without the field.
+    /// </summary>
+    internal static JsonObject Bound(JsonObject report, int maxBytes)
+    {
+        if (report["evidence"] is not JsonArray evidence) return report;
+        var total = System.Text.Encoding.UTF8.GetByteCount(report.ToJsonString());
+        if (total <= maxBytes) return report;
+        var cited = new HashSet<string>();
+        foreach (var f in report["findings"] as JsonArray ?? [])
+            foreach (var id in Json.Strings(f?["evidenceIds"]).Concat(Json.Strings(f?["counterevidence"]))) cited.Add(id);
+
+        var items = evidence.ToList();
+        var sizes = items.Select(e => (e is null ? 4 : System.Text.Encoding.UTF8.GetByteCount(e.ToJsonString())) + 1).ToArray();
+        var used = total - sizes.Sum() + 32; // the rest of the report, plus room for evidenceOmitted
+        var keep = new bool[items.Count];
+        for (var i = 0; i < items.Count; i++)
+            if (items[i]?["id"] is JsonValue v && v.TryGetValue<string>(out var id) && cited.Contains(id)) { keep[i] = true; used += sizes[i]; }
+        for (var i = 0; i < items.Count; i++)
+            if (!keep[i] && used + sizes[i] <= maxBytes) { keep[i] = true; used += sizes[i]; }
+
+        evidence.Clear();
+        var omitted = 0;
+        for (var i = 0; i < items.Count; i++)
+            if (keep[i]) evidence.Add(items[i]); else omitted++;
+        if (omitted > 0) report["evidenceOmitted"] = omitted;
+        return report;
+    }
 
     internal static JsonObject Load(Db db, string reportId)
     {

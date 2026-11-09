@@ -38,6 +38,7 @@
       ]
     },
     "evidence": { "type": "array", "items": { "$ref": "evidence.schema.json" } },
+    "evidenceOmitted": { "type": "integer", "minimum": 1, "description": "Only on a report.get that would pass the size budget: uncited evidence left out (open each with evidence.get)." },
     "findings": { "type": "array", "items": { "$ref": "#/$defs/finding" } },
     "rules": { "type": "array", "items": { "$ref": "#/$defs/ruleOutcome" } },
     "coverage": { "type": "array", "items": { "$ref": "scan.schema.json#/$defs/coverage" } },

@@ -1,4 +1,4 @@
-# Publishes the desktop app, host, MCP bridge and broker (self-contained, win-x64, Release) into one staging folder
+# Publishes the desktop app, host, MCP bridge, broker and benchmark worker (self-contained, win-x64, Release) into one staging folder
 # that the installer harvests. Builds go to artifacts/pkg-build, never src/*/bin (a running MCP bridge locks those).
 #   powershell -ExecutionPolicy Bypass -File packaging\publish.ps1 [-Configuration Release] [-Staging <dir>]
 param(
@@ -21,9 +21,10 @@ $projects = [ordered]@{
     "Host"    = "src\Host\OptimizationTool.Host.csproj"
     "Mcp"     = "src\Mcp\OptimizationTool.Mcp.csproj"
     "Broker"  = "src\Broker\OptimizationTool.Broker.csproj"
+    "Bench"   = "src\Bench\OptimizationTool.Bench.csproj"
 }
 $common = @("-c", $Configuration, "-r", "win-x64", "--self-contained", "true", "--artifacts-path", $build, "-nologo", "-v", "q",
-            "-p:Version=$version", "-p:OtSkipHost=true", "-p:OtSkipMcp=true", "-p:OtSkipBroker=true", "-p:DebugType=none")
+            "-p:Version=$version", "-p:OtSkipHost=true", "-p:OtSkipMcp=true", "-p:OtSkipBroker=true", "-p:OtSkipBench=true", "-p:DebugType=none")
 
 $outs = @{}
 foreach ($name in $projects.Keys) {
@@ -77,7 +78,7 @@ foreach ($r in $replaced) { Write-Host "  newer shared DLL: $r" }
 foreach ($bad in "ui\tests", "ui\tools") {
     if (Test-Path (Join-Path $Staging $bad)) { throw "Staging contains $bad; it must not ship." }
 }
-$missing = @("OptimizationTool.exe", "OptimizationTool.Host.exe", "OptimizationTool.Mcp.exe", "OptimizationTool.Broker.exe", "ui\index.html") |
+$missing = @("OptimizationTool.exe", "OptimizationTool.Host.exe", "OptimizationTool.Mcp.exe", "OptimizationTool.Broker.exe", "OptimizationTool.Bench.exe", "ui\index.html") |
     Where-Object { -not (Test-Path (Join-Path $Staging $_)) }
 if ($missing) { throw "Staging is missing: $($missing -join ', ')" }
 

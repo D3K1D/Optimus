@@ -108,7 +108,7 @@ public static class AgentSetup
     public static AgentOptions Options(ICredentialStore? store = null, params IProviderAdapter[] providers) => new()
     {
         Providers = providers, Credentials = store ?? new MemoryCredentialStore(), Project = FakeProjection.Project,
-        RetryDelay = TimeSpan.FromMilliseconds(20), McpExecutablePath = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe",
+        RetryDelay = TimeSpan.FromMilliseconds(20), McpExecutablePath = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe",
     };
 
     public static JsonObject Grant(string[]? diagnostics = null, JsonObject? limits = null, int? idle = null)

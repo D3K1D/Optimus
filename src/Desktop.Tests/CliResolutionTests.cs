@@ -8,7 +8,7 @@ namespace OptimizationTool.Desktop.Tests;
 public sealed class CliResolutionTests
 {
     private const string Doc = "https://app.optimizationtool.invalid/index.html";
-    private const string Bridge = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
+    private const string Bridge = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe";
     private const string Home = @"C:\Users\u";
     private const string Roaming = Home + @"\AppData\Roaming";
     private const string Local = Home + @"\AppData\Local";
@@ -89,9 +89,10 @@ public sealed class CliResolutionTests
             ProcessResult r = args switch
             {
                 ["--version"] => new(0, Versions.TryGetValue(cli, out var v) ? v
-                    : Path.GetFileNameWithoutExtension(cli) == "claude" ? "2.1.317 (Claude Code)\n" : "codex-cli 0.166.0-alpha.5.1\n", "", false),
+                    : Path.GetFileNameWithoutExtension(cli) == "claude" ? "2.1.317 (Claude Code)\n" : "codex-cli 0.167.0-alpha.5.1\n", "", false),
                 ["--help"] => new(0, CliHelp.Claude, "", false),
                 ["exec", "--help"] => new(0, CliHelp.Codex, "", false),
+                ["features", "list"] => new(0, CliHelp.CodexFeatures, "", false),
                 ["mcp", "get", _] => new(1, "", "No MCP server found with name: optimization-tool\n", false),
                 _ => new(2, "", "", false),
             };

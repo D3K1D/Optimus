@@ -168,6 +168,31 @@ public class ChatGptPlanTests
     }
 
     [Fact]
+    public async Task Disconnect_CancelsAPendingSignIn_WhichCanNeverConnectAfterwards()
+    {
+        var gate = new TaskCompletionSource();
+        var signIn = new FakeSignIn { Gate = gate }; // the browser is open; the callback has not arrived
+        var (host, _, logs) = Start(signIn, new FakePlanAdapter(tools: true));
+        await using var _h = host;
+        var c = await host.ConnectAsync(minor: 4);
+        await c.Call("provider.connect", new JsonObject { ["kind"] = "chatgpt_plan" });
+        await BenchTests.WaitUntil(() => !signIn.Opened.IsEmpty);
+
+        var after = await c.Call("provider.disconnect", new JsonObject { ["kind"] = "chatgpt_plan" });
+        Assert.Equal("not_configured", after.Str("status")); // not left "checking" for the rest of the 3 minutes
+        await BenchTests.WaitUntil(() => logs.Any(l => l.Contains("sign-in cancelled by disconnect")));
+        gate.TrySetResult(); // the browser comes back late: nobody is listening any more
+        Assert.False(signIn.IsSignedIn);
+        Assert.Equal("not_configured", (await Entry(c)).Str("status"));
+        Assert.DoesNotContain(Statuses(c), s => s.StartsWith("connected", StringComparison.Ordinal) || s.StartsWith("error", StringComparison.Ordinal));
+
+        // The provider is not stuck: signing in again works.
+        signIn.Gate = null;
+        await c.Call("provider.connect", new JsonObject { ["kind"] = "chatgpt_plan" });
+        await BenchTests.WaitUntil(() => Statuses(c).LastOrDefault() == "connected");
+    }
+
+    [Fact]
     public async Task ABrowserThatNeverComesBack_EndsAsCallbackTimeout_NotChecking()
     {
         var signIn = new FakeSignIn { Gate = new TaskCompletionSource() }; // the loopback callback never arrives

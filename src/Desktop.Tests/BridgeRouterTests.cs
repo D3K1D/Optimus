@@ -33,6 +33,8 @@ public class BridgeRouterTests
     [InlineData("review.preview")] [InlineData("review.submit")] [InlineData("review.export")] [InlineData("review.import")]
     [InlineData("action.catalog")] [InlineData("action.preview")] [InlineData("action.get")] [InlineData("action.decline")]
     [InlineData("action.undo")] [InlineData("operation.get")] [InlineData("operation.list")] [InlineData("manual.recheck")]
+    [InlineData("bench.capabilities")] [InlineData("bench.start")] [InlineData("bench.get")] [InlineData("bench.cancel")]
+    [InlineData("bench.list")] [InlineData("bench.evidence")]
     public void Every_desktop_method_is_allowed(string method) =>
         Assert.IsType<BridgeDecision.Forward>(_router.Evaluate($$"""{"type":"rpc","id":1,"method":"{{method}}"}""", Doc, true));
 
@@ -66,6 +68,32 @@ public class BridgeRouterTests
         Assert.Equal(-32600, reply["error"]!["code"]!.GetValue<int>());
         Assert.Equal("size", reply["error"]!["data"]!["field"]!.GetValue<string>());
         Assert.Null(reply["id"]);
+    }
+
+    [Fact]
+    public void SaveImage_is_shell_handled_and_may_exceed_the_normal_size_limit()
+    {
+        var big = new string('A', BridgeRouter.MaxMessageBytes * 4);
+        var d = _router.Evaluate($$$"""{"type":"rpc","id":3,"method":"shell.saveImage","params":{"pngBase64":"{{{big}}}"}}""", Doc, true);
+        var shell = Assert.IsType<BridgeDecision.Shell>(d);
+        Assert.Equal("shell.saveImage", shell.Method);
+    }
+
+    [Fact]
+    public void Large_message_naming_saveImage_but_calling_another_method_is_rejected()
+    {
+        var big = new string('a', BridgeRouter.MaxMessageBytes);
+        var reply = ReplyJson(_router.Evaluate($$$"""{"type":"rpc","id":1,"method":"scan.get","params":{"x":"shell.saveImage","z":"{{{big}}}"}}""", Doc, true));
+        Assert.Equal("size", reply["error"]!["data"]!["field"]!.GetValue<string>());
+        Assert.Null(reply["id"]);
+    }
+
+    [Fact]
+    public void SaveImage_over_the_image_limit_is_rejected()
+    {
+        var big = new string('A', BridgeRouter.MaxImageMessageBytes);
+        var reply = ReplyJson(_router.Evaluate($$$"""{"type":"rpc","id":1,"method":"shell.saveImage","params":{"pngBase64":"{{{big}}}"}}""", Doc, true));
+        Assert.Equal("size", reply["error"]!["data"]!["field"]!.GetValue<string>());
     }
 
     [Fact]

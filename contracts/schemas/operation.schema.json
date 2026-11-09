@@ -11,7 +11,7 @@
     "actionId": { "type": "string" },
     "state": { "enum": ["prepared", "attempted", "verified", "failed", "indeterminate", "rolled_back_failed"] },
     "progress": { "type": ["string", "null"], "description": "Provider operations: the handler's latest progress line while running." },
-    "result": { "type": "string", "description": "Provider operations: updated | already_current | no_threats | threats_found." },
+    "result": { "type": "string", "description": "Provider operations: updated | already_current | no_threats | threats_found | threats_unknown (scan finished, but Defender's event history was not fully readable)." },
     "manualUri": { "type": "string" },
     "receipt": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/receipt" }] },
     "undo": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["available", "reason"],

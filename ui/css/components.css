@@ -1,4 +1,4 @@
-/* Optimization Tool components. Copied from design/design-system/components/bundle.css; the Google Fonts @import is replaced by css/fonts.css (local). */
+/* Optimus components. Copied from design/design-system/components/bundle.css; the Google Fonts @import is replaced by css/fonts.css (local). */
 
 .ot-app { font-family: var(--font-sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
 .ot-app *, .ot-app *::before, .ot-app *::after { box-sizing: border-box; }
@@ -231,7 +231,7 @@
 /* The screen keeps one size so the wave behind it never resizes; the panel scrolls inside it. */
 .ot-login { position: relative; height: 100vh; overflow: hidden; font-family: var(--font-sans); color: var(--ink); }
 /* Centred; auto margins keep it centred when it fits and scrollable from the top when it doesn't. */
-.ot-login-scroll { position: absolute; inset: 0; overflow-y: auto; display: flex; flex-direction: column; align-items: center; padding: var(--space-6) var(--space-4); scrollbar-width: thin; scrollbar-color: var(--control-stroke) transparent; }
+.ot-login-scroll { position: absolute; inset: 0; overflow-y: auto; will-change: scroll-position; display: flex; flex-direction: column; align-items: center; padding: var(--space-6) var(--space-4); scrollbar-width: thin; scrollbar-color: var(--control-stroke) transparent; }
 .ot-login-scroll > *, .ot-flow-stage.is-login > * { margin-block: auto; }
 .ot-login-panel { position: relative; width: 100%; max-width: 640px; padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-4); }
 /* Frosted white glass, like privacy film: a milky white tint and a moderate blur, so what is behind
@@ -311,8 +311,10 @@
 .ot-flow { position: relative; height: 100vh; min-height: 640px; overflow: hidden; font-family: var(--font-sans); color: var(--ink); }
 .ot-flow-top { position: absolute; top: 20px; left: 24px; right: 24px; z-index: 3; display: flex; align-items: center; justify-content: space-between; pointer-events: none; }
 .ot-flow-top > * { pointer-events: auto; }
-/* Top-aligned (m5 §6): the box sits high, and cards and panels grow downward; the gutter is kept so nothing shifts when it scrolls. */
-.ot-flow-stage { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable both-edges; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: clamp(88px, 13vh, 140px) var(--space-4) var(--space-7); scrollbar-width: thin; scrollbar-color: var(--control-stroke) transparent; }
+/* Top-aligned (m5 §6): the box sits high, and cards and panels grow downward; the gutter is kept so nothing shifts when it scrolls.
+   will-change: scroll-position makes WebView2 scroll it on the compositor; without it the plain parts (heading, bar
+   outline) were repainted by the busy main thread and lagged behind the glass panels. Same on every scroller over the sea. */
+.ot-flow-stage { position: absolute; inset: 0; overflow-y: auto; will-change: scroll-position; scrollbar-gutter: stable both-edges; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: clamp(88px, 13vh, 140px) var(--space-4) var(--space-7); scrollbar-width: thin; scrollbar-color: var(--control-stroke) transparent; }
 .ot-flow-stage.is-login { padding: var(--space-6) var(--space-4); }
 /* Content scrolling up fades out under the top bar (a strip of ground, not a mask: masks would stop the glass from blurring the sea) */
 .ot-flow-top::before { content: ''; position: absolute; left: -24px; right: -24px; top: -20px; height: 100px; z-index: -1; background: linear-gradient(to bottom, var(--ground) 45%, transparent); pointer-events: none; }
@@ -440,7 +442,7 @@
 .ot-sheet-title { display: flex; align-items: center; gap: 10px; }
 .ot-sheet-actions { display: flex; align-items: center; gap: var(--space-2); }
 .ot-sheet-body { flex: 1; min-height: 0; }
-.ot-sheet-scroll { height: 100%; overflow-y: auto; padding: var(--space-6) var(--space-5) var(--space-8); display: flex; flex-direction: column; align-items: center; gap: var(--space-5); scrollbar-width: thin; }
+.ot-sheet-scroll { height: 100%; overflow-y: auto; will-change: scroll-position; padding: var(--space-6) var(--space-5) var(--space-8); display: flex; flex-direction: column; align-items: center; gap: var(--space-5); scrollbar-width: thin; }
 .ot-sheet-scroll > * { width: 100%; max-width: 960px; }
 .ot-summary { padding: var(--space-4) var(--space-5); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-neu-sm); animation: ot-fade .32s both; }
 .ot-summary-head { display: flex; align-items: center; gap: 6px; color: var(--accent); margin-bottom: 8px; }

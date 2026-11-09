@@ -33,7 +33,7 @@ public sealed class TestHost : IAsyncDisposable
     public static TestHost Start(double speed = 0, string? dataDir = null, TimeSpan? idle = null) =>
         new(new HostOptions
         {
-            DataDir = dataDir ?? NewDataDir(), PipeName = NewPipeName(), FixtureSpeed = speed, IdleExit = idle,
+            DataDir = dataDir ?? NewDataDir(), PipeName = NewPipeName(), FixtureSpeed = speed, IdleExit = idle, DevAllowAnyClient = true,
         }, dataDir is null);
 
     /// <summary>A module-source host (M2) over the given modules.</summary>
@@ -43,16 +43,16 @@ public sealed class TestHost : IAsyncDisposable
         {
             DataDir = dataDir ?? NewDataDir(), PipeName = NewPipeName(), Modules = modules, IdleExit = null,
             Time = time ?? TimeProvider.System, CollectorOptions = collectorOptions ?? new CollectorOptions(),
-            ScanDeadline = scanDeadline ?? TimeSpan.FromSeconds(120),
+            ScanDeadline = scanDeadline ?? TimeSpan.FromSeconds(120), DevAllowAnyClient = true,
         }, dataDir is null);
 
     /// <summary>An M3 host: modules (or the fixture when null), agent options, any agent image allowed unless told otherwise.</summary>
     public static TestHost StartAgent(OptimizationTool.Engine.Agent.AgentOptions agent, IReadOnlyList<IAuditModule>? modules = null,
-        TimeProvider? time = null, bool devAllowAnyAgent = true, Action<string>? log = null, string? dataDir = null) =>
+        TimeProvider? time = null, bool devAllowAnyAgent = true, Action<string>? log = null, string? dataDir = null, bool devAllowAnyClient = true) =>
         new(new HostOptions
         {
             DataDir = dataDir ?? NewDataDir(), PipeName = NewPipeName(), Modules = modules, IdleExit = null,
-            Time = time ?? TimeProvider.System, Agent = agent, DevAllowAnyAgent = devAllowAnyAgent, Log = log,
+            Time = time ?? TimeProvider.System, Agent = agent, DevAllowAnyAgent = devAllowAnyAgent, DevAllowAnyClient = devAllowAnyClient, Log = log,
         }, dataDir is null);
 
     /// <summary>An M4 host: fake action handlers (no real writes), optional audit modules, elevation and firewall switch.</summary>
@@ -62,9 +62,19 @@ public sealed class TestHost : IAsyncDisposable
         new(new HostOptions
         {
             DataDir = NewDataDir(), PipeName = NewPipeName(), Modules = modules ?? [], IdleExit = null, Time = time ?? TimeProvider.System,
-            Agent = agent ?? new OptimizationTool.Engine.Agent.AgentOptions(), DevAllowAnyAgent = true,
+            Agent = agent ?? new OptimizationTool.Engine.Agent.AgentOptions(), DevAllowAnyAgent = true, DevAllowAnyClient = true,
             ActionModules = actions, Elevation = elevation, EnableFirewallHandler = enableFirewall,
         }, true);
+
+    /// <summary>An M6a host: benchmark fakes (no workload ever runs), optional agent, audit modules (fixture when null) and actions.</summary>
+    public static TestHost StartBench(OptimizationTool.Engine.Bench.BenchOptions bench, OptimizationTool.Engine.Agent.AgentOptions? agent = null,
+        IReadOnlyList<IAuditModule>? modules = null, double speed = 0, IReadOnlyList<OptimizationTool.Engine.Actions.IActionModule>? actions = null,
+        string? dataDir = null) =>
+        new(new HostOptions
+        {
+            DataDir = dataDir ?? NewDataDir(), PipeName = NewPipeName(), Modules = modules, IdleExit = null, FixtureSpeed = speed,
+            Agent = agent ?? new OptimizationTool.Engine.Agent.AgentOptions(), DevAllowAnyAgent = true, DevAllowAnyClient = true, ActionModules = actions ?? [], Bench = bench,
+        }, dataDir is null);
 
     private static string NewPipeName() => "OptimizationTool.test." + Guid.NewGuid().ToString("N");
 
@@ -77,8 +87,9 @@ public sealed class TestHost : IAsyncDisposable
         {
             DataDir = DataDir, PipeName = PipeName, FixtureSpeed = Speed, IdleExit = null, Modules = _template.Modules,
             Time = _template.Time, CollectorOptions = _template.CollectorOptions, ScanDeadline = _template.ScanDeadline,
-            Agent = _template.Agent, DevAllowAnyAgent = _template.DevAllowAnyAgent, Log = _template.Log,
+            Agent = _template.Agent, DevAllowAnyAgent = _template.DevAllowAnyAgent, DevAllowAnyClient = _template.DevAllowAnyClient, Log = _template.Log,
             ActionModules = _template.ActionModules, Elevation = _template.Elevation, EnableFirewallHandler = _template.EnableFirewallHandler,
+            Bench = _template.Bench,
         });
     }
 

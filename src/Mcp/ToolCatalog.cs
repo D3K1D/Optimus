@@ -17,7 +17,8 @@ internal static class ToolCatalog
         "returns an operationId; poll get_operation for its result. request_action only requests a change: every change " +
         "needs the user's approval in the app, which you cannot give. It returns a planId; poll get_operation with the " +
         "planId. Never say a change happened unless get_operation returns a verified receipt. A finding whose disposition " +
-        "is \"intended\" is the user's deliberate setup: explain trade-offs if asked, but don't recommend undoing it.";
+        "is \"intended\" is the user's deliberate setup: explain trade-offs if asked, but don't recommend undoing it. " +
+        "get_benchmarks reads benchmark results; you cannot start a benchmark.";
 
     public static readonly string[] Actions =
     [
@@ -27,8 +28,11 @@ internal static class ToolCatalog
     public static readonly string[] Diagnostics =
     [
         "power.inventory", "process.sample", "startup.list", "events.recent", "storage.volumes",
-        "network.listeners", "display.modes", "devices.problems", "security.status",
+        "network.listeners", "display.modes", "devices.problems", "security.status", "sensors.snapshot",
     ];
+
+    /// <summary>get_fan_guidance parts (m6-benchmark.md §7).</summary>
+    public static readonly string[] BenchParts = ["cpu", "gpu", "ram", "disk"];
 
     public static readonly string[] Categories =
         ["security", "performance", "storage", "privacy_telemetry", "diagnostics", "customization", "misc"];
@@ -80,6 +84,33 @@ internal static class ToolCatalog
                     },
                 },
                 ["required"] = new JsonArray("diagnosticId"),
+                ["additionalProperties"] = false,
+            }),
+
+        // m6-benchmark.md §8: benchmark results and fan guidance (read-only).
+        Make("get_benchmarks",
+            "Read benchmark results: one run by runId, or the latest runs (limit, default 1). Pass runId or limit, not both.",
+            new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["runId"] = new JsonObject { ["type"] = "string", ["pattern"] = "^[A-Za-z0-9_-]{1,100}$", ["description"] = "One run." },
+                    ["limit"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = 5, ["description"] = "How many recent runs." },
+                },
+                ["additionalProperties"] = false,
+            }),
+
+        Make("get_fan_guidance",
+            "Read Optimus's cooling guidance for one part. Guidance only; there are no fan curves to set.",
+            new JsonObject
+            {
+                ["type"] = "object",
+                ["properties"] = new JsonObject
+                {
+                    ["part"] = new JsonObject { ["type"] = "string", ["enum"] = Array(BenchParts) },
+                },
+                ["required"] = new JsonArray("part"),
                 ["additionalProperties"] = false,
             }),
 

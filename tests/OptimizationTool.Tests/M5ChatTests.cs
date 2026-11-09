@@ -69,8 +69,15 @@ public sealed class M5ChatTests : IDisposable
 
     private static string State(JsonObject entry) => entry.Str("status") + (entry["detail"] is null ? "" : "/" + entry.Str("detail"));
 
-    private Task<JsonObject> SetClient(Client c, string kind, string? path, bool? signedIn) =>
-        c.Call("provider.setClient", new JsonObject { ["kind"] = kind, ["path"] = path, ["signedIn"] = signedIn, ["version"] = "2.1.318" });
+    /// <summary>The probed Codex features a test shell reports (m6 §0): a subset, in §0 order.</summary>
+    private static readonly string[] ProbedCodexFeatures = ["shell_tool", "unified_exec", "apps"];
+
+    private Task<JsonObject> SetClient(Client c, string kind, string? path, bool? signedIn)
+    {
+        var p = new JsonObject { ["kind"] = kind, ["path"] = path, ["signedIn"] = signedIn, ["version"] = "2.1.318" };
+        if (kind == "codex_mcp" && path is not null) p["codexFeatures"] = new JsonArray([.. ProbedCodexFeatures.Select(f => (JsonNode?)f)]);
+        return c.Call("provider.setClient", p);
+    }
 
     private static async Task<(JsonObject Message, JsonObject Turn)> Answer(Client c, string taskId, int nth = 1)
     {
@@ -222,7 +229,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.True(Guid.TryParse(first.Arguments[^1], out _));
         Assert.DoesNotContain(first.Arguments, a => a.Contains("Look over", StringComparison.Ordinal));
         Assert.NotNull(ProcessCommand.ForCli(first.CliPath, first.Arguments, @"C:\Windows")); // the .cmd line builder accepts every token
-        Assert.StartsWith("[prompt-v7]", File.ReadAllText(Path.Combine(runDir, "system.md")));
+        Assert.StartsWith("[prompt-v8]", File.ReadAllText(Path.Combine(runDir, "system.md")));
         Assert.False(File.Exists(Path.Combine(runDir, "mcp.json"))); // the token file goes with the run
         Assert.Contains("The user uses this PC for: Gaming. Goals: Improve PC performance.", first.StandardInput);
         Assert.Contains($"Current report {reportId}:", first.StandardInput);
@@ -290,10 +297,11 @@ public sealed class M5ChatTests : IDisposable
         var token = FakeCli.Token(first);
         Assert.Matches("^[0-9a-f]{32}$", token);
         Assert.Equal(["exec", "--sandbox", "read-only", "-C", runDir, "--json", "--skip-git-repo-check", "--ignore-user-config",
-            "--disable", "shell_tool", "--disable", "unified_exec",
+            "-c", "web_search='disabled'",
+            "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
             "-c", $"mcp_servers.optimization-tool.command='{AgentSetup.Options().McpExecutablePath}'",
             "-c", $"mcp_servers.optimization-tool.env.OT_RUN_TOKEN='{token}'", "-"], first.Arguments);
-        Assert.StartsWith("[prompt-v7]", first.StandardInput); // the system text, first ask only
+        Assert.StartsWith("[prompt-v8]", first.StandardInput); // the system text, first ask only
         Assert.EndsWith("User: What matters?", first.StandardInput);
         Assert.NotNull(ProcessCommand.ForCli(Path.Combine(_bin, "codex.cmd"), first.Arguments, @"C:\Windows")); // an npm shim could carry it too
 
@@ -310,6 +318,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.Equal("auth", failed.Str("code"));
         var second = cli.Launches[1];
         Assert.Equal(["exec", "--sandbox", "read-only", "-C", runDir, "resume", "01a1acef-e7fe-7660-8a5e-dbabb0764106", "--json"], second.Arguments.Take(8));
+        Assert.Equal(first.Arguments.Skip(5).Take(13), second.Arguments.Skip(7).Take(13)); // a resumed run carries the same lock-down (m6 §0)
         Assert.Equal("User: More?", second.StandardInput);
         Assert.Equal("error/signed_out", State(await Entry(c, "codex_mcp")));
         Assert.Equal(2, (await c.Call("agent.get", new JsonObject { ["taskId"] = taskId }))["used"]!["turns"]!.GetValue<long>());
@@ -620,7 +629,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.StartsWith("The user uses this PC for:", firstAsk);
         Assert.Contains($"Current report {reportId}:", firstAsk);
         Assert.DoesNotContain("fnd-", firstAsk); // no findings list (m5 §4)
-        Assert.StartsWith("[prompt-v7]", provider.Requests.First().System);
+        Assert.StartsWith("[prompt-v8]", provider.Requests.First().System);
         Assert.Contains(provider.Requests.First().Tools, t => t.Name == "add_card");
 
         await Idle(host);
@@ -942,18 +951,18 @@ public sealed class M5ChatTests : IDisposable
         var run = Path.Combine(@"C:\Users\u\AppData\Local\OptimizationTool", "agent-runs", "task-0123456789abcdef");
         var claude = HeadlessCommand.Claude(run, Guid.NewGuid(), resume: false);
         Assert.NotNull(ProcessCommand.ForCli(shim, claude, root));
-        var codex = HeadlessCommand.Codex(run, @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe", new string('a', 32), "01a1acef-e7fe-7660-8a5e-dbabb0764106")!;
+        var codex = HeadlessCommand.Codex(run, @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe", new string('a', 32), "01a1acef-e7fe-7660-8a5e-dbabb0764106", HeadlessCommand.CodexLockdownFeatures)!;
         Assert.NotNull(ProcessCommand.ForCli(@"C:\Users\u\AppData\Roaming\npm\codex.cmd", codex, root));
         var exe = ProcessCommand.ForCli(@"C:\Tools\codex.exe", codex, root)!;
         Assert.Equal(codex, exe.ArgumentList);
         // An apostrophe cannot be a TOML literal: it becomes a TOML basic string (an .exe takes it; a plain .cmd line refuses it).
-        var quoted = HeadlessCommand.Codex(run, @"C:\It's\OptimizationTool.Mcp.exe", new string('a', 32), null)!;
+        var quoted = HeadlessCommand.Codex(run, @"C:\It's\OptimizationTool.Mcp.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures)!;
         Assert.Contains("""mcp_servers.optimization-tool.command="C:\\It's\\OptimizationTool.Mcp.exe" """.TrimEnd(), quoted);
         Assert.NotNull(ProcessCommand.ForCli(@"C:\Tools\codex.exe", quoted, root));
         Assert.Null(ProcessCommand.ForCli(@"C:\Tools\other.cmd", quoted, root));
-        Assert.Null(HeadlessCommand.Codex(run, @"C:\a""b.exe", new string('a', 32), null));
-        Assert.Null(HeadlessCommand.Codex(run, @"C:\b.exe", "not-a-token", null));
-        Assert.Null(HeadlessCommand.Codex(run, @"C:\b.exe", new string('a', 32), "x' -c evil='1"));
+        Assert.Null(HeadlessCommand.Codex(run, @"C:\a""b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures));
+        Assert.Null(HeadlessCommand.Codex(run, @"C:\b.exe", "not-a-token", null, HeadlessCommand.CodexLockdownFeatures));
+        Assert.Null(HeadlessCommand.Codex(run, @"C:\b.exe", new string('a', 32), "x' -c evil='1", HeadlessCommand.CodexLockdownFeatures));
     }
 
     [Theory]

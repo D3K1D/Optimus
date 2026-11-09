@@ -70,11 +70,11 @@ public sealed class CliSetupTests : IDisposable
     [Fact]
     public void CodexArgv_PassesTheCredentialStore_AndRefusesAnUnknownOne()
     {
-        var args = HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, "keyring")!;
+        var args = HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures, "keyring")!;
         Assert.Equal(["-c", "cli_auth_credentials_store='keyring'", "-"], args.TakeLast(3));
-        Assert.Null(HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, "evil"));
-        Assert.DoesNotContain(HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null)!, a => a.Contains("cli_auth", StringComparison.Ordinal));
-        var resume = HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), "01a1acef-e7fe-7660-8a5e-dbabb0764106", "auto")!;
+        Assert.Null(HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures, "evil"));
+        Assert.DoesNotContain(HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures)!, a => a.Contains("cli_auth", StringComparison.Ordinal));
+        var resume = HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), "01a1acef-e7fe-7660-8a5e-dbabb0764106", HeadlessCommand.CodexLockdownFeatures, "auto")!;
         Assert.Equal(["-c", "cli_auth_credentials_store='auto'", "-"], resume.TakeLast(3));
     }
 
@@ -86,7 +86,7 @@ public sealed class CliSetupTests : IDisposable
         host.Server.Engine.Agent.CodexCredentialsStore = () => "keyring";
         var c = await host.ConnectAsync(minor: 4);
         var reportId = await AgentSetup.Report(c);
-        await c.Call("provider.setClient", new JsonObject { ["kind"] = "codex_mcp", ["path"] = _codex, ["signedIn"] = true });
+        await c.Call("provider.setClient", new JsonObject { ["kind"] = "codex_mcp", ["path"] = _codex, ["signedIn"] = true, ["codexFeatures"] = new JsonArray("shell_tool") });
         var taskId = (await AgentSetup.StartTask(c, reportId, "codex_mcp")).Str("taskId");
         await AgentSetup.Ask(c, taskId, "Hi?");
         await AgentSetup.TaskEvent(c, taskId, "agent.turn", p => p.Str("status") is "finished" or "failed");

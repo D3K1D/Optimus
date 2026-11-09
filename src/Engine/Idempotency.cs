@@ -75,6 +75,8 @@ internal sealed class EventService(Store store)
             return db.Scalar("SELECT 1 FROM scans WHERE scan_id = $i", ("$i", stream[5..])) is not null;
         if (stream.StartsWith("inventory:", StringComparison.Ordinal))
             return db.Scalar("SELECT 1 FROM inventories WHERE inventory_id = $i", ("$i", stream[10..])) is not null;
+        if (stream.StartsWith("bench:", StringComparison.Ordinal))
+            return db.Scalar("SELECT 1 FROM bench_runs WHERE run_id = $i", ("$i", stream[6..])) is not null;
         if (stream.StartsWith(Agent.AgentService.TaskStreamPrefix, StringComparison.Ordinal))
             return db.Scalar("SELECT 1 FROM agent_tasks WHERE task_id = $i", ("$i", stream[Agent.AgentService.TaskStreamPrefix.Length..])) is not null;
         return stream == "user";

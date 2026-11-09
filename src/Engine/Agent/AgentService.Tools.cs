@@ -173,7 +173,15 @@ public sealed partial class AgentService
         if (tool == Diagnostics.RunDiagnostic)
         {
             var def = Diagnostics.Find(prepared.Args.Text("diagnosticId"))!;
-            if (ExpectedSeconds(def, prepared.Args) > Diagnostics.OperationThresholdSeconds)
+            if (def.Id == Diagnostics.SensorsSnapshot)
+            {
+                // m6 §8: sensors.snapshot shares the benchmark lease, so it is refused while a benchmark (or scan or change) runs.
+                (run, var busy) = await SnapshotDiagnosticAsync(invocationId, ct).ConfigureAwait(false);
+                if (busy is not null) return Finish(taskId, invocationId, turnId, tool, prepared.Args, origin, busy);
+                if (run is null) return Finish(taskId, invocationId, turnId, tool, prepared.Args, origin, ToolError("unavailable", "That diagnostic is not available on this PC."));
+                if (run.Status == "cancelled") return Finish(taskId, invocationId, turnId, tool, prepared.Args, origin, ToolError("cancelled", "The call was cancelled."));
+            }
+            else if (ExpectedSeconds(def, prepared.Args) > Diagnostics.OperationThresholdSeconds)
             {
                 operationId = StartOperation(taskId, invocationId, def, prepared.Args, ct);
             }

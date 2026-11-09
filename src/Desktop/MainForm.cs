@@ -33,9 +33,12 @@ internal sealed class MainForm : Form
         _dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, log,
             apiKeys: new ApiKeyRequest(new WinFormsApiKeyPrompt(this)),
             approvals: new PlanApproval(new WinFormsPlanPrompt(this)),
-            clients: _clients);
+            clients: _clients,
+            images: new ImageSave(new WinFormsSaveImagePrompt(this)),
+            retryBackend: backend.RetryNow);
 
         Text = "Optimus";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); // the gear .ico set as ApplicationIcon
         BackColor = Ground;
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -136,6 +139,8 @@ internal sealed class MainForm : Form
         core.NewWindowRequested += OnNewWindowRequested;
         core.WebMessageReceived += OnWebMessageReceived;
         core.FrameCreated += OnFrameCreated;
+        // window.close() from the page (the loading screen's Close when the data needs a newer Optimus) closes the app.
+        core.WindowCloseRequested += (_, _) => BeginInvoke(Close);
         core.PermissionRequested += (_, e) => { e.State = CoreWebView2PermissionState.Deny; e.Handled = true; _log.Warn($"webview: denied permission {e.PermissionKind}"); };
         core.DownloadStarting += (_, e) => { e.Cancel = true; e.Handled = true; _log.Warn("webview: blocked download"); };
         core.LaunchingExternalUriScheme += (_, e) => { e.Cancel = true; _log.Warn("webview: blocked external URI scheme"); };

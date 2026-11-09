@@ -82,6 +82,24 @@ test('calls wait while the shell reports connecting', async () => {
   assert.deepEqual(await p, { revision: 1 });
 });
 
+test('the shell\'s detail code is kept for the page: another session, then cleared on ready', () => {
+  const { backendNotice } = require('../js/connection-state.js');
+  const wv = fakeWebview(), be = createDesktopAdapter(wv);
+  assert.equal(be.detail(), null);
+  const seen = [];
+  be.onState((state, info) => seen.push([state, info.detail]));
+  wv.deliver({ type: 'backend', state: 'connecting', detail: 'other_session' });
+  assert.equal(be.detail(), 'other_session');
+  assert.equal(backendNotice(be.state(), be.detail()), 'Optimus is open in another session');
+  wv.deliver({ type: 'backend', state: 'ready', detail: null });   // the other session closed: the app is back
+  assert.equal(be.detail(), null);
+  assert.equal(backendNotice(be.state(), be.detail()), null);
+  assert.deepEqual(seen, [['connecting', 'other_session'], ['ready', null]]);
+  assert.equal(backendNotice('incompatible', { action: 'Update Optimus' }), 'Update Optimus');
+  assert.equal(backendNotice('connecting', 'unavailable'), null);     // other codes keep the page as it was
+  assert.equal(backendNotice('reconnecting', 'other_session'), 'Optimus is open in another session');
+});
+
 test('incompatible rejects pending and later calls', async () => {
   const wv = fakeWebview(), be = createDesktopAdapter(wv);
   const p = be.call('onboarding.get');
@@ -110,4 +128,26 @@ test('a retryable error before the first state message is held and re-sent on re
   assert.equal(wv.sent.length, 2);
   wv.deliver({ type: 'rpc.result', id: wv.sent[1].id, result: { step: 'provider' } });
   assert.deepEqual(await p, { step: 'provider' });
+});
+
+test('startup details reach the page; shell.retryBackend is posted at once while other calls are held', async () => {
+  const wv = fakeWebview(), be = createDesktopAdapter(wv);
+  const seen = [];
+  be.onState((state, info) => seen.push([state, info.detail]));
+  for (const detail of ['needs_update', 'cant_start', 'other_session']) {
+    wv.deliver({ type: 'backend', state: 'connecting', detail });
+    assert.equal(be.state(), 'connecting');
+    assert.equal(be.detail(), detail);
+  }
+  assert.deepEqual(seen, [['connecting', 'needs_update'], ['connecting', 'cant_start'], ['connecting', 'other_session']]);
+
+  const held = be.call('onboarding.get');
+  const retry = be.call('shell.retryBackend', {});
+  assert.deepEqual(wv.sent.map((m) => m.method), ['shell.retryBackend']);
+  wv.deliver({ type: 'rpc.result', id: wv.sent[0].id, result: { retrying: true } });
+  assert.deepEqual(await retry, { retrying: true });
+  wv.deliver({ type: 'backend', state: 'ready', detail: null });
+  assert.deepEqual(wv.sent.map((m) => m.method), ['shell.retryBackend', 'onboarding.get']);
+  wv.deliver({ type: 'rpc.result', id: wv.sent[1].id, result: { step: 'complete' } });
+  assert.deepEqual(await held, { step: 'complete' });
 });

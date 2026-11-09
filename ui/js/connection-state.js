@@ -122,7 +122,7 @@
       t.begun = true;
       if (e.type === 'agent.message') { t.status = 'answered'; t.message = pl; t.tool = null; }
       else if (e.type === 'agent.tool') { if (t.status === 'running') t.tool = pl.status === 'running' ? pl : null; }
-      else if (t.status === 'running' && pl.status === 'failed') { t.status = pl.code === 'cancelled' ? 'cancelled' : 'failed'; t.tool = null; }
+      else if (t.status === 'running' && pl.status === 'failed') { t.status = pl.code === 'cancelled' ? 'cancelled' : 'failed'; t.tool = null; t.code = pl.code || null; }
     });
     // A question whose run never began (the host stopped in between) is over once a later ask exists.
     out.forEach(function (t, i) { if (t.status === 'running' && !t.begun && i < out.length - 1) t.status = 'failed'; });
@@ -152,7 +152,8 @@
     turns.forEach(function (t) { by[t.turnId] = t; });
     function answered(a, t) {
       var m = t.message;
-      return Object.assign({}, a, { turnId: t.turnId, text: strip(m.text || ''), citations: m.citations || [], followUps: m.followUps || [], busy: null, failedTurn: false });
+      return Object.assign({}, a, { turnId: t.turnId, text: strip(m.text || ''), citations: m.citations || [], followUps: m.followUps || [],
+        warnings: m.warnings || [], suggest: m.suggest || null, busy: null, failedTurn: false });
     }
     // The question from the history fills an entry that lost it (a reload, another window).
     function asked(a, t) {
@@ -173,7 +174,7 @@
       a = asked(a, t);
       if (t.status === 'answered') out.push(a.text == null ? answered(a, t) : a);
       else if (t.status === 'cancelled') { if (!pending) out.push(a); }
-      else if (t.status === 'failed') out.push(pending ? Object.assign({}, a, { failedTurn: true, busy: null }) : a);
+      else if (t.status === 'failed') out.push(pending ? Object.assign({}, a, { failedTurn: true, failCode: t.code || null, busy: null }) : a);
       else out.push(pending && !opts.stale ? Object.assign({}, a, { busy: t.tool ? word(t.tool) : a.busy || 'Thinking…' }) : a);
     });
     turns.forEach(function (t) {
@@ -235,8 +236,80 @@
     return -1;
   }
 
+  // The one line shown in place of the app while the backend cannot be used, or null. "other_session": this user's
+  // Optimus already runs in another Windows session (one host per user); the shell keeps trying and it clears by itself.
+  function backendNotice(state, detail) {
+    if (state === 'incompatible') return 'Update Optimus';
+    if (state !== 'ready' && detail === 'other_session') return 'Optimus is open in another session';
+    return null;
+  }
+
+  // The loading screen's state for a backend state and the shell's detail code (protocol-v1 §7), or 'ready' when it goes.
+  // "incompatible" also dismisses it: the app's own "Update Optimus" notice covers that case.
+  var LOAD_FOR_DETAIL = { needs_update: 'update', other_session: 'session', cant_start: 'failed' };
+  function loadingState(state, detail) {
+    if (state === 'ready' || state === 'incompatible') return 'ready';
+    return LOAD_FOR_DETAIL[detail] || 'starting';
+  }
+  var UPDATE_URL = 'https://github.com/D3K1D/Optimus/releases/latest';
+  // Drives the loading screen (ui/js/loading.js) from the backend: its buttons retry, open the download page, or close.
+  // It goes once the backend is ready (after the first paint, so the app is never shown half-drawn); afterwards the app's
+  // own notices take over. A desktop backend whose first state hasn't arrived yet (known() false) keeps it up.
+  function wireLoading(backend, loading) {
+    if (!backend || !loading) return function () {};
+    loading.on({
+      retry: function () { Promise.resolve(backend.call('shell.retryBackend', {})).catch(function () {}); },
+      update: function () { window.open(UPDATE_URL, '_blank', 'noopener'); },
+      close: function () { window.close(); }
+    });
+    var off = null;
+    function apply(state, detail) {
+      var next = loadingState(state, detail);
+      if (next !== 'ready') { loading.set(next); return; }
+      if (off) { off(); off = null; }
+      var paint = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : function (f) { setTimeout(f, 16); };
+      paint(function () { paint(function () { loading.ready(); }); });
+    }
+    off = backend.onState(function (state, info) { apply(state, info && info.detail); });
+    if (typeof backend.known !== 'function' || backend.known()) apply(backend.state(), backend.detail ? backend.detail() : null);
+    return function () { if (off) off(); };
+  }
+
+  // Brings a whole popover inside the viewport. Focus alone only reveals the focused row, which can leave the
+  // panel's top edge (its padding and first row) cut off above the page when the page is scrolled.
+  function keepInView(el) {
+    if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  // Citation chips for evidence the assistant measured itself (it is not in the report, so it has no e-label): a short
+  // word for the kind of check instead of a bare running number, "Ports", "CPU", and "CPU 2" for the second of a
+  // kind. Evidence whose kind is not known (yet) keeps the running label, "m3".
+  var CITE_KINDS = [[/bench/, 'Bench'], [/sensor/, 'Sensors'], [/process|cpu/, 'CPU'], [/power/, 'Power'], [/startup/, 'Startup'], [/event/, 'Events'],
+    [/volume|storage|disk/, 'Drives'], [/listener|network/, 'Ports'], [/display/, 'Display'], [/device|pnp/, 'Devices'], [/app/, 'Apps'],
+    [/wsc|defender|firewall|security/, 'Security']];
+  var BENCH_PART = { cpu: 'CPU', gpu: 'GPU', ram: 'RAM', disk: 'Disk' };
+  // hint: the evidence ({collectorId}) or the check that produced it (a diagnostic id such as "network.listeners", or a tool name).
+  function citeKind(hint) {
+    var id = String((hint && typeof hint === 'object' ? hint.collectorId : hint) || '').toLowerCase();
+    var bench = /^bench\.([a-z]+)/.exec(id);
+    if (bench) return BENCH_PART[bench[1]] || 'Bench';
+    for (var i = 0; i < CITE_KINDS.length; i++) if (CITE_KINDS[i][0].test(id)) return CITE_KINDS[i][1];
+    return null;
+  }
+  function citeRegistry() { return { n: 0, order: {}, named: {}, counts: {} }; }
+  // The label for one evidence id; stable once its kind is known. reg: citeRegistry(); hint: as for citeKind, when known.
+  function citeLabel(reg, id, hint) {
+    if (reg.named[id]) return reg.named[id];
+    if (!reg.order[id]) reg.order[id] = ++reg.n;
+    var kind = citeKind(hint);
+    if (!kind) return 'm' + reg.order[id];
+    var k = reg.counts[kind] = (reg.counts[kind] || 0) + 1;
+    return (reg.named[id] = k === 1 ? kind : kind + ' ' + k);
+  }
+
   var api = { connectionState: connectionState, routeAsk: routeAsk, taskEnded: taskEnded, turnsFromHistory: turnsFromHistory,
-    runningTurn: runningTurn, reconcileAnswers: reconcileAnswers, answerKey: answerKey, answerPanels: answerPanels, menuStep: menuStep };
+    runningTurn: runningTurn, reconcileAnswers: reconcileAnswers, answerKey: answerKey, answerPanels: answerPanels, menuStep: menuStep,
+    backendNotice: backendNotice, loadingState: loadingState, wireLoading: wireLoading, keepInView: keepInView, citeKind: citeKind, citeRegistry: citeRegistry, citeLabel: citeLabel };
   if (root) {
     root.OptTool = root.OptTool || {};
     Object.keys(api).forEach(function (k) { root.OptTool[k] = api[k]; });

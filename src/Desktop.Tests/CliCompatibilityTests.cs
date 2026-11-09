@@ -44,13 +44,29 @@ internal static class CliHelp
               --ignore-user-config
               --json
         """;
+
+    /// <summary>An excerpt of <c>codex features list</c> (codex-cli 0.167.0-alpha.3.2).</summary>
+    public const string CodexFeatures = """
+        apps                                     stable             true
+        apps_mcp_path_override                   removed            false
+        browser_use                              stable             true
+        code_mode_host                           stable             true
+        in_app_browser                           stable             true
+        multi_agent                              stable             true
+        shell_tool                               stable             true
+        unified_exec                             stable             true
+        web_search_request                       deprecated         false
+        """;
+
+    /// <summary>What the shell reports for <see cref="CodexFeatures"/>: the §0 features listed, in §0 order.</summary>
+    public static readonly string[] CodexDisabled = ["shell_tool", "unified_exec", "apps", "browser_use", "in_app_browser", "multi_agent"];
 }
 
 /// <summary>Cross-PC CLI handling: capability probe and outdated CLIs, blocked launches, Codex/Claude sign-in forms and auth kind, npm shims, re-sent reports.</summary>
 public sealed class CliCompatibilityTests
 {
     private const string Doc = "https://app.optimizationtool.invalid/index.html";
-    private const string Bridge = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
+    private const string Bridge = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe";
     private const string OldCodex = @"C:\Old\codex.exe";
     private const string NewCodex = @"C:\New\codex.exe";
     private const string OldClaude = @"C:\Old\claude.exe";
@@ -88,6 +104,7 @@ public sealed class CliCompatibilityTests
     {
         public readonly Dictionary<string, ProcessResult> Version = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, ProcessResult> Help = new(StringComparer.OrdinalIgnoreCase);
+        public readonly Dictionary<string, ProcessResult> Features = new(StringComparer.OrdinalIgnoreCase);
         public ProcessResult? Auth;
         public readonly List<ProcessCommand> Runs = [];
 
@@ -100,6 +117,7 @@ public sealed class CliCompatibilityTests
             {
                 ["--version"] => Version.GetValueOrDefault(cli) ?? new(0, claude ? "2.1.318 (Claude Code)\n" : "codex-cli 0.167.0\n", "", false),
                 ["--help"] or ["exec", "--help"] => Help.GetValueOrDefault(cli) ?? new(0, claude ? CliHelp.Claude : CliHelp.Codex, "", false),
+                ["features", "list"] => Features.GetValueOrDefault(cli) ?? new(0, CliHelp.CodexFeatures, "", false),
                 ["mcp", "get", _] => new(1, "", "No MCP server found with name: optimization-tool\n", false),
                 ["auth", "status"] => Auth ?? new(0, """{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty"}""", "", false),
                 ["login", "status"] => Auth ?? new(0, "", "Logged in using ChatGPT\n", false),
@@ -261,6 +279,86 @@ public sealed class CliCompatibilityTests
         await Status(Dispatcher(connector), "codex");
         Assert.Equal(NewCodex, connector.ResolvedFor("codex")?.Path);
         Assert.Equal(NewCodex, LastReport["path"]!.GetValue<string>());
+    }
+
+    // ---------- m6 §0: Codex features probe (fail closed) ----------
+
+    [Fact]
+    public async Task Codex_ReportsTheProbedFeatures_AndProbesOncePerVersion()
+    {
+        _path = @"C:\New";
+        _files.Add(NewCodex);
+        _runner.Version[NewCodex] = new ProcessResult(0, "codex-cli 0.167.0-alpha.3.2\n", "", false);
+        var connector = Connector();
+        var r = await Status(Dispatcher(connector), "codex");
+        Assert.Null(r["outdated"]);
+        Assert.Equal(CliHelp.CodexDisabled, LastReport["codexFeatures"]!.AsArray().Select(n => n!.GetValue<string>()));
+        Assert.False(LastReport.ContainsKey("compatible"));
+        Assert.Contains(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["features", "list"]));
+
+        _runner.Runs.Clear();
+        await Status(Dispatcher(connector), "codex");
+        Assert.DoesNotContain(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["features", "list"])); // cached per path and version
+        Assert.Equal(CliHelp.CodexDisabled, LastReport["codexFeatures"]!.AsArray().Select(n => n!.GetValue<string>()));
+    }
+
+    [Fact]
+    public async Task Claude_ReportHasNoCodexFeatures()
+    {
+        _path = @"C:\New";
+        _files.Add(NewClaude);
+        await Status(Dispatcher(Connector()), "claude_code");
+        Assert.False(LastReport.ContainsKey("codexFeatures"));
+        Assert.DoesNotContain(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["features", "list"]));
+    }
+
+    [Theory]
+    [InlineData(1, "error: unrecognized subcommand 'features'\n", false)]
+    [InlineData(-1, "", true)]                                        // timed out
+    public async Task Codex_FeaturesProbeThatFails_IsOutdated_AndTriedAgain(int exit, string stderr, bool timedOut)
+    {
+        _path = @"C:\New";
+        _files.Add(NewCodex);
+        _runner.Features[NewCodex] = new ProcessResult(exit, "", stderr, timedOut);
+        var connector = Connector();
+        var r = await Status(Dispatcher(connector), "codex");
+        Assert.True(r["outdated"]!.GetValue<bool>());
+        Assert.False(LastReport["compatible"]!.GetValue<bool>());
+        Assert.False(LastReport.ContainsKey("codexFeatures"));
+
+        _runner.Features.Remove(NewCodex); // works next time: not cached
+        r = await Status(Dispatcher(connector), "codex");
+        Assert.Null(r["outdated"]);
+        Assert.NotNull(LastReport["codexFeatures"]);
+    }
+
+    [Theory]
+    [InlineData("garbage\n")]
+    [InlineData("code_mode_host  stable  true\n")]                    // apps missing
+    [InlineData("")]
+    public async Task Codex_FeaturesWithoutTheRequiredOnes_IsOutdated(string listing)
+    {
+        _path = @"C:\New";
+        _files.Add(NewCodex);
+        _runner.Features[NewCodex] = new ProcessResult(0, listing, "", false);
+        var r = await Status(Dispatcher(Connector()), "codex");
+        Assert.True(r["outdated"]!.GetValue<bool>());
+        Assert.False(LastReport["compatible"]!.GetValue<bool>());
+        Assert.False(LastReport.ContainsKey("codexFeatures"));
+    }
+
+    [Theory]
+    [InlineData("codex-cli 0.166.0\n")]
+    [InlineData("codex-cli 0.166.9-alpha.1\n")]
+    [InlineData("codex-cli\n")]                                       // no version
+    public async Task Codex_TooOldOrUnreadableVersion_IsOutdated(string version)
+    {
+        _path = @"C:\New";
+        _files.Add(NewCodex);
+        _runner.Version[NewCodex] = new ProcessResult(0, version, "", false);
+        var r = await Status(Dispatcher(Connector()), "codex");
+        Assert.True(r["outdated"]!.GetValue<bool>());
+        Assert.False(LastReport["compatible"]!.GetValue<bool>());
     }
 
     [Fact]

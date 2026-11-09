@@ -32,12 +32,19 @@ public sealed class HostOptions
     /// <summary>Development only: accept an agent client from any image path (normally only OptimizationTool.Mcp.exe beside the host).</summary>
     public bool DevAllowAnyAgent { get; init; }
 
+    /// <summary>Development only: accept a desktop client from any image path (normally only OptimizationTool.exe beside the
+    /// host) and allow the "test" client kind, which is otherwise refused. --dev-allow-any-client sets both dev options.</summary>
+    public bool DevAllowAnyClient { get; init; }
+
     /// <summary>M4: compiled action handlers (WindowsModules.Actions) and how machine-scope ones elevate.</summary>
     public IReadOnlyList<IActionModule> ActionModules { get; init; } = [];
     public IElevation? Elevation { get; init; }
 
     /// <summary>firewall.enable_public stays off unless set (--enable-firewall-handler), m4 §2.</summary>
     public bool EnableFirewallHandler { get; init; }
+
+    /// <summary>M6a: sensors, hardware and the worker launcher (Windows types or the fixture fakes). Default: unsupported.</summary>
+    public OptimizationTool.Engine.Bench.BenchOptions Bench { get; init; } = new();
 
     public Action<string>? Log { get; init; }
 }
@@ -49,8 +56,9 @@ public sealed class HostOptions
 /// </summary>
 public sealed class HostServer : IAsyncDisposable
 {
-    public const int ProtocolMajor = 1, ProtocolMinor = 4;
+    public const int ProtocolMajor = 1, ProtocolMinor = 5;
     public const string AgentExecutable = "OptimizationTool.Mcp.exe";
+    public const string DesktopExecutable = "OptimizationTool.exe";
     /// <summary>scan.fixture for the M1 fixture source, audit.windows for live collectors (protocol §9).</summary>
     public string[] Features => _engine.IsLive ? ["audit.windows"] : ["scan.fixture"];
 
@@ -98,7 +106,7 @@ public sealed class HostServer : IAsyncDisposable
         {
             DataDir = options.DataDir, Modules = options.Modules, CollectorOptions = options.CollectorOptions,
             FixtureSpeed = options.FixtureSpeed, ScanDeadline = options.ScanDeadline, Time = options.Time, Log = options.Log,
-            Agent = options.Agent,
+            Agent = options.Agent, Bench = options.Bench,
             Actions = new ActionOptions
             {
                 Handlers = options.ActionModules.SelectMany(m => m.Handlers(new ActionContext(options.Elevation ?? new NoElevation(), options.EnableFirewallHandler))).ToList(),
@@ -316,6 +324,17 @@ public sealed class HostServer : IAsyncDisposable
         var kind = p["client"]?["kind"] is JsonValue kv && kv.TryGetValue<string>(out var k) ? k : null;
         if (kind is null || !Allowlists.ContainsKey(kind))
             throw RpcError.Params("client.kind", "client.kind must be desktop, test or agent.");
+        // desktop and test get the desktop allowlist (approvals included), so only the installed shell may claim it (m3-agent §1).
+        if (kind == "test" && !_options.DevAllowAnyClient)
+        {
+            _log($"client {connection.Id} rejected as test: dev option off");
+            throw RpcError.State("untrusted_client", "Test clients need a development host.");
+        }
+        if (kind == "desktop" && !_options.DevAllowAnyClient && !IsTrustedImage(connection.Client?.ImagePath, DesktopExecutable))
+        {
+            _log($"client {connection.Id} rejected as desktop: unexpected image");
+            throw RpcError.State("untrusted_client", "Desktop clients must be OptimizationTool.exe installed with Optimus.");
+        }
         if (kind == "agent" && !_options.DevAllowAnyAgent && !IsTrustedAgentImage(connection.Client?.ImagePath))
         {
             _log($"client {connection.Id} rejected as agent: unexpected image");
@@ -338,8 +357,11 @@ public sealed class HostServer : IAsyncDisposable
         new(c.Id, c.ClientKind ?? "", (int)(c.Client?.ProcessId ?? 0), c.Client?.User?.Value, (int)(c.Client?.SessionId ?? 0));
 
     /// <summary>An agent client must be the MCP bridge installed beside this host (m3-agent §1).</summary>
-    internal static bool IsTrustedAgentImage(string? imagePath) =>
-        imagePath is not null && string.Equals(Path.GetFullPath(imagePath), Path.Combine(AppContext.BaseDirectory, AgentExecutable), StringComparison.OrdinalIgnoreCase);
+    internal static bool IsTrustedAgentImage(string? imagePath) => IsTrustedImage(imagePath, AgentExecutable);
+
+    /// <summary>True when the client's image is <paramref name="executable"/> in this host's own folder.</summary>
+    internal static bool IsTrustedImage(string? imagePath, string executable) =>
+        imagePath is not null && string.Equals(Path.GetFullPath(imagePath), Path.Combine(AppContext.BaseDirectory, executable), StringComparison.OrdinalIgnoreCase);
 
     private static JsonArray Json(IEnumerable<string> items) => new(items.Select(s => (JsonNode?)JsonValue.Create(s)).ToArray());
 

@@ -16,7 +16,7 @@ public sealed class BackendUnavailableException(string message, Exception? inner
 /// </summary>
 public sealed class BridgeDispatcher(BridgeRouter router, IBackend backend, DesktopLog log,
     SettingsLauncher? settings = null, ApiKeyRequest? apiKeys = null, PlanApproval? approvals = null,
-    ClientConnector? clients = null, SettingsLauncher? links = null)
+    ClientConnector? clients = null, SettingsLauncher? links = null, ImageSave? images = null, Action? retryBackend = null)
 {
     public const int MaxInFlight = 64;
     private readonly SettingsLauncher _settings = settings ?? new SettingsLauncher();
@@ -46,15 +46,36 @@ public sealed class BridgeDispatcher(BridgeRouter router, IBackend backend, Desk
                 return approvals is null
                     ? BridgeMessages.Error(shell.Id, -32013, "Not available.", new JsonObject { ["reason"] = "unavailable" })
                     : await approvals.HandleAsync(shell.Id, shell.Params, backend, log, ct);
+            case BridgeDecision.Shell shell when shell.Method == ImageSave.Method:
+                return images is null
+                    ? BridgeMessages.Error(shell.Id, -32013, "Not available.", new JsonObject { ["reason"] = "unavailable" })
+                    : await images.HandleAsync(shell.Id, shell.Params, log, ct);
             case BridgeDecision.Shell shell when ClientConnector.Methods.Contains(shell.Method):
                 return clients is null
                     ? BridgeMessages.Error(shell.Id, -32013, "Not available.", new JsonObject { ["reason"] = "unavailable" })
                     : await clients.HandleAsync(shell.Method, shell.Id, shell.Params, log, ct, backend);
+            case BridgeDecision.Shell shell when shell.Method == Backend.BackendConnection.RetryMethod:
+                return RetryBackend(shell);
             case BridgeDecision.Forward fwd:
                 return await ForwardAsync(fwd, ct);
             default:
                 return null;
         }
+    }
+
+    /// <summary><c>shell.retryBackend {}</c> → <c>{retrying:true}</c>: the "Try again" on the startup screen (protocol-v1 §7).</summary>
+    private string RetryBackend(BridgeDecision.Shell shell)
+    {
+        if (shell.Params is { Count: > 0 })
+        {
+            log.Warn("shell: refused shell.retryBackend (invalid params)");
+            return BridgeMessages.Error(shell.Id, -32602, "Invalid params.", new JsonObject { ["field"] = "params" });
+        }
+        if (retryBackend is null)
+            return BridgeMessages.Error(shell.Id, -32013, "Not available.", new JsonObject { ["reason"] = "unavailable" });
+        log.Info("shell: backend retry requested by the page");
+        retryBackend();
+        return BridgeMessages.Result(shell.Id, new JsonObject { ["retrying"] = true });
     }
 
     private async Task<string> ForwardAsync(BridgeDecision.Forward fwd, CancellationToken ct)

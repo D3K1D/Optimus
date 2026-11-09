@@ -64,6 +64,11 @@ public sealed class ChatGptSignIn : IProviderSignIn
     readonly HttpClient _http;
     readonly TimeProvider _time;
     readonly SemaphoreSlim _refreshGate = new(1, 1);
+    /// <summary>Guards <see cref="_generation"/> together with every write or delete of the stored tokens.</summary>
+    readonly Lock _tokenGate = new();
+    /// <summary>Bumped by <see cref="SignOut"/>. A sign-in or refresh that began before a sign-out must not store
+    /// tokens after it, so each reads this first and saves only while it is unchanged.</summary>
+    int _generation;
     JsonObject? _discovery;
 
     public ChatGptSignIn(ICredentialStore store, HttpClient http, ChatGptSignInOptions? options = null, TimeProvider? time = null)
@@ -127,7 +132,25 @@ public sealed class ChatGptSignIn : IProviderSignIn
     public ChatGptAccount? Account => LoadTokens() is { } t ? new(t.Subject, t.Email, t.ClientId, t.Scopes) : null;
 
     /// <summary>Clears tokens (provider.disconnect). The install's host ID and issued client ID are kept for the next sign-in.</summary>
-    public void SignOut() => _store.Delete(TokenKind);
+    public void SignOut()
+    {
+        lock (_tokenGate)
+        {
+            _generation++; // a pending sign-in or refresh can no longer save
+            _store.Delete(TokenKind);
+        }
+    }
+
+    /// <summary>Stores the tokens unless a sign-out happened since <paramref name="generation"/> was read.</summary>
+    bool TrySaveTokens(TokenRecord t, int generation)
+    {
+        lock (_tokenGate)
+        {
+            if (generation != _generation) return false;
+            SaveTokens(t);
+            return true;
+        }
+    }
 
     // ---- sign-in ------------------------------------------------------------------------------------------
 
@@ -137,6 +160,7 @@ public sealed class ChatGptSignIn : IProviderSignIn
     /// </summary>
     public async Task<ChatGptAccount> SignInInteractiveAsync(Func<Uri, bool> openBrowser, CancellationToken ct)
     {
+        var generation = Volatile.Read(ref _generation);
         var discovery = await DiscoverAsync(ct).ConfigureAwait(false);
         if (Options.AuthorizeEndpoint.Scheme != Uri.UriSchemeHttps ||
             !string.Equals(Options.AuthorizeEndpoint.Host, Options.Issuer.Host, StringComparison.OrdinalIgnoreCase) ||
@@ -211,7 +235,8 @@ public sealed class ChatGptSignIn : IProviderSignIn
         if (host.ClientId is null) SaveHost(host with { ClientId = clientId });
         var tokens = TokensFrom(response, clientId, claims, scopes, previousRefresh: null)
             ?? throw new ChatGptSignInException("exchange_failed", "ChatGPT returned an incomplete token response.");
-        SaveTokens(tokens);
+        if (!TrySaveTokens(tokens, generation))
+            throw new ChatGptSignInException("denied", "Signed out while signing in."); // disconnect won: nothing is stored
         return new ChatGptAccount(tokens.Subject, tokens.Email, clientId, scopes);
     }
 
@@ -253,6 +278,8 @@ public sealed class ChatGptSignIn : IProviderSignIn
         try
         {
             // Another caller may have refreshed while we waited; never spend a rotating refresh token twice.
+            // The generation is read before the tokens it belongs to: a sign-out from here on voids this refresh.
+            var generation = Volatile.Read(ref _generation);
             var current = LoadTokens() ?? throw NotSignedIn();
             if (current.RefreshToken != before.RefreshToken && current.ExpiresAt - Options.RefreshSkew > _time.GetUtcNow())
                 return new ProviderCredential(TokenKind, current.AccessToken);
@@ -284,7 +311,8 @@ public sealed class ChatGptSignIn : IProviderSignIn
             catch (ChatGptSignInException e) when (e.Code == "terminal")
             {
                 // invalid_grant, refresh_token_reused/expired/…: the refresh token is dead. Sign-in again (same client ID).
-                _store.Delete(TokenKind);
+                lock (_tokenGate)
+                    if (generation == _generation) _store.Delete(TokenKind); // never a newer sign-in's tokens
                 throw new ProviderException("auth", "ChatGPT sign-in expired. Sign in again.", retryable: false);
             }
             catch (ChatGptSignInException e)
@@ -310,7 +338,8 @@ public sealed class ChatGptSignIn : IProviderSignIn
             var scopes = response["scope"].AsString() is { } sc ? ReadScopes(sc) : current.Scopes;
             var next = TokensFrom(response, current.ClientId, claims, scopes, previousRefresh: current.RefreshToken, previous: current)
                 ?? throw new ProviderException("incomplete", "ChatGPT returned an incomplete token response.", retryable: false);
-            SaveTokens(next); // access, expiry, scopes and refresh token replaced together
+            // access, expiry, scopes and refresh token replaced together, unless the user signed out meanwhile
+            if (!TrySaveTokens(next, generation)) throw NotSignedIn();
             if (!scopes.Contains(RequiredScope))
                 throw new ProviderException("not_eligible", "This ChatGPT account no longer grants plan usage to the app.", retryable: false);
             return new ProviderCredential(TokenKind, next.AccessToken);

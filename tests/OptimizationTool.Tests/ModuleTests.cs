@@ -39,7 +39,7 @@ public class ModuleTests
         await using var _h = host;
         var c = await host.ConnectAsync(); // the test client says 1.0
         Assert.Equal(1, (int)c.Hello!["protocol"]!["major"]!);
-        Assert.Equal(4, (int)c.Hello["protocol"]!["minor"]!);
+        Assert.Equal(5, (int)c.Hello["protocol"]!["minor"]!);
         Assert.Contains("audit.windows", c.Hello["features"]!.AsArray().Select(x => (string)x!));
     }
 

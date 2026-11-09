@@ -7,7 +7,7 @@ namespace OptimizationTool.Desktop.Tests;
 public sealed class ClientConnectorTests
 {
     private const string Doc = "https://app.optimizationtool.invalid/index.html";
-    private const string Bridge = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
+    private const string Bridge = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe";
     private const string NpmDir = @"C:\Users\u\AppData\Roaming\npm";
     private const string ClaudeCmd = NpmDir + @"\claude.cmd";
     private const string CodexExe = @"C:\Tools\codex\codex.exe";
@@ -56,9 +56,10 @@ public sealed class ClientConnectorTests
             var args = c.Argv.Skip(1).ToArray();
             ProcessResult r = args switch
             {
-                ["--version"] => new(0, Flavor == "claude" ? "2.0.14 (Claude Code)\n" : "codex-cli 0.46.0\n", "", false),
+                ["--version"] => new(0, Flavor == "claude" ? "2.0.14 (Claude Code)\n" : "codex-cli 0.167.0\n", "", false),
                 ["--help"] => new(0, CliHelp.Claude, "", false),
                 ["exec", "--help"] => new(0, CliHelp.Codex, "", false),
+                ["features", "list"] => new(0, CliHelp.CodexFeatures, "", false),
                 ["mcp", "get", "optimization-tool"] => Get(),
                 ["mcp", "add", .., "--", var path] => Add(path),
                 ["mcp", "remove", ..] => Remove(),
@@ -102,7 +103,7 @@ public sealed class ClientConnectorTests
     private static string[] Args(ProcessCommand c) => c.Argv.Skip(1).ToArray();
 
     /// <summary>Runs other than the --version identity check and the --help capability probe.</summary>
-    private List<ProcessCommand> McpRuns => _runner.Runs.Where(r => Args(r) is not (["--version"] or ["--help"] or ["exec", "--help"])).ToList();
+    private List<ProcessCommand> McpRuns => _runner.Runs.Where(r => Args(r) is not (["--version"] or ["--help"] or ["exec", "--help"] or ["features", "list"])).ToList();
 
     // ---------- status ----------
 
@@ -130,7 +131,7 @@ public sealed class ClientConnectorTests
 
     [Theory]
     [InlineData("claude", Bridge, "yes")]
-    [InlineData("claude", @"c:\program files\optimization tool\OPTIMIZATIONTOOL.MCP.EXE", "yes")]
+    [InlineData("claude", @"c:\program files\optimus\OPTIMIZATIONTOOL.MCP.EXE", "yes")]
     [InlineData("claude", @"C:\Old\OptimizationTool.Mcp.exe", "outdated")]
     [InlineData("codex", Bridge, "yes")]
     [InlineData("codex", @"D:\dev\OptimizationTool.Mcp.exe", "outdated")]
@@ -139,11 +140,60 @@ public sealed class ClientConnectorTests
     {
         _files.Add(ClaudeCmd);
         _files.Add(CodexExe);
+        _files.Add(registered); // a bridge still present elsewhere is not repaired (see Status_repairs_a_registration_to_a_removed_bridge)
         _runner.Flavor = flavor;
         _runner.Registered = registered;
         var client = flavor == "claude" ? "claude_code" : "codex";
         var r = (await Call("shell.clientStatus", $$"""{"client":"{{client}}"}"""))["result"]!;
         Assert.Equal(expected, r["registered"]!.GetValue<string>());
+        Assert.DoesNotContain(McpRuns, run => Args(run) is ["mcp", "add", ..] or ["mcp", "remove", ..]);
+    }
+
+    [Theory]
+    [InlineData("claude", "claude_code")]
+    [InlineData("codex", "codex")]
+    public async Task Status_repairs_a_registration_to_a_removed_bridge(string flavor, string client)
+    {
+        // 0.8 → 0.9 moved the install from Program Files\Optimization Tool to Program Files\Optimus; the MSI removed the old folder.
+        const string old = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
+        _files.Add(ClaudeCmd);
+        _files.Add(CodexExe);
+        _runner.Flavor = flavor;
+        _runner.Registered = old;
+        var r = (await Call("shell.clientStatus", $$"""{"client":"{{client}}"}"""))["result"]!;
+
+        Assert.Equal("yes", r["registered"]!.GetValue<string>());
+        Assert.Equal(Bridge, _runner.Registered);
+        Assert.Empty(_confirm.Shown); // the user approved this app's registration before; only its path changed
+        var scope = flavor == "claude" ? new[] { "--scope", "user" } : [];
+        Assert.Equal(
+            [["mcp", "get", "optimization-tool"],
+             ["mcp", "remove", .. scope, "optimization-tool"],
+             ["mcp", "add", .. scope, "optimization-tool", "--", Bridge],
+             ["mcp", "get", "optimization-tool"]],
+            McpRuns.Where(run => Args(run) is not ["auth", ..] and not ["login", ..]).Select(Args));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Gone\other-server.exe")]   // not this app's bridge
+    [InlineData("OptimizationTool.Mcp.exe")]    // not a full path
+    public async Task Status_leaves_other_missing_entries_outdated(string registered)
+    {
+        _files.Add(ClaudeCmd);
+        _runner.Registered = registered;
+        var r = (await Call("shell.clientStatus", """{"client":"claude_code"}"""))["result"]!;
+        Assert.Equal("outdated", r["registered"]!.GetValue<string>());
+        Assert.Equal(registered, _runner.Registered);
+    }
+
+    [Fact]
+    public async Task Status_does_not_repair_when_this_bridge_is_missing()
+    {
+        _files.Remove(Bridge);
+        _files.Add(ClaudeCmd);
+        _runner.Registered = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
+        var r = (await Call("shell.clientStatus", """{"client":"claude_code"}"""))["result"]!;
+        Assert.Equal("outdated", r["registered"]!.GetValue<string>());
     }
 
     [Theory]

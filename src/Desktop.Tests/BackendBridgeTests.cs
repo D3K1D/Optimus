@@ -141,6 +141,135 @@ public class BackendBridgeTests
     }
 
     [Fact]
+    public async Task Host_that_exits_as_other_session_is_reported_at_once_not_as_endless_connecting()
+    {
+        // A stand-in host that ends at once with the host's "other session" exit code (one host per user and data folder).
+        var cmd = Environment.GetEnvironmentVariable("ComSpec") ?? Path.Combine(Environment.SystemDirectory, "cmd.exe");
+        await using var backend = new BackendConnection(new BackendOptions
+        {
+            PipeName = "OptimizationTool.test." + Guid.NewGuid().ToString("N"), HostPath = cmd, LaunchHost = true, AllowAnyHost = true,
+            HostArguments = ["/c", "exit " + OptimizationTool.Transport.HostExitCodes.OtherSession],
+            ConnectBudget = TimeSpan.FromMinutes(5), // far away: the detail must not wait for the "unavailable" budget
+        }, DesktopLog.Disabled);
+        backend.Start();
+        var sw = Stopwatch.StartNew();
+        while (!(backend.Current.Detail is JsonValue v && v.GetValue<string>() == "other_session"))
+        {
+            if (sw.Elapsed > TimeSpan.FromSeconds(60)) throw new TimeoutException("Never reported other_session.");
+            await Task.Delay(50);
+        }
+        Assert.Equal(BackendState.Connecting, backend.Current.State);
+    }
+
+    /// <summary>A stand-in host (cmd.exe) that appends a line to <paramref name="launches"/> on every start, then exits with <paramref name="exitCode"/>.</summary>
+    private static BackendConnection FailingHost(string launches, int exitCode, IReadOnlyList<TimeSpan>? backoff = null) =>
+        new(new BackendOptions
+        {
+            PipeName = "OptimizationTool.test." + Guid.NewGuid().ToString("N"),
+            HostPath = Environment.GetEnvironmentVariable("ComSpec") ?? Path.Combine(Environment.SystemDirectory, "cmd.exe"),
+            LaunchHost = true, AllowAnyHost = true,
+            HostArguments = ["/d", "/c", $"echo x>>{launches}& exit {exitCode}"], // the temp path has no spaces
+            ConnectBudget = TimeSpan.FromMinutes(5),
+            LaunchBackoff = backoff,
+        }, DesktopLog.Disabled);
+
+    private static int Launches(string file)
+    {
+        try { return File.Exists(file) ? File.ReadAllLines(file).Count(l => l.Trim() == "x") : 0; }
+        catch (IOException) { return -1; } // cmd is writing it right now
+    }
+
+    private static async Task WaitForDetail(BackendConnection b, string detail, TimeSpan within)
+    {
+        var sw = Stopwatch.StartNew();
+        while (!(b.Current.Detail is JsonValue v && v.GetValue<string>() == detail))
+        {
+            if (sw.Elapsed > within) throw new TimeoutException($"Never reported {detail} (detail {b.Current.Detail?.ToJsonString() ?? "null"}).");
+            await Task.Delay(20);
+        }
+    }
+
+    [Fact]
+    public async Task Host_that_exits_as_needs_update_is_reported_and_not_relaunched_until_the_page_retries()
+    {
+        var launches = Path.Combine(Path.GetTempPath(), "ot-launch-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            await using var backend = FailingHost(launches, OptimizationTool.Transport.HostExitCodes.NeedsUpdate);
+            backend.Start();
+            await WaitForDetail(backend, "needs_update", TimeSpan.FromSeconds(60));
+            Assert.Equal(BackendState.Connecting, backend.Current.State);
+
+            await Task.Delay(3000); // the old shell relaunched every 1-5 s here, forever
+            Assert.Equal(1, Launches(launches));
+            Assert.Equal("needs_update", backend.Current.Detail!.GetValue<string>());
+
+            backend.RetryNow(); // "Try again": one launch at once, which ends the same way
+            var sw = Stopwatch.StartNew();
+            while (Launches(launches) < 2)
+            {
+                if (sw.Elapsed > TimeSpan.FromSeconds(30)) throw new TimeoutException("Retry did not relaunch the host.");
+                await Task.Delay(20);
+            }
+            await WaitForDetail(backend, "needs_update", TimeSpan.FromSeconds(30));
+            await Task.Delay(1500);
+            Assert.Equal(2, Launches(launches));
+        }
+        finally { File.Delete(launches); }
+    }
+
+    [Fact]
+    public async Task Host_that_keeps_failing_backs_off_then_reports_cant_start_and_keeps_a_slow_retry()
+    {
+        var launches = Path.Combine(Path.GetTempPath(), "ot-launch-" + Guid.NewGuid().ToString("N") + ".txt");
+        try
+        {
+            var step = TimeSpan.FromMilliseconds(150);
+            await using var backend = FailingHost(launches, 1, [step, step, step, TimeSpan.FromSeconds(2)]);
+            backend.Start();
+            await WaitForDetail(backend, "cant_start", TimeSpan.FromSeconds(60));
+            var atCantStart = Launches(launches);
+            Assert.True(atCantStart >= BackendConnection.CantStartAfter, $"cant_start after {atCantStart} launches");
+            Assert.Equal(BackendState.Connecting, backend.Current.State);
+
+            // The slow retry continues (2 s backoff here, 30 s in the app), with no flood of launches.
+            await Task.Delay(7000); // the poll slows to 5 s once a startup detail is shown
+            var later = Launches(launches);
+            Assert.InRange(later, atCantStart + 1, atCantStart + 3);
+            Assert.Equal("cant_start", backend.Current.Detail!.GetValue<string>());
+        }
+        finally { File.Delete(launches); }
+    }
+
+    [Fact]
+    public void Default_launch_backoff_is_2_5_10_then_30_seconds() =>
+        Assert.Equal([2, 5, 10, 30], BackendConnection.DefaultLaunchBackoff.Select(t => (int)t.TotalSeconds));
+
+    [Fact]
+    public async Task Retry_backend_is_shell_handled_and_wakes_the_connection()
+    {
+        var retries = 0;
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), new ThrowingBackend(), DesktopLog.Disabled, retryBackend: () => retries++);
+        var ok = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":1,"method":"shell.retryBackend","params":{}}""", Doc, true, default))!)!;
+        Assert.Equal("""{"retrying":true}""", ok["result"]!.ToJsonString());
+        var noParams = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":2,"method":"shell.retryBackend"}""", Doc, true, default))!)!;
+        Assert.True(noParams["result"]!["retrying"]!.GetValue<bool>());
+        Assert.Equal(2, retries);
+
+        var bad = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":3,"method":"shell.retryBackend","params":{"x":1}}""", Doc, true, default))!)!;
+        Assert.Equal(-32602, bad["error"]!["code"]!.GetValue<int>());
+        Assert.Equal(2, retries);
+        Assert.Contains(BackendConnection.RetryMethod, (IReadOnlySet<string>)BridgeRouter.ShellMethods);
+        Assert.DoesNotContain(BackendConnection.RetryMethod, (IReadOnlySet<string>)BridgeRouter.DesktopMethods);
+    }
+
+    private sealed class ThrowingBackend : IBackend
+    {
+        public Task<JsonObject> CallAsync(string method, JsonObject? parameters, CancellationToken ct) =>
+            throw new InvalidOperationException("shell.retryBackend must not be forwarded");
+    }
+
+    [Fact]
     public async Task Unexpected_server_image_is_refused()
     {
         await using var stub = new StubPipeServer();

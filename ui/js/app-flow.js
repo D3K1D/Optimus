@@ -59,12 +59,13 @@
   /* ---------- M3: providers, tasks, grants (contracts/m3-agent.md) ---------- */
   // §3.3 diagnostics, in plain words; used when the backend does not list them itself.
   var DIAG_LABELS = { 'power.inventory': 'Power plans', 'process.sample': 'CPU sample', 'startup.list': 'Startup apps', 'events.recent': 'Event logs',
-    'storage.volumes': 'Drives', 'network.listeners': 'Open ports', 'display.modes': 'Displays', 'devices.problems': 'Devices', 'security.status': 'Security status' };
+    'storage.volumes': 'Drives', 'network.listeners': 'Open ports', 'display.modes': 'Displays', 'devices.problems': 'Devices', 'security.status': 'Security status',
+    'sensors.snapshot': 'Sensors' };
   var DIAG_WORDS = { 'process.sample': ['Measuring CPU', 'Measured CPU'], 'power.inventory': ['Reading power plans', 'Read power plans'],
     'startup.list': ['Reading startup apps', 'Read startup apps'], 'events.recent': ['Reading event logs', 'Read event logs'],
     'storage.volumes': ['Reading drives', 'Read drives'], 'network.listeners': ['Reading open ports', 'Read open ports'],
     'display.modes': ['Reading displays', 'Read displays'], 'devices.problems': ['Reading devices', 'Read devices'],
-    'security.status': ['Reading security status', 'Read security status'] };
+    'security.status': ['Reading security status', 'Read security status'], 'sensors.snapshot': ['Reading sensors', 'Read sensors'] };
   var DEFAULT_LIMITS = { diagnosticCalls: 10, totalBytes: 131072, turns: 8 };
   var NATIVE_KIND = { 'claude-code': 'claude_code_mcp', codex: 'codex_mcp' };
   var TILE_OF = { claude_code_mcp: 'claude-code', codex_mcp: 'codex', anthropic_api: 'api-key', openai_api: 'api-key', chatgpt_plan: 'chatgpt' };
@@ -253,6 +254,7 @@
     var ai = React.useState({ value: 'local', label: 'Local only' }), conn = ai[0], setConn = ai[1];
     var rt = React.useState(null), returnTo = rt[0], setReturnTo = rt[1];
     var bs = React.useState(backend.state()), bstate = bs[0], setBstate = bs[1];
+    var bd = React.useState(backend.detail ? backend.detail() : null), bdetail = bd[0], setBdetail = bd[1];   // the shell's detail code
     var re = React.useState(null), restore = re[0], setRestore = re[1];       // draft put back in the main box
     var ar = React.useState(null), askRestore = ar[0], setAskRestore = ar[1]; // draft put back in the card box
     var fl = React.useState(false), failed = fl[0], setFailed = fl[1];
@@ -290,6 +292,8 @@
     var wl = React.useState(false), waitLong = wl[0], setWaitLong = wl[1];          // 60 s in waiting: show the check help
     var regs = React.useRef({});                                                    // kind → registration command
 
+    // M6a: the benchmark panel's state (bench.js); flash is defined below and only called later.
+    var bench = OT.useBench(backend, { flash: function (w) { flash(w); } });
     var timers = React.useRef([]);
     var onbRef = React.useRef(null), fuRef = React.useRef(null), stageRef = React.useRef(stage);
     var scanRef = React.useRef(null);          // { scanId, stream, cursor, handled }
@@ -298,7 +302,7 @@
     var fuChain = React.useRef(Promise.resolve()), busy = React.useRef(false);
     var cardFinding = React.useRef({});        // card id → finding id, for restoring a disposition from the review list
     var taskRef = React.useRef(null);          // { taskId, stream }
-    var taskLabels = React.useRef({});         // task evidence id → short label (m1, m2 …)
+    var taskLabels = React.useRef(OT.citeRegistry()); // task evidence id → short label by kind (CPU, Ports 2 …; m3 until known)
     var pendingSummary = React.useRef(false);
     var cls2 = React.useState({}), clients = cls2[0], setClients = cls2[1];      // tile → shell.clientStatus result (+ busy / failed)
     function putClient(tile, patch) { setClients(function (m) { var n = Object.assign({}, m); n[tile] = Object.assign({}, m[tile] || {}, patch); return n; }); }
@@ -582,7 +586,8 @@
         if (pl.status === 'complete' && (pl.tool === 'note_card' || pl.tool === 'add_card')) refreshDeck();
       } else if (ev.type === 'agent.message') {
         // A turn started before a reload or a reconnect has no entry yet: it gets one (the answer lands somewhere).
-        var mtext = { text: stripCites(pl.text), citations: pl.citations || [], followUps: pl.followUps || [], busy: null, failedTurn: false };
+        var mtext = { text: stripCites(pl.text), citations: pl.citations || [], followUps: pl.followUps || [], busy: null, failedTurn: false,
+          warnings: pl.warnings || [], suggest: pl.suggest || null };   // M6a §8: voltage note, Run benchmark
         ensureAnswer(pl.turnId || null, ev.seq, mtext);
         patch(pl.turnId, mtext);
         setLiveTurn(function (cur) { return cur && (!pl.turnId || cur === pl.turnId || cur === 'turn') ? null : cur; });
@@ -596,7 +601,7 @@
         if (pl.status === 'started') { ensureAnswer(pl.turnId, ev.seq, { text: null, busy: 'Thinking…', failedTurn: false }); patch(pl.turnId, { busy: 'Thinking…' }); }
         // Stopped by the user (agent.cancel): the question simply goes away; any other failure says so.
         else if (pl.status === 'failed' && pl.code === 'cancelled') dropAnswer(pl.turnId, tid);
-        else if (pl.status === 'failed') patch(pl.turnId, { failedTurn: true, busy: null });
+        else if (pl.status === 'failed') patch(pl.turnId, { failedTurn: true, failCode: pl.code || null, busy: null });
       }
     }
     function refreshDeck() {
@@ -607,6 +612,7 @@
     function handleEvent(ev) {
       var s = scanRef.current, i = invRef.current, tr = taskRef.current;
       if (ev.type === 'agent.pairing') { onPairing(ev.payload || {}); return true; }
+      if (typeof ev.stream === 'string' && ev.stream.indexOf('bench:') === 0) { bench.onEvent(ev); return true; }
       if (ev.type === 'action.plan') { onPlanEvent(ev.payload || {}); return true; }
       if (ev.type === 'operation.state') {
         var os = ev.payload || {};
@@ -670,7 +676,10 @@
       var offE = backend.onEvent(function (ev) {
         if (!handleRef.current(ev)) { buffer.current.push(ev); if (buffer.current.length > 200) buffer.current.shift(); }
       });
-      var offS = backend.onState(function (state, info) { setBstate(state); if (info && info.resumed && resyncRef.current) resyncRef.current(); });
+      var offS = backend.onState(function (state, info) {
+        setBstate(state); setBdetail(info ? info.detail : null);
+        if (info && info.resumed && resyncRef.current) resyncRef.current();
+      });
       boot();
       return function () { offE(); offS(); };
     }, []);
@@ -678,6 +687,7 @@
     // After the shell reconnects to the host: re-read snapshots instead of trusting missed events.
     resyncRef.current = function () {
       backend.call('onboarding.get').then(setOnb).catch(function () {});
+      bench.resync();
       var s = scanRef.current;
       if (s && !s.handled) backend.call('scan.get', { scanId: s.scanId }).then(function (snap) {
         if (snap.status === 'running' || snap.status === 'queued') setScanDone(function (x) { return Math.max(x, snap.progress.done); });
@@ -753,7 +763,8 @@
       }, function (err) {
         busy.current = false;
         setStage({ id: from, leaving: false });
-        flash(err && err.code === -32004 ? 'A scan is running' : 'Scan failed');
+        var benchBusy = err && err.code === -32013 && err.data && err.data.reason === 'bench_active';
+        flash(err && err.code === -32004 ? 'A scan is running' : benchBusy ? 'After the benchmark' : 'Scan failed');
       });
     }
     // Scan (toolbar): every check, compared with the current report; PC specs are re-read alongside when the user
@@ -762,6 +773,7 @@
     function tbLabel(t) { return h('span', { className: 'ot-tb-label' }, t); }
     function fullScan() {
       if (busy.current) return;
+      if (bench.active) { flash('After the benchmark'); return; }
       var prof = onbRef.current && onbRef.current.profile;
       if (prof && prof.inventoryConsent === 'granted') backend.call('inventory.start', { idempotencyKey: uuid() }).catch(function () {});
       runAudit('Full scan', 'audit.full', report ? report.reportId : null);
@@ -1007,6 +1019,8 @@
       setAnswers(function (list) { return list.concat([Object.assign({ id: id, q: text, cardId: cardId || null, taskId: t.taskId, turnId: null, text: null, busy: 'Thinking…', reportId: report.reportId, at: new Date().toISOString() }, extra)]).slice(-KEEP_ANSWERS); });
       var params = { idempotencyKey: uuid(), taskId: t.taskId, text: text };
       if (cardId) params.cardId = cardId;
+      // M6a §8: Investigate with AI names the benchmark run and part it is about.
+      if (extra && extra.context) params.context = extra.context;
       backend.call('agent.ask', params).then(function (r) {
         setAnswers(function (list) { return list.map(function (a) { return a.id === id && !a.turnId ? Object.assign({}, a, { turnId: r.turnId }) : a; }); });
       }, function (err) {
@@ -1035,7 +1049,7 @@
       backend.call('agent.start', params).then(function (t) {
         attachTask(t, []); setGrant(null);
         if (g.pending && g.pending.scan) firstScan(t);
-        else if (g.pending) agentAsk(g.pending.text, g.pending.cardId, t);
+        else if (g.pending) agentAsk(g.pending.text, g.pending.cardId, t, g.pending.context ? { context: g.pending.context } : undefined);
         else if (isMcpKind(g.kind) && !headless) setShowActivity(true);
       }, function () { setGrant(function (x) { return x && Object.assign({}, x, { busy: false }); }); flash('Not started'); });
     }
@@ -1137,7 +1151,7 @@
     // task (fetched once if this window hasn't seen them yet).
     // ownerTaskId: the task that cited it (an AI card's own task when the host says so); the current task is the fallback.
     function openCite(eid, ownerTaskId) {
-      var label = labels[eid] || taskLabels.current[eid] || null;
+      var label = labels[eid] || OT.citeLabel(taskLabels.current, eid, citeHint(eid));
       if (evById[eid]) { setPeek({ id: eid, label: label, ev: evById[eid], inReport: true }); return; }
       if (tev.current[eid]) { setPeek({ id: eid, label: label, ev: tev.current[eid] }); return; }
       setPeek({ id: eid, label: label, ev: null });
@@ -1582,18 +1596,30 @@
       return function () { clearTimeout(t); };
     }, [waitKind, waitEntry && waitEntry.status, waitEntry && waitEntry.since]);
     React.useEffect(function () { setShowCmd(false); }, [pillKind, pillState.row]);
-    // Report evidence keeps its e-label; evidence from this task's own checks is numbered m1, m2 … as it is cited.
+    // Report evidence keeps its e-label; evidence from this task's own checks is named by its kind as it is cited
+    // ("Ports", "CPU 2"), or numbered m1, m2 … while its kind is not known.
     function citeChip(id) {
-      if (!labels[id] && !taskLabels.current[id]) taskLabels.current[id] = 'm' + (Object.keys(taskLabels.current).length + 1);
-      return { id: id, label: labels[id] || taskLabels.current[id] };
+      return { id: id, label: labels[id] || OT.citeLabel(taskLabels.current, id, citeHint(id)) };
+    }
+    // What an evidence id came from: the check that returned it (Activity), else the evidence itself once loaded.
+    function citeHint(id) {
+      for (var i = 0; i < activity.length; i++) {
+        var a = activity[i];
+        if (a.evidenceIds && a.evidenceIds.indexOf(id) >= 0) return (a.arguments && a.arguments.diagnosticId) || a.tool;
+      }
+      return tev.current[id] || null;
     }
     // A failed in-app turn shows the connection's state word and its action (or "No answer").
     var failWord = askState.tone === 'expired' && askState.word ? askState.word : 'No answer';
     var failAction = ACTION_WORD[askState.action] && isApiKind(conn.kind) ? { label: ACTION_WORD[askState.action], onClick: function () { apiAction(conn.kind, false); } }
       : askState.action === 'signIn' && isMcpKind(conn.kind) ? { label: ACTION_WORD.signIn, onClick: function () { signInClient(TILE_OF[conn.kind]); } } : null;
+    // M6.0: a turn the host stopped because the AI tried a blocked tool says so (no connection action).
+    var BLOCKED_WORD = 'Stopped · the AI tried a blocked tool';
+    function failOf(a) { return !a.failedTurn ? null : a.failCode === 'tool_blocked' ? BLOCKED_WORD : failWord; }
+    function failActionOf(a) { return a.failedTurn && a.failCode !== 'tool_blocked' ? failAction : null; }
     var aiLabel = (task && task.recipient && task.recipient.label) || (curProvider && curProvider.label) || (isLocal ? null : conn.label);
     var reportAnswers = answers.filter(function (a) { return !a.cardId && (!a.reportId || !report || a.reportId === report.reportId); }).map(function (a) {
-      return Object.assign({}, a, { cites: (a.citations || []).map(citeChip), failed: a.failedTurn ? failWord : null, action: a.failedTurn ? failAction : null });
+      return Object.assign({}, a, { cites: (a.citations || []).map(citeChip), failed: failOf(a), action: failActionOf(a) });
     });
     // A turn or run in progress (m5 §8): only then is there something to Stop; Stop cancels the run, never the task.
     var taskWaiting = !!task && answers.some(function (a) { return a.taskId === task.taskId && a.text == null && !a.failedTurn; });
@@ -1604,9 +1630,33 @@
     // m5 §9: one panel per question, newest first; History lists them all (closed ones included).
     var pv2 = answerPanels(answers, { open: panelOpen, deleted: deleted });
     var panels = pv2.panels.map(function (a) {
-      return Object.assign({}, a, { cites: (a.citations || []).map(citeChip), failed: a.failedTurn ? failWord : null, action: a.failedTurn ? failAction : null });
+      return Object.assign({}, a, { cites: (a.citations || []).map(citeChip), failed: failOf(a), action: failActionOf(a) });
     });
-    var historyRows = pv2.history.map(function (r) { return Object.assign({}, r, { when: r.at ? whenDay(r.at) : '' }); });
+    // History: answers and finished benchmarks together, newest first.
+    var historyRows = pv2.history.concat(bench.history).map(function (r, i) { return { r: r, i: i, t: Date.parse(r.at || '') || 0 }; })
+      .sort(function (x, y) { return (y.t - x.t) || (x.i - y.i); })
+      .map(function (x) { return Object.assign({}, x.r, { when: x.r.at ? whenDay(x.r.at) : '' }); });
+    // M6a §8: Investigate with AI asks on the active task with the run and part as context; the answer is a normal panel.
+    var benchAi = inApp && !!report;
+    function investigate(part, verdict) {
+      var run = bench.run; if (!run) return;
+      var label = (OT.bench.PARTS.filter(function (x) { return x.id === part; })[0] || { label: part }).label;
+      agentAsk(verdict === 'running_hot' ? 'Why is my ' + label + ' running hot?' : 'Why is my ' + label + ' slower than before?', null, null,
+        { context: { benchRunId: run.runId, part: part } });
+    }
+    // Save image: the desktop shell's Save dialog (shell.saveImage, it never tells the page the path); the website downloads.
+    function saveBenchImage(dataUrl) {
+      var name = 'Optimus-benchmark-' + OT.bench.fileDate(bench.run && bench.run.finishedAt) + '.png';
+      if (backend.kind === 'desktop') {
+        return backend.call('shell.saveImage', { pngBase64: String(dataUrl).split(',')[1] || '', suggestedName: name }).then(function (r) { return !!(r && r.saved); });
+      }
+      var a = document.createElement('a'); a.href = dataUrl; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      return Promise.resolve(true);
+    }
+    function focusBench(ms) {
+      later(function () { var el = document.querySelector('[data-bench]'); if (el) { if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }); if (el.focus) el.focus({ preventScroll: true }); } }, ms || 30);
+    }
+    function openBench() { setMenu(null); bench.openPanel(); focusBench(); }
     var actItems = activity.map(function (a) {
       var args = a.arguments || {};
       return { id: a.invocationId, title: toolWords(a).replace(/ · \d+ s$/, ''), origin: a.origin, originLabel: ORIGIN_LABEL[a.origin] || a.origin, size: a.bytes ? kib(a.bytes) : null,
@@ -1656,10 +1706,11 @@
       saveOnb(patch).then(function () { stepSaving.current = false; if (after) after(); go(next); }, function () { stepSaving.current = false; });
     }
     var body = null;
-    if (bstate === 'incompatible' || (failed && id === 'boot')) {
+    var notice = OT.backendNotice(bstate, bdetail);   // "Update Optimus" / "Optimus is open in another session"
+    if (notice || (failed && id === 'boot')) {
       body = h('div', { key: 'down', className: 'ot-flow-panel ot-enter' }, h(GlassPanel, { strong: true, className: 'ot-choice ot-frost' },
-        h('h2', { className: 'text-title-2' }, bstate === 'incompatible' ? 'Update Optimus' : 'Backend unavailable'),
-        bstate !== 'incompatible' && h('div', { className: 'ot-choice-foot' }, h(Button, { variant: 'primary', onClick: boot }, 'Retry'))));
+        h('h2', { className: 'text-title-2' }, notice || 'Backend unavailable'),
+        !notice && h('div', { className: 'ot-choice-foot' }, h(Button, { variant: 'primary', onClick: boot }, 'Retry'))));
     } else if (id === 'login') {
       body = h('div', { key: 'login', className: cls('ot-flow-panel') }, h(LoginPanel, {
         initialProvider: isLocal ? 'claude-code' : conn.value === 'api' ? 'api-key' : conn.value,
@@ -1738,12 +1789,19 @@
             h(Button, { variant: 'neu', size: 'sm', icon: 'history', id: 'ot-history-btn', 'aria-expanded': menu === 'history', 'aria-controls': 'ot-history-menu',
               className: menu === 'history' ? 'is-on' : null, 'aria-label': 'History', title: 'History', onClick: function () { setMenu(menu === 'history' ? null : 'history'); } }, tbLabel('History')),
             task && h(Button, { variant: 'neu', size: 'sm', icon: 'pulse', 'aria-pressed': showActivity, 'aria-label': 'Activity', title: 'Activity', onClick: function () { setShowActivity(!showActivity); } }, tbLabel('Activity')),
-            h(Button, { variant: 'neu', size: 'sm', icon: 'repeat', 'aria-label': 'Scan', title: 'Check everything again and compare', onClick: fullScan }, tbLabel('Scan')),
+            // Scan opens its menu: Full scan or Benchmark (M6a).
+            h(Button, { variant: 'neu', size: 'sm', icon: 'repeat', id: 'ot-scan-btn', 'aria-haspopup': 'true', 'aria-expanded': menu === 'scan', 'aria-controls': 'ot-scan-menu',
+              className: menu === 'scan' ? 'is-on' : null, 'aria-label': 'Scan', title: 'Scan', onClick: function () { setMenu(menu === 'scan' ? null : 'scan'); } }, tbLabel('Scan')),
             report && h(Button, { variant: 'neu', size: 'sm', icon: 'report', 'aria-label': 'Report', title: 'Report', onClick: function () { setMenu(null); setSheet('open'); } }, tbLabel('Report'))),
           menu === 'suggest' && h(OT.SuggestionList, { id: 'ot-suggest-menu', toggleId: 'ot-suggest-btn', items: starters, onClose: function () { setMenu(null); },
             onPick: function (s) { setMenu(null); runAudit(s.text, s.intent); } }),
           menu === 'history' && h(OT.HistoryList, { id: 'ot-history-menu', toggleId: 'ot-history-btn', rows: historyRows, onClose: function () { setMenu(null); },
-            onOpen: function (r) { showPanel(r.id); }, onDelete: deleteAnswer })),
+            onOpen: function (r) { if (r.bench) { setMenu(null); bench.openRun(r.bench); focusBench(300); } else showPanel(r.id); }, onDelete: deleteAnswer }),
+          menu === 'scan' && h(OT.ScanMenu, { id: 'ot-scan-menu', toggleId: 'ot-scan-btn', benchRunning: bench.active, onClose: function () { setMenu(null); },
+            onPick: function (pick) { setMenu(null); if (pick === 'full') fullScan(); else openBench(); } })),
+        onMain && bench.open && h(OT.BenchPanel, { key: 'bench', className: 'ot-enter', view: bench.view, caps: bench.caps, run: bench.run, warn: bench.warn, toast: bench.toast,
+          starting: bench.starting, cancelling: bench.cancelling, onStart: bench.start, onCancel: bench.cancel, onClose: bench.close,
+          onInvestigate: benchAi ? investigate : null, onSaveImage: saveBenchImage }),
         onMain && agentPanels(),
         onMain && summary === 'connect' && h(GlassPanel, { className: 'ot-share ot-enter' },
           h('div', { className: 'text-headline' }, 'Summaries use an AI'),
@@ -1759,7 +1817,7 @@
           var mine = !!task && a.taskId === task.taskId;
           return h(OT.AnswerPanel, { key: a.id, className: 'ot-enter', item: a, onCite: openCite,
             onFollow: inApp ? function (q) { followUp(a, q); } : null, followBusy: runInProgress,
-            onStop: mine && runInProgress ? cancelRun : null, onClose: function () { setOpen([a.id], false); } });
+            onStop: mine && runInProgress ? cancelRun : null, onClose: function () { setOpen([a.id], false); }, onBenchmark: openBench });
         }),
         onMain && (summary === 'loading' || summaryLines) && h(GlassPanel, { className: 'ot-summary-inline ot-enter' },
           summary === 'loading' ? h('div', { className: 'text-mono-sm ot-muted ot-turn' }, h(Logo, { size: 16, spin: true, decorative: true, className: 'ot-busy-logo' }), 'Summarizing…') :
@@ -1818,7 +1876,10 @@
               // Back from a preview: no decision about the card; the unused plan is dropped.
               onPreviewBack: function () { if (curState.planId && curPlan && curPlan.status === 'awaiting_user') declinePlan(curState.planId); setMode(curId, null); unfocus(curId); },
               checkAgain: !!curState.opened, recheck: curState.recheck,
-              mode: curPhase, reply: cardAnswer ? (cardAnswer.failedTurn ? failWord : cardAnswer.text) : replyText(curCard.reply),
+              mode: curPhase, reply: cardAnswer ? (cardAnswer.failedTurn ? failOf(cardAnswer) : cardAnswer.text) : replyText(curCard.reply),
+              // M6a §8: the card's AI answer keeps its voltage note and Run benchmark, as an answer panel does.
+              replyRisk: !!(cardAnswer && cardAnswer.text && (cardAnswer.warnings || []).indexOf('voltage') >= 0),
+              onReplyBenchmark: cardAnswer && cardAnswer.text && cardAnswer.suggest === 'benchmark' ? openBench : null,
               // A report-only answer (no AI in the app): offer the chooser once, under the answer.
               onReplyConnect: !cardAnswer && curCard.reply && !inApp && !nativeLive && !isMcpKind(conn.kind) ? function () { setDetailOpen(false); setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } : null,
               replyBusy: cardAnswer && cardAnswer.text == null && !cardAnswer.failedTurn ? cardAnswer.busy || 'Thinking…' : null,

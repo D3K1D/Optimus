@@ -131,23 +131,29 @@
 .ot-welcome-block { display: flex; flex-direction: column; align-items: center; margin-bottom: var(--space-4); }
 .ot-welcome-block .ot-welcome { margin-bottom: var(--space-2); }
 .ot-welcome-block .ot-welcome-bar { margin-top: 0; }
-.ot-toolwrap { position: relative; z-index: 3; width: 100%; max-width: 760px; display: flex; flex-direction: column; align-items: center;
+.ot-toolwrap { position: relative; z-index: 3; width: 100%; max-width: 880px; display: flex; flex-direction: column; align-items: center;
   container: tools / inline-size; }
 /* One row always: flat buttons with a hairline edge (no glow); when the row would not fit, labels give way to icons
    (each keeps its name as tooltip and accessible name). */
 .ot-toolbar { margin-top: var(--space-4); flex-wrap: nowrap; gap: var(--space-2); max-width: 100%; }
 .ot-toolbar .ot-btn { flex: none; gap: 6px; padding: 0 12px; }
 .ot-toolbar .ot-btn-neu { box-shadow: none; border: 1px solid var(--glass-stroke); }
-@container tools (max-width: 700px) {
+/* Room for a seventh button (design v36): labels give way under 820 px; under 360 px the icons are 36 px, 4 px apart. */
+@container tools (max-width: 820px) {
   .ot-toolbar .ot-tb-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .ot-toolbar .ot-btn { width: 40px; padding: 0; justify-content: center; }
 }
-.ot-toolbar .ot-btn.is-on, .ot-toolbar .ot-btn[aria-pressed="true"] { color: var(--accent); }
+@container tools (max-width: 360px) {
+  .ot-toolbar { gap: 4px; }
+  .ot-toolbar .ot-btn { width: 36px; }
+}
+.ot-toolbar .ot-btn.is-on, .ot-toolbar .ot-btn[aria-pressed="true"], .ot-toolbar .ot-btn[aria-expanded="true"] { color: var(--accent); }
 .ot-icon-btn, .ot-answer-x, .ot-insight-fold, .ot-history-del { flex: none; width: 36px; padding: 0; }
 .ot-popover { position: absolute; top: calc(100% + var(--space-2)); left: 0; right: 0; margin: 0 auto; width: min(100%, 520px);
   padding: var(--space-2); border-radius: var(--radius-lg); background: var(--glass-fill-strong); }
 .ot-popover:focus { outline: none; }
-.ot-popover-scroll { max-height: min(60vh, 420px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.ot-popover { scroll-margin: var(--space-2); }
+.ot-popover-scroll { max-height: min(60vh, 420px); overflow-y: auto; will-change: scroll-position; overscroll-behavior: contain; scrollbar-width: thin; }
 .ot-menu-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .ot-menu-item { width: 100%; min-height: 40px; display: flex; align-items: flex-start; gap: var(--space-2); padding: 9px 12px; border: 0; border-radius: var(--radius-md);
   background: transparent; color: var(--ink); font: inherit; font-size: 14px; line-height: 20px; text-align: left; cursor: pointer; }
@@ -176,3 +182,171 @@
 .ot-cards > .ot-insight:not(.is-open) .ot-insight-obs {
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; }
 .ot-cards > .ot-insight:not(.is-open) .ot-reply > span .ot-rich-table { display: none; }
+
+/* ---------- M6a: Scan menu, Benchmark panel, score card, cooling tips, risk note (design v35–v37) ---------- */
+.ot-menu-item-2 { min-height: 44px; gap: var(--space-3); padding: 10px 12px; }
+.ot-menu-item:disabled { cursor: default; color: var(--ink-faint); background: transparent; }
+.ot-menu-item:disabled .ot-muted, .ot-menu-item:disabled .ot-menu-icon { color: var(--ink-faint); }
+.ot-menu-icon { flex: none; color: var(--accent); }
+.ot-menu-item > .ot-menu-icon { margin-top: 2px; }
+.ot-menu-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; overflow-wrap: anywhere; }
+.ot-menu-title { font-weight: 600; }
+.ot-scanmenu { width: min(100%, 420px); }
+.ot-wrap { overflow-wrap: anywhere; min-width: 0; }
+
+.ot-bench { width: 100%; max-width: 680px; margin: var(--space-4) auto 0; padding: var(--space-4) var(--space-5) var(--space-5); border-radius: var(--radius-lg);
+  display: flex; flex-direction: column; gap: var(--space-4); container: bench / inline-size; }
+.ot-bench:focus { outline: none; }
+.ot-bench .ot-answer-head { display: flex; align-items: flex-start; gap: var(--space-2); min-height: 36px; }
+.ot-bench-titles { flex: 1; min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px var(--space-3); padding-top: 6px; }
+.ot-bench .ot-answer-title { flex: none; margin: 0; padding: 0; display: inline-flex; align-items: center; gap: var(--space-2); }
+.ot-bench-glyph { color: var(--accent); }
+.ot-bench-when { overflow-wrap: anywhere; }
+.ot-bench .ot-choice-foot { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); margin: 0; }
+.ot-bench .ot-toast { margin: 0; align-self: center; }
+.ot-bench-err { padding: 10px 14px; border-radius: var(--radius-md); color: var(--ink); background: var(--exposure-tint); }
+
+/* Start: the parts, time and noise, Start. */
+.ot-bparts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 136px), 1fr)); gap: var(--space-3); }
+.ot-bpart { min-width: 0; display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md);
+  background: var(--surface); box-shadow: var(--shadow-neu); color: var(--ink); }
+.ot-bpart > .ot-icon { flex: none; margin-top: 1px; color: var(--accent); }
+.ot-bpart.is-off > .ot-icon { color: var(--ink-muted); }
+.ot-bpart-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ot-bench-meta { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-5); }
+.ot-bench-meta > span { display: inline-flex; align-items: center; gap: 6px; }
+.ot-bench-warn { display: flex; align-items: center; gap: var(--space-2); padding: 10px 14px; border-radius: var(--radius-md); color: var(--exposure); background: var(--exposure-tint); }
+.ot-bench-warn .text-callout { color: var(--ink); }
+
+/* Running: the test rail, the ring, four live charts. */
+.ot-bsteps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+.ot-bstep { min-width: 0; display: flex; flex-direction: column; gap: 6px; color: var(--ink-muted); }
+.ot-bstep-bar { display: block; height: 4px; border-radius: 2px; background: var(--tint-hover); overflow: hidden; }
+.ot-bstep-bar > span { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width .25s linear; }
+.ot-bstep-label { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ot-bstep.is-running, .ot-bstep.is-done { color: var(--ink); }
+.ot-bstep.is-done .ot-icon { color: var(--verified); }
+.ot-bstep.is-skipped .ot-bstep-bar > span { background: var(--ink-faint); }
+.ot-gauge { display: flex; align-items: center; gap: var(--space-5); }
+.ot-gauge-ring { position: relative; flex: none; width: 132px; height: 132px; }
+.ot-gauge-ring svg { width: 100%; height: 100%; display: block; }
+.ot-gauge-track { fill: none; stroke: var(--tint-hover); stroke-width: 9; }
+.ot-gauge-fill { fill: none; stroke: var(--accent); stroke-width: 9; stroke-linecap: round; transition: stroke-dashoffset .25s linear; }
+.ot-gauge-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.ot-gauge-score { font-size: 26px; line-height: 30px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ink); }
+.ot-gauge-text { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.ot-gauge-part { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--ink); }
+.ot-charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.ot-chart { --tone: var(--accent); margin: 0; min-width: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--surface);
+  box-shadow: var(--shadow-neu-inset); display: flex; flex-direction: column; gap: 6px; }
+.ot-chart.tone-exposure { --tone: var(--exposure); }
+.ot-chart.tone-storage { --tone: var(--cat-storage); }
+.ot-chart.tone-performance { --tone: var(--performance); }
+.ot-chart.tone-privacy { --tone: var(--cat-privacy); }
+.ot-chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; }
+.ot-chart-label { color: var(--ink-muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.ot-chart-value { font-size: 20px; line-height: 24px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ot-chart-unit { margin-left: 4px; font-size: 12px; font-weight: 500; color: var(--ink-muted); }
+.ot-chart-plot { display: block; width: 100%; height: 56px; overflow: visible; }
+.ot-chart-line { fill: none; stroke: var(--tone); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ot-chart-area { fill: color-mix(in srgb, var(--tone) 16%, transparent); stroke: none; }
+.ot-chart-ref { stroke: var(--ink-muted); stroke-width: 1; stroke-dasharray: 3 4; }
+.ot-chart-limit { stroke: var(--threat); stroke-width: 1; stroke-dasharray: 3 4; }
+.ot-chart-foot { display: flex; justify-content: space-between; gap: var(--space-2); flex-wrap: wrap; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.ot-chart-key { display: inline-flex; align-items: center; gap: 6px; }
+.ot-chart-key::before { content: ''; width: 12px; border-top: 1px dashed var(--ink-muted); }
+.ot-chart-key.is-limit::before { border-top-color: var(--threat); }
+.ot-chart-off { height: 56px; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px dashed var(--control-stroke); border-radius: var(--radius-sm); color: var(--ink-muted); }
+.ot-chart.is-off .ot-chart-value { color: var(--ink-muted); }
+
+/* Result: one row per part. */
+.ot-brows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-brow { --v: var(--verified); min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "icon name score" "icon stats verdict" "icon obs obs" "icon act act";
+  column-gap: var(--space-4); row-gap: 6px; align-items: center; padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-neu); }
+.ot-brow.is-slow { --v: var(--exposure); }
+.ot-brow.is-hot { --v: var(--threat); }
+.ot-brow.is-gap { --v: var(--ink-muted); }
+.ot-brow.is-slow, .ot-brow.is-hot { box-shadow: var(--shadow-neu), inset 3px 0 0 var(--v); }
+.ot-brow-icon { grid-area: icon; align-self: start; width: 40px; height: 40px; display: grid; place-items: center; border-radius: var(--radius-sm); color: var(--accent); background: var(--ground); box-shadow: var(--shadow-neu-inset); }
+.ot-brow-name { grid-area: name; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ot-brow-score { grid-area: score; display: flex; align-items: baseline; justify-content: flex-end; gap: var(--space-2); white-space: nowrap; }
+.ot-brow-num { font-size: 22px; line-height: 28px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ot-brow-verdict { grid-area: verdict; justify-self: end; }
+.ot-brow-stats { grid-area: stats; min-width: 0; display: flex; flex-wrap: wrap; gap: 4px var(--space-4); color: var(--ink); font-variant-numeric: tabular-nums; }
+.ot-brow-obs { grid-area: obs; min-width: 0; list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 2px var(--space-4); color: var(--ink-muted); overflow-wrap: anywhere; }
+.ot-stat.is-off .ot-stat-v { color: var(--ink-muted); }
+.ot-stat-v { white-space: nowrap; }
+.ot-brow-act { grid-area: act; display: flex; justify-content: flex-end; }
+.ot-verdict { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; white-space: nowrap;
+  color: var(--v, var(--verified)); background: color-mix(in srgb, var(--v, var(--verified)) 14%, transparent); }
+.ot-verdict.is-gap { background: transparent; border: 1px dashed var(--ink-muted); color: var(--ink-muted); }
+.ot-delta { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink-muted); }
+.ot-delta.is-up { color: var(--performance); }
+.ot-delta.is-down { color: var(--exposure); }
+@container bench (max-width: 520px) {
+  .ot-bench { padding: var(--space-4); }
+  .ot-brow { grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "icon name" "score score" "verdict verdict" "stats stats" "obs obs" "act act"; column-gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+  .ot-brow-icon { align-self: center; }
+  .ot-brow-score, .ot-brow-verdict { justify-self: start; justify-content: flex-start; }
+  .ot-brow-act { justify-content: flex-start; }
+  .ot-charts { gap: var(--space-2); }
+  .ot-chart { padding: var(--space-3); }
+}
+@container bench (max-width: 400px) {
+  .ot-gauge { flex-direction: column; text-align: center; gap: var(--space-3); }
+  .ot-gauge-text { align-items: center; }
+  .ot-charts { grid-template-columns: minmax(0, 1fr); }
+  .ot-bsteps .ot-bstep-label { font-size: 12px; }
+}
+
+/* Overall score card. */
+.ot-score { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4) var(--space-5); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 8%, var(--surface)); box-shadow: var(--shadow-neu); }
+.ot-score-main { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3) var(--space-5); }
+.ot-score-now, .ot-score-prev { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ot-score-prev { align-items: flex-end; text-align: right; }
+.ot-score-cap { text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.ot-score-big { font-size: 48px; line-height: 52px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ot-score-mid { font-size: 24px; line-height: 30px; font-weight: 700; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.ot-score-sub { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 26px; }
+.ot-score-sub .ot-delta { font-size: 13px; }
+.ot-score-parts { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-2); }
+.ot-score-parts li { min-width: 0; display: flex; flex-direction: column; gap: 2px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--ground); box-shadow: var(--shadow-neu-inset); }
+.ot-score-part { font-size: 17px; line-height: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ot-score-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.ot-score-acts { display: inline-flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-left: auto; }
+.ot-score-done { color: var(--accent); }
+@container bench (max-width: 520px) {
+  .ot-score { padding: var(--space-3) var(--space-4); }
+  .ot-score-big { font-size: 40px; line-height: 44px; }
+  .ot-score-prev { align-items: flex-start; text-align: left; }
+  .ot-score-parts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Cooling tips (§7: text, no curve). */
+.ot-fan-title { display: inline-flex; align-items: center; gap: var(--space-2); }
+.ot-fan-tag { height: 22px; display: inline-flex; align-items: center; padding: 0 8px; border-radius: var(--radius-pill); font-weight: 600; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ot-cool { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--shadow-neu), inset 3px 0 0 var(--threat); }
+.ot-cool-glyph { color: var(--threat); }
+.ot-cool-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-2) var(--space-4); }
+.ot-cool-list li { display: flex; align-items: flex-start; gap: var(--space-2); color: var(--ink); min-width: 0; }
+.ot-cool-icon { flex: none; margin-top: 1px; color: var(--ink-muted); }
+.ot-cool-apps { display: flex; flex-direction: column; gap: 6px; }
+.ot-cool-cap { text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.ot-cool-applist { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ot-cool-app { min-width: 0; max-width: 100%; display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px var(--space-2); padding: 8px 12px; border-radius: var(--radius-sm); background: var(--ground); box-shadow: var(--shadow-neu-inset); }
+.ot-cool-app.is-mine { outline: 1.5px solid var(--accent); outline-offset: -1.5px; }
+.ot-cool-app-n { font-size: 14px; font-weight: 600; color: var(--ink); }
+
+/* Risk note (overclocking, voltage) and Run benchmark under an answer. */
+.ot-risk { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md);
+  background: var(--threat-tint); border: 1px solid color-mix(in srgb, var(--threat) 45%, transparent); }
+.ot-risk-icon { flex: none; margin-top: 1px; color: var(--threat); }
+.ot-risk-text { min-width: 0; display: flex; flex-direction: column; gap: 2px; color: var(--ink); overflow-wrap: anywhere; }
+.ot-risk-text .text-headline { color: var(--threat); }
+.ot-answer-acts { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ot-gauge-fill, .ot-bstep-bar > span { transition: none; }
+}

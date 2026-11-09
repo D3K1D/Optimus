@@ -38,7 +38,18 @@
     play: 'M8 5l11 7-11 7z',
     list: 'M5 7h14M5 12h14M5 17h14',
     report: 'M7 3h7l4 4v14H7zM14 3v4h4M10 12h5M10 16h5',
-    link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1'
+    link: 'M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1',
+    // M6a (design: Scan menu and Benchmark, Benchmark additions)
+    gauge: 'M4.2 17.5a8.5 8.5 0 1115.6 0M12 13.5l3.8-4.3M12 13.5v.01',
+    cpu: 'M7 7h10v10H7zM10 10h4v4h-4zM9.5 3v4M14.5 3v4M9.5 17v4M14.5 17v4M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4',
+    gpu: 'M2.5 7h17v10h-17zM19.5 10h2M6 17v3M10 17v3M14 12a3 3 0 11-6 0 3 3 0 016 0z',
+    ram: 'M3 7.5h18v8H3zM7 10.5v2M11 10.5v2M15 10.5v2M6 15.5v3M18 15.5v3',
+    thermo: 'M10 14.6V5a2 2 0 014 0v9.6a4 4 0 11-4 0zM12 9.5v6',
+    fan: 'M12 10.6a1.4 1.4 0 110 2.8 1.4 1.4 0 010-2.8zM11 10.8C9.6 7 10.6 3.8 13 4.2c2.2.4 1.8 3.8-.3 6M13.2 11c3.9-1.4 7 .2 6.6 2.6-.4 2.2-3.8 1.8-6-.3M13 13.2c1.4 3.9.4 7-2 6.6-2.2-.4-1.8-3.8.3-6M10.8 13c-3.9 1.4-7-.2-6.6-2.6.4-2.2 3.8-1.8 6 .3',
+    plug: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0zM12 17v4',
+    clock: 'M12 3.5a8.5 8.5 0 110 17 8.5 8.5 0 010-17zM12 7.5V12l3 2',
+    copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
+    download: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14'
   };
 
   function Icon(p) {
@@ -1000,11 +1011,14 @@
         p.ignoreChoices.map(function (c) {
           return h('button', { key: c.id, type: 'button', className: 'ot-suggest-chip is-small', title: c.title || undefined, onClick: function () { setIgnoring(false); if (p.onIgnore) p.onIgnore(c.id); } }, c.label);
         })) : null),
+      // M6a §8: an AI reply with warnings ["voltage"] gets the risk block above it, once.
+      p.reply && p.replyRisk && h(RiskNote, { className: 'ot-reply-risk' }),
       (p.reply || p.replyBusy) && h('div', { className: cx('ot-reply text-callout', !p.reply && 'is-busy') },
         p.reply ? h(Icon, { name: 'spark', size: 16 }) : h(Logo, { size: 16, spin: true, decorative: true, className: 'ot-busy-logo' }),
         h('span', null, p.reply ? h(RichText, { text: p.reply }) : h('span', { className: 'ot-muted' }, p.replyBusy),
           (p.replyCites || []).map(function (c) { return h('button', { key: c.id, type: 'button', className: 'ot-cite text-mono-sm', title: c.id, onClick: function () { if (p.onCite) p.onCite(c.id); } }, c.label); }),
           p.reply && p.onReplyConnect && h(Button, { variant: 'ghost', size: 'sm', icon: 'spark', className: 'ot-reply-connect', onClick: p.onReplyConnect }, 'Connect AI'))),
+      p.reply && p.onReplyBenchmark && h('div', { className: 'ot-answer-acts' }, h(Button, { variant: 'neu', size: 'sm', icon: 'gauge', onClick: p.onReplyBenchmark }, 'Run benchmark')),
       h(AskField, { placeholder: 'Ask about this…', onSend: p.onAsk, focusToken: p.askToken, restore: p.askRestore, onFocusIn: p.onAskFocus, onFocusOut: p.onAskBlur }));
   }
 
@@ -1296,14 +1310,27 @@
 
   // One question from the box and its answer (m5 §9): the question as the title, Close beside it; the answer with its
   // citation chips, or the turning gear with Stop while it runs; then the AI's follow-ups (each asks as a new panel).
+  // M6a §8: the risk block for overclocking and voltage. Danger styling, calm words; no action (the app never applies these).
+  function RiskNote(p) {
+    return h('div', { className: cx('ot-risk', p.className), role: 'note' },
+      h(Icon, { name: 'alert', size: 20, strokeWidth: 2, className: 'ot-risk-icon' }),
+      h('div', { className: 'ot-risk-text' },
+        h('span', { className: 'text-headline' }, p.title || 'Your call'),
+        h('span', { className: 'text-callout' }, p.children || 'Overclocking and voltage changes can cause crashes or damage. Optimus never applies them.')));
+  }
+
   function AnswerPanel(p) {
     var a = p.item, running = !a.text && !a.failed;
     var follow = p.onFollow && a.text && (a.followUps || []).length ? a.followUps : null;
+    // M6a §8: warnings ["voltage"] → the risk block above the text (once); suggest "benchmark" → Run benchmark.
+    var risk = a.text && (a.warnings || []).indexOf('voltage') >= 0;
+    var bench = a.text && a.suggest === 'benchmark' && p.onBenchmark;
     return h(GlassPanel, { className: cx('ot-summary-inline ot-answers ot-answer-panel', p.className), role: 'region', 'aria-label': a.q || 'Answer',
         'data-answer': a.id, tabIndex: -1 },
       h('div', { className: 'ot-answer-head' },
         h('h3', { className: 'text-headline ot-answer-title' }, a.q || 'Answer'),
         p.onClose && h(Button, { variant: 'ghost', size: 'sm', icon: 'close', className: 'ot-answer-x', 'aria-label': 'Close', title: 'Close', onClick: p.onClose })),
+      risk && h(RiskNote, null),
       h('div', { className: 'ot-answer', 'aria-live': 'polite' },
         a.failed ? h('div', { className: 'ot-answer-fail' }, h('span', { className: 'text-callout ot-muted' }, a.failed),
           a.action && h(Button, { variant: 'neu', size: 'sm', onClick: a.action.onClick }, a.action.label))
@@ -1311,6 +1338,7 @@
         : h('div', { className: 'ot-answer-busy' },
             h('div', { className: 'text-mono-sm ot-muted ot-turn' }, h(Logo, { size: 16, spin: true, decorative: true, className: 'ot-busy-logo' }), a.busy || 'Thinking…'),
             running && p.onStop && h(Button, { variant: 'neu', size: 'sm', icon: 'stop', onClick: p.onStop }, 'Stop'))),
+      bench && h('div', { className: 'ot-answer-acts' }, h(Button, { variant: 'neu', size: 'sm', icon: 'gauge', onClick: p.onBenchmark }, 'Run benchmark')),
       follow && h('div', { className: 'ot-followups' }, follow.map(function (q) {
         return h('button', { key: q, type: 'button', className: 'ot-suggest-chip is-small', disabled: !!p.followBusy, onClick: function () { p.onFollow(q); } }, q);
       })));
@@ -1321,10 +1349,13 @@
   // the page. toggleId: the button that opened it (it stays a toggle, so clicking it isn't "outside").
   function Popover(p) {
     var ref = React.useRef(null), menuStep = window.OptTool && window.OptTool.menuStep;
-    function items() { return ref.current ? Array.prototype.slice.call(ref.current.querySelectorAll('[data-menu-item]')) : []; }
+    function items() { return ref.current ? Array.prototype.slice.call(ref.current.querySelectorAll('[data-menu-item]:not(:disabled)')) : []; }
     function back() { var t = p.toggleId && document.getElementById(p.toggleId); if (t && t.focus) t.focus(); }
+    // The whole panel stays inside the viewport, on open and when the arrow keys move focus in it (not just the focused row).
+    function keep() { var k = window.OptTool && window.OptTool.keepInView; if (k && ref.current) k(ref.current.parentNode); }
     React.useEffect(function () {
       var first = items()[0]; if (first && first.focus) first.focus(); else if (ref.current) ref.current.focus();
+      keep();
       function onKey(e) { if (e.key === 'Escape') { e.stopPropagation(); p.onClose(); back(); } }
       function away(e) {
         var t = e.target;
@@ -1338,7 +1369,7 @@
     function onKeyDown(e) {
       var list = items(), at = list.indexOf(document.activeElement), next = menuStep ? menuStep(e.key, at, list.length) : -1;
       if (next < 0) return;
-      e.preventDefault(); list[next].focus();
+      e.preventDefault(); list[next].focus(); keep();
     }
     return h(GlassPanel, { className: cx('ot-popover', p.className), id: p.id, role: 'group', 'aria-label': p.label, tabIndex: -1, onKeyDown: onKeyDown },
       h('div', { ref: ref, className: 'ot-popover-scroll' }, p.children));
@@ -1364,7 +1395,7 @@
           h('button', { type: 'button', 'data-menu-item': true, className: cx('ot-menu-item', r.open && 'is-on'), title: r.title, 'aria-current': r.open ? 'true' : undefined, onClick: function () { p.onOpen(r); } },
             h('span', { className: 'ot-history-title' }, r.title),
             h('span', { className: 'text-mono-sm ot-muted ot-history-when' }, r.running ? 'Now' : r.when || '')),
-          h(Button, { variant: 'ghost', size: 'sm', icon: 'trash', className: 'ot-history-del', 'aria-label': 'Delete: ' + r.title, title: 'Delete', disabled: r.running,
+          !r.keep && h(Button, { variant: 'ghost', size: 'sm', icon: 'trash', className: 'ot-history-del', 'aria-label': 'Delete: ' + r.title, title: 'Delete', disabled: r.running,
             onClick: function () { p.onDelete(r); } }));
       })) : h('p', { className: 'text-callout ot-muted ot-menu-empty' }, 'Nothing yet'));
   }
@@ -1477,9 +1508,9 @@
     ConnectionPill: ConnectionPill, PermissionGrant: PermissionGrant, AgentActivity: AgentActivity, ApprovalCard: ApprovalCard,
     CheckRow: CheckRow, AskField: AskField, ChoicePanel: ChoicePanel, SpecScanPanel: SpecScanPanel, PromptBox: PromptBox,
     StarterPrompt: StarterPrompt, ScanStatus: ScanStatus, CopyField: CopyField, PairingCard: PairingCard, GrantSheet: GrantSheet,
-    CardGrid: CardGrid, ActivityPanel: ActivityPanel, AgentAnswers: AgentAnswers, AnswerPanel: AnswerPanel, SuggestionList: SuggestionList, HistoryList: HistoryList, AiScanPanel: AiScanPanel, EvidencePeek: EvidencePeek, ContinuePanel: ContinuePanel, ConnectionDetail: ConnectionDetail, PlanCard: PlanCard, InsightCard: InsightCard, ReviewComplete: ReviewComplete, SharePreview: SharePreview, ReportSheet: ReportSheet,
+    CardGrid: CardGrid, ActivityPanel: ActivityPanel, AgentAnswers: AgentAnswers, AnswerPanel: AnswerPanel, RiskNote: RiskNote, Popover: Popover, SuggestionList: SuggestionList, HistoryList: HistoryList, AiScanPanel: AiScanPanel, EvidencePeek: EvidencePeek, ContinuePanel: ContinuePanel, ConnectionDetail: ConnectionDetail, PlanCard: PlanCard, InsightCard: InsightCard, ReviewComplete: ReviewComplete, SharePreview: SharePreview, ReportSheet: ReportSheet,
     LoginPanel: LoginPanel, LoginScreen: LoginScreen,
     // Shared, data-free helpers for app-flow.js.
-    ui: { cx: cx, CATS: CATS, SCAN_CATS: SCAN_CATS, PROVIDERS: PROVIDERS }
+    ui: { cx: cx, CATS: CATS, SCAN_CATS: SCAN_CATS, PROVIDERS: PROVIDERS, LOGO_SVG: LOGO_SVG }
   });
 })();

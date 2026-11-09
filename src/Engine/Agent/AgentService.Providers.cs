@@ -29,6 +29,8 @@ public sealed partial class AgentService
 
     private readonly Dictionary<string, ApiState> _api = new() { ["anthropic_api"] = new(), ["openai_api"] = new(), ["chatgpt_plan"] = new() };
     private readonly Dictionary<string, string> _mcpOutcome = [];   // kind → pairing_expired | denied | bridge_rejected
+    /// <summary>kind → the cancel switch of its running browser sign-in (provider.disconnect pulls it). Guarded by _gate.</summary>
+    private readonly Dictionary<string, CancellationTokenSource> _signIns = [];
     private readonly Dictionary<string, Published> _published = [];
 
     private IProviderAdapter? Adapter(string kind) => _options.Providers.FirstOrDefault(a => a.Kind == kind);
@@ -191,14 +193,16 @@ public sealed partial class AgentService
         };
     });
 
-    /// <summary>The §3.3 diagnostics whose collectors exist in this build (none on the fixture source), for the grant sheet.</summary>
+    /// <summary>The §3.3 diagnostics whose collectors exist in this build (none on the fixture source), for the grant sheet.
+    /// sensors.snapshot has no collector: it is offered when the benchmark sensors are available (m6 §8).</summary>
     private JsonArray AvailableDiagnostics()
     {
         var ids = _catalog.IsFixture ? [] : _catalog.Collectors.Select(c => c.Id).ToHashSet();
         var all = new Grant([.. Diagnostics.All.Select(d => d.Id)], false, new Limits(), 900);
         var runSchema = Diagnostics.Tools(all).First(t => t.Name == Diagnostics.RunDiagnostic).InputSchema;
         return new JsonArray(Diagnostics.All
-            .Where(d => d.TakesTarget ? Diagnostics.EventTargets.Any(t => ids.Contains($"win.events.{t}")) : d.CollectorIds.Any(ids.Contains))
+            .Where(d => d.Id == Diagnostics.SensorsSnapshot ? Bench?.SensorsAvailable == true
+                : d.TakesTarget ? Diagnostics.EventTargets.Any(t => ids.Contains($"win.events.{t}")) : d.CollectorIds.Any(ids.Contains))
             .Select(d => (JsonNode?)new JsonObject
             {
                 ["id"] = d.Id, ["description"] = d.Description, ["arguments"] = ArgumentSchema(d, all, runSchema),
@@ -435,13 +439,15 @@ public sealed partial class AgentService
         if (SignIn(kind) is { } signIn)
         {
             var adapter = Adapter(kind) ?? throw RpcError.State("provider_unavailable", "That provider is not available in this build.");
+            var cancel = new CancellationTokenSource();
             lock (_gate)
             {
                 if (_api[kind].Checking) return Entry(kind); // a sign-in is already running
                 _api[kind].Checking = true;
+                _signIns[kind] = cancel;
             }
             RefreshProviders(kind);
-            Track(Task.Run(() => SignInAsync(kind, signIn, adapter)));
+            Track(Task.Run(() => SignInAsync(kind, signIn, adapter, cancel)));
             return FreshEntry(kind);
         }
         if (InAppKinds.Contains(kind))
@@ -467,25 +473,36 @@ public sealed partial class AgentService
     /// Browser sign-in (at most SignInTimeout), then the same check as a key: connected, or error with a safe reason:
     /// callback_timeout (the browser never came back: blocked loopback, another browser profile, or the tab was left),
     /// cancelled (the user said no), not_eligible, network, storage (tokens not saved), unavailable (anything else).
+    /// provider.disconnect cancels it through <paramref name="cancel"/>: it then stores nothing, runs no check and
+    /// leaves the provider as the disconnect left it.
     /// </summary>
-    private async Task SignInAsync(string kind, IProviderSignIn signIn, IProviderAdapter adapter)
+    private async Task SignInAsync(string kind, IProviderSignIn signIn, IProviderAdapter adapter, CancellationTokenSource cancel)
     {
         string? error = "unavailable";
         try
         {
             try
             {
-                using var cts = new CancellationTokenSource(_options.SignInTimeout);
+                using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancel.Token);
+                cts.CancelAfter(_options.SignInTimeout);
                 var result = await signIn.SignInAsync(url => OpenAuthorizationUrl(signIn, url), cts.Token).WaitAsync(cts.Token).ConfigureAwait(false);
                 error = result.Ok ? null : SignInError(result.Error);
             }
-            catch (OperationCanceledException) { error = "callback_timeout"; }
+            catch (OperationCanceledException) { error = cancel.IsCancellationRequested ? "cancelled" : "callback_timeout"; }
             catch (Exception ex)
             {
                 _log($"provider {kind}: sign-in failed ({ex.GetType().Name})");
                 error = "unavailable";
             }
 
+            if (cancel.IsCancellationRequested)
+            {
+                // Disconnected while signing in. If the sign-in still finished, its tokens go too (the provider also
+                // refuses to save after a sign-out; this covers a sign-in that saved just before it).
+                if (error is null) signIn.SignOut();
+                _log($"provider {kind}: sign-in cancelled by disconnect");
+                return;
+            }
             if (error is null)
             {
                 using var cts = new CancellationTokenSource(CheckTimeout);
@@ -505,7 +522,10 @@ public sealed partial class AgentService
             bool stuck;
             lock (_gate)
             {
-                stuck = _api[kind].Checking;
+                // After a disconnect this sign-in no longer owns the provider's state (a newer one may be running).
+                var mine = _signIns.TryGetValue(kind, out var current) && ReferenceEquals(current, cancel);
+                if (mine) _signIns.Remove(kind);
+                stuck = mine && _api[kind].Checking;
                 if (stuck)
                 {
                     _api[kind].Checking = false;
@@ -557,7 +577,14 @@ public sealed partial class AgentService
         var kind = P.OneOf(p, "kind", ProviderKinds);
         if (InAppKinds.Contains(kind))
         {
-            if (SignIn(kind) is { } signIn) signIn.SignOut(); // deletes the stored tokens
+            // A sign-in still waiting for the browser is cancelled first, so it cannot store tokens after this.
+            CancellationTokenSource? pending;
+            lock (_gate)
+            {
+                if (_signIns.Remove(kind, out pending)) _api[kind].Checking = false;
+            }
+            pending?.Cancel();
+            if (SignIn(kind) is { } signIn) signIn.SignOut(); // deletes the stored tokens (and voids a refresh in flight)
             else _credentials.Delete(kind);
             lock (_gate)
             {

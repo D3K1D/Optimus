@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/bench-run.schema.json",
+  "title": "BenchRun",
+  "description": "bench.start / bench.get / bench.cancel result (contracts/m6-benchmark.md §2). live is in-memory only (null when the run is not live).",
+  "type": "object",
+  "required": ["runId", "state", "reason", "startedAt", "finishedAt", "benchVersion", "configId", "estSeconds", "tests", "metrics", "result", "live", "eventCursor"],
+  "properties": {
+    "runId": { "type": "string", "pattern": "^bench-[0-9a-f]{16}$" },
+    "state": { "enum": ["starting", "running", "stopping", "done", "cancelled", "stopped_on_battery", "failed", "interrupted"] },
+    "reason": { "type": ["string", "null"] },
+    "startedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+    "finishedAt": { "oneOf": [{ "type": "null" }, { "$ref": "scan.schema.json#/$defs/timestamp" }] },
+    "benchVersion": { "const": "1" },
+    "configId": { "type": ["string", "null"], "pattern": "^cfg-[0-9a-f]{16}$" },
+    "estSeconds": { "type": "integer", "minimum": 0 },
+    "power": { "type": "object", "properties": { "ac": { "enum": ["online", "offline", "unknown"] }, "battery": { "enum": ["present", "absent", "unknown"] } } },
+    "tests": {
+      "type": "array", "maxItems": 4,
+      "items": {
+        "type": "object", "required": ["part", "state", "reason", "progress", "liveScore", "etaSec"],
+        "properties": {
+          "part": { "$ref": "#/$defs/part" }, "device": { "type": "string" },
+          "state": { "$ref": "#/$defs/testState" }, "reason": { "type": ["string", "null"] },
+          "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+          "liveScore": { "type": ["number", "null"] }, "etaSec": { "type": ["integer", "null"] }, "subtest": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "metrics": {
+      "type": "object", "propertyNames": { "$ref": "#/$defs/part" },
+      "additionalProperties": { "type": "array", "items": { "$ref": "#/$defs/slot" } }
+    },
+    "live": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "object", "required": ["part", "t0", "score", "samples"],
+          "properties": {
+            "part": { "$ref": "#/$defs/part" }, "t0": { "type": "string" }, "score": { "type": ["number", "null"] },
+            "samples": { "type": "object", "propertyNames": { "pattern": "^(cpu|gpu|ram|disk)\\.[a-z0-9]+$" },
+              "additionalProperties": { "type": "array", "maxItems": 60, "items": { "type": ["number", "null"] } } } } }
+      ]
+    },
+    "result": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/result" }] },
+    "eventCursor": { "type": "object", "required": ["stream", "seq"],
+      "properties": { "stream": { "type": "string", "pattern": "^bench:bench-" }, "seq": { "type": "integer", "minimum": 0 } } }
+  },
+  "$defs": {
+    "part": { "enum": ["cpu", "gpu", "ram", "disk"] },
+    "testState": { "enum": ["queued", "running", "done", "skipped", "failed", "cancelled"] },
+    "slot": {
+      "type": "object", "required": ["id", "unit", "source", "max", "expected", "limit", "available", "reason"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(cpu|gpu|ram|disk)\\.[a-z0-9]+$" }, "unit": { "type": "string" },
+        "source": { "enum": ["pdh", "emi", "d3dkmt", "nvml", "wmi", "worker", "none"] },
+        "max": { "type": ["number", "null"] }, "expected": { "type": ["number", "null"] }, "limit": { "type": ["number", "null"] },
+        "available": { "type": "boolean" }, "reason": { "type": ["string", "null"] }
+      }
+    },
+    "figure": { "type": "object", "required": ["value", "unit", "source"],
+      "properties": { "value": { "type": "number" }, "unit": { "type": "string" }, "source": { "type": "string" } } },
+    "result": {
+      "type": "object", "required": ["score", "partial", "partsScored", "comparison", "differentSetup", "parts", "fanGuidance"],
+      "properties": {
+        "score": { "type": ["number", "null"] },
+        "partial": { "type": "boolean" },
+        "partsScored": { "type": "array", "items": { "$ref": "#/$defs/part" } },
+        "differentSetup": { "type": "boolean" },
+        "comparison": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "required": ["prevRunId", "prevScore", "prevFinishedAt", "deltas"],
+              "properties": {
+                "prevRunId": { "type": "string", "pattern": "^bench-" }, "prevScore": { "type": "number" }, "prevFinishedAt": { "type": ["string", "null"] },
+                "deltas": { "type": "object", "propertyNames": { "$ref": "#/$defs/part" },
+                  "additionalProperties": { "type": "object", "required": ["prev", "pct"], "properties": { "prev": { "type": "number" }, "pct": { "type": "number" } } } } } }
+          ]
+        },
+        "parts": {
+          "type": "array",
+          "items": {
+            "type": "object", "required": ["part", "device", "score", "verdict", "reason", "why", "figures", "observations", "evidenceIds"],
+            "properties": {
+              "part": { "$ref": "#/$defs/part" }, "device": { "type": "string" },
+              "score": { "type": ["number", "null"] },
+              "verdict": { "enum": ["running_hot", "unmeasured", "slower_than_before", "no_issue"] },
+              "reason": { "type": ["string", "null"] },
+              "why": { "type": "array", "items": { "type": "string" } },
+              "figures": { "type": "object", "additionalProperties": { "$ref": "#/$defs/figure" } },
+              "observations": { "type": "array", "items": { "type": "object", "required": ["id"],
+                "properties": { "id": { "enum": ["power_limited", "clock_drop_after_boost", "thermal_slowdown_brief", "ram_speed_below_module_rating", "disk_below_typical_for_type", "lower_than_before_unconfirmed"] } } } },
+              "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-[0-9a-f]{16}$" } },
+              "missingSensors": { "type": "array", "items": { "type": "object", "required": ["id"] } }
+            }
+          }
+        },
+        "fanGuidance": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "object", "required": ["brand", "tips", "pump"], "additionalProperties": false,
+              "properties": {
+                "brand": { "enum": ["any", "asus", "lenovo"] },
+                "tips": { "type": "array", "items": { "enum": ["bios_fan_mode", "clean_filters", "check_fans_spin", "gpu_default_curve"] } },
+                "pump": { "type": "boolean" } } }
+          ]
+        }
+      }
+    }
+  }
+}

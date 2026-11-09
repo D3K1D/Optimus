@@ -125,6 +125,12 @@ public sealed partial class AgentService
                     ? (new JsonObject { ["cardId"] = args.Text("cardId"), ["status"] = "noted" }, "", null)
                     : (null, "", ToolError("invalid_arguments", "Unknown cardId for this report."));
 
+            case Diagnostics.GetBenchmarks:
+                return Benchmarks(db, task, grant, args);
+
+            case Diagnostics.GetFanGuidance:
+                return (global::OptimizationTool.Engine.Bench.BenchService.FanGuidanceTool(db, args.Text("part")), "", null);
+
             default: // add_card
                 JsonObject report;
                 try { report = ReportService.Load(db, reportId); }

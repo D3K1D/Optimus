@@ -17,7 +17,7 @@ public static class Diagnostics
     /// <summary>network.listeners: exposed (default) = a summary plus what other devices can reach; all = every endpoint row.</summary>
     public static readonly string[] ListenerTargets = ["exposed", "all"];
     public static readonly string[] AllTargets = [.. EventTargets, .. ListenerTargets];
-    public const string Listeners = "network.listeners";
+    public const string Listeners = "network.listeners", SensorsSnapshot = "sensors.snapshot";
     public const int DefaultSampleSeconds = 15, MinSampleSeconds = 5, DefaultLookbackDays = 7, MaxLookbackDays = 7;
 
     /// <summary>A diagnostic expected to run longer than this returns an operation ID instead of waiting.</summary>
@@ -34,6 +34,8 @@ public static class Diagnostics
         new("display.modes", "Each active display's current and maximum refresh rate.", ["win.custom.display"], 2, false, false),
         new("devices.problems", "Devices that report a problem code.", ["win.devices.pnp"], 4, false, false),
         new("security.status", "Antivirus, Defender and firewall status.", ["win.security.wsc", "win.security.defender", "win.security.firewall"], 4, false, false),
+        // m6 §8: driver-free sensors at 1 Hz for a few seconds (CPU, then GPU). Refused while a benchmark, scan or change runs.
+        new(SensorsSnapshot, "Reads CPU and GPU sensors (clocks, GPU temperature, power and fan) at 1 Hz for up to 10 seconds. Refused while a benchmark runs.", [], 8, false, false),
     ];
 
     public static DiagnosticDef? Find(string id) => All.FirstOrDefault(d => d.Id == id);
@@ -43,7 +45,10 @@ public static class Diagnostics
 
     /// <summary>M5 (contracts/m5-chat.md §5): always allowed, read-only or deck-only, no diagnostic budget.</summary>
     public const string GetCards = "get_cards", GetPcSpecs = "get_pc_specs", GetReportHistory = "get_report_history", NoteCard = "note_card", AddCard = "add_card";
-    public static readonly string[] ContextTools = [GetCards, GetPcSpecs, GetReportHistory, NoteCard, AddCard];
+    /// <summary>M6a (contracts/m6-benchmark.md §8): read-only benchmark results and fan guidance, no diagnostic budget.</summary>
+    public const string GetBenchmarks = "get_benchmarks", GetFanGuidance = "get_fan_guidance";
+    public const int MaxBenchmarks = 5, DefaultBenchmarks = 1;
+    public static readonly string[] ContextTools = [GetCards, GetPcSpecs, GetReportHistory, NoteCard, AddCard, GetBenchmarks, GetFanGuidance];
     public static readonly string[] ToolNames = [ListCapabilities, GetFindings, RunDiagnostic, GetOperation, RequestAction, .. ContextTools];
 
     public const int MaxNoteChars = 600, MaxCardTitle = 120, MaxCardWhy = 400, MaxCardRefs = 5, MaxHistory = 10, DefaultHistory = 5;
@@ -147,6 +152,23 @@ public static class Diagnostics
             ["required"] = new JsonArray("title", "why", "category"),
             ["additionalProperties"] = false,
         }),
+        new(GetBenchmarks, "Returns benchmark results (scores, verdicts, observations, evidence): one run by runId, or the latest runs (limit 1-5, default 1). You cannot start a benchmark.", new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
+            {
+                ["runId"] = new JsonObject { ["type"] = "string", ["pattern"] = "^bench-" },
+                ["limit"] = new JsonObject { ["type"] = "integer", ["minimum"] = 1, ["maximum"] = MaxBenchmarks, ["default"] = DefaultBenchmarks },
+            },
+            ["additionalProperties"] = false,
+        }),
+        new(GetFanGuidance, "Returns Optimus's cooling guidance for one part (text tips only; there are no fan curves to set).", new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject { ["part"] = new JsonObject { ["type"] = "string", ["enum"] = Json.Array(["cpu", "gpu", "ram", "disk"]) } },
+            ["required"] = new JsonArray("part"),
+            ["additionalProperties"] = false,
+        }),
     ];
 
     /// <summary>request_action (M4): asks the user to approve one catalog change. It never approves anything itself.</summary>
@@ -179,6 +201,8 @@ public static class Diagnostics
             GetOperation => ["operationId", "planId"],
             RequestAction => ["actionId", "targetRef", "parameters", "findingRef"],
             GetReportHistory => ["limit"],
+            GetBenchmarks => ["runId", "limit"],
+            GetFanGuidance => ["part"],
             NoteCard => ["cardId", "text"],
             AddCard => ["title", "why", "category", "findingIds", "evidenceIds"],
             _ => [],
@@ -283,6 +307,25 @@ public static class Diagnostics
                     var limit = Int("limit") ?? DefaultHistory;
                     if (limit is < 1 or > MaxHistory) throw new ArgumentException($"limit must be 1-{MaxHistory}.");
                     args["limit"] = limit;
+                    break;
+                case GetBenchmarks:
+                    var runId = Str("runId", 64);
+                    var benchLimit = Int("limit");
+                    if (runId is not null && benchLimit is not null) throw new ArgumentException("Send runId or limit, not both.");
+                    if (runId is not null)
+                    {
+                        if (!runId.StartsWith("bench-", StringComparison.Ordinal)) throw new ArgumentException("runId must be a benchmark ID.");
+                        args["runId"] = runId;
+                    }
+                    else
+                    {
+                        var n = benchLimit ?? DefaultBenchmarks;
+                        if (n is < 1 or > MaxBenchmarks) throw new ArgumentException($"limit must be 1-{MaxBenchmarks}.");
+                        args["limit"] = n;
+                    }
+                    break;
+                case GetFanGuidance:
+                    args["part"] = Str("part", 8, ["cpu", "gpu", "ram", "disk"]) ?? throw new ArgumentException("part is required.");
                     break;
                 case NoteCard:
                     var cardId = Str("cardId", 64) ?? throw new ArgumentException("cardId is required.");

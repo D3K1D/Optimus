@@ -403,7 +403,7 @@ public class AgentTests
         var (host, desktop, reportId) = await Start(AgentSetup.Options(null), time);
         await using var _ = host;
         var agent = await host.ConnectAsync(kind: "agent", minor: 2);
-        Assert.Equal(4, (int)agent.Hello!["protocol"]!["minor"]!);
+        Assert.Equal(5, (int)agent.Hello!["protocol"]!["minor"]!);
 
         // Before pairing: tool.call says not_paired; an agent cannot call desktop methods.
         Assert.Equal("not_paired", (await agent.Fails("tool.call", new JsonObject { ["name"] = "list_capabilities" })).ErrorData.Str("reason"));
@@ -470,6 +470,33 @@ public class AgentTests
     }
 
     [Fact]
+    public async Task DesktopClient_FromAnUntrustedImage_IsRejected()
+    {
+        // The test runner is not OptimizationTool.exe beside the host, so it cannot claim the desktop allowlist (approvals).
+        await using var host = TestHost.StartAgent(AgentSetup.Options(null), devAllowAnyClient: false);
+        var c = await host.ConnectAsync(hello: false);
+        var error = await c.Fails("session.hello", Rpc.HelloParams(kind: "desktop", minor: 2));
+        Assert.Equal("untrusted_client", error.ErrorData.Str("reason"));
+        Assert.Equal(ErrorCodes.HandshakeRequired, (await c.Fails("action.approve", new JsonObject { ["planId"] = "p" })).Code);
+    }
+
+    [Fact]
+    public async Task TestClient_WithoutTheDevOption_IsRejected()
+    {
+        await using var host = TestHost.StartAgent(AgentSetup.Options(null), devAllowAnyClient: false);
+        var c = await host.ConnectAsync(hello: false);
+        Assert.Equal("untrusted_client", (await c.Fails("session.hello", Rpc.HelloParams(kind: "test", minor: 2))).ErrorData.Str("reason"));
+    }
+
+    [Fact]
+    public void DesktopImage_IsTrustedOnlyBesideTheHost()
+    {
+        Assert.True(OptimizationTool.Host.HostServer.IsTrustedImage(Path.Combine(AppContext.BaseDirectory, "OptimizationTool.exe"), OptimizationTool.Host.HostServer.DesktopExecutable));
+        Assert.False(OptimizationTool.Host.HostServer.IsTrustedImage(Path.Combine(Path.GetTempPath(), "OptimizationTool.exe"), OptimizationTool.Host.HostServer.DesktopExecutable));
+        Assert.False(OptimizationTool.Host.HostServer.IsTrustedImage(null, OptimizationTool.Host.HostServer.DesktopExecutable));
+    }
+
+    [Fact]
     public async Task ApiKey_NeverReachesEventsLogsOrTheDatabase()
     {
         var logs = new System.Collections.Concurrent.ConcurrentQueue<string>();
@@ -522,10 +549,10 @@ public class AgentTests
     public async Task OlderClients_StillHandshake()
     {
         await using var host = TestHost.StartAgent(AgentSetup.Options(null));
-        foreach (var minor in new[] { 0, 1, 2, 3, 4 })
+        foreach (var minor in new[] { 0, 1, 2, 3, 4, 5 })
         {
             var c = await host.ConnectAsync(minor: minor);
-            Assert.Equal(4, (int)c.Hello!["protocol"]!["minor"]!);
+            Assert.Equal(5, (int)c.Hello!["protocol"]!["minor"]!);
         }
     }
 

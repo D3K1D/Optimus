@@ -319,6 +319,37 @@ public sealed class ChatGptSignInTests
     }
 
     [Fact]
+    public async Task Sign_out_during_sign_in_stores_no_tokens()
+    {
+        using var f = new FakeIssuer();
+        // The user disconnects while the code is being exchanged: the exchange still answers, but nothing may be saved.
+        f.TokenOverride = _ => { f.SignIn.SignOut(); return null; };
+        var result = await f.SignIn.SignInAsync(f.Approve(), CancellationToken.None);
+        Assert.False(result.Ok);
+        Assert.Equal("access_denied", result.Error);
+        Assert.False(f.SignIn.IsSignedIn);
+        Assert.False(f.Store.Values.ContainsKey(ChatGptSignIn.TokenKind));
+
+        // A sign-in started after the sign-out works as usual.
+        f.TokenOverride = null;
+        Assert.True((await f.SignIn.SignInAsync(f.Approve(), CancellationToken.None)).Ok);
+        Assert.True(f.SignIn.IsSignedIn);
+    }
+
+    [Fact]
+    public async Task Sign_out_during_refresh_stores_no_tokens()
+    {
+        using var f = new FakeIssuer();
+        Assert.True((await f.SignIn.SignInAsync(f.Approve(), CancellationToken.None)).Ok);
+        f.Time.Now = f.Time.Now.AddMinutes(59); // due for a refresh
+        f.TokenOverride = form => { if (form["grant_type"] == "refresh_token") f.SignIn.SignOut(); return null; };
+        var e = await Assert.ThrowsAsync<ProviderException>(() => f.SignIn.GetAccessTokenAsync());
+        Assert.Equal("auth", e.Code);
+        Assert.False(f.SignIn.IsSignedIn);
+        Assert.False(f.Store.Values.ContainsKey(ChatGptSignIn.TokenKind));
+    }
+
+    [Fact]
     public async Task Refresh_rotates_and_persists_and_runs_once_for_concurrent_callers()
     {
         using var f = new FakeIssuer();

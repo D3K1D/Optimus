@@ -9,7 +9,7 @@ namespace OptimizationTool.Engine;
 /// with its evidence, coverage and events in one transaction; the finish step builds the report from whatever was
 /// committed. A skippable collector (the sampler) can be skipped on its own (protocol §9 scan.skipCollector).
 /// </summary>
-internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog catalog, TimeSpan scanDeadline, TimeProvider time, Action<string> log)
+internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog catalog, TimeSpan scanDeadline, TimeProvider time, Action<string> log, WorkLease? lease = null)
 {
     public const int ExpensiveSlots = 2, CheapSlots = 4;
     public static readonly TimeSpan SkipGrace = TimeSpan.FromSeconds(5);
@@ -17,6 +17,7 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
 
     private readonly object _gate = new();
     private readonly Dictionary<string, Run> _runs = [];
+    private readonly WorkLease _lease = lease ?? new WorkLease();
 
     private sealed class Run(string scanId, IReadOnlyList<ICollector> plan, TimeSpan deadline)
     {
@@ -49,7 +50,11 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
         if (intent != "rescan" && fixture.CategoriesFor(intent) is null) throw RpcError.Params("intent", $"Unknown intent {intent}.");
 
         Run? started = null;
-        var (result, _) = store.Write(db => Idempotency.Run(db, "scan.start", key, p, () =>
+        string? leased = null;
+        JsonNode result;
+        try
+        {
+        (result, _) = store.Write(db => Idempotency.Run(db, "scan.start", key, p, () =>
         {
             if (db.Scalar("SELECT scan_id FROM scans WHERE status IN ('queued','running') LIMIT 1") is string busy)
                 throw new RpcError(ErrorCodes.ScanActive, "A scan is already running.", new JsonObject { ["scanId"] = busy });
@@ -71,9 +76,19 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
                 db.Exec("INSERT INTO scan_collectors (scan_id, collector_id, ord, category, version, status) VALUES ($s, $c, $o, $g, $v, 'queued')",
                     ("$s", scanId), ("$c", plan[i].Id), ("$o", i), ("$g", plan[i].Category), ("$v", plan[i].Version));
             db.AppendEvent(Stream(scanId), "scan.progress", ProgressEvent(db, scanId, null));
+            // m6 §2: one lease shared with benchmarks, sensor snapshots and performance actions. Taken last, so a
+            // refusal rolls the scan rows back.
+            _lease.Acquire(WorkLease.Scan, scanId);
+            leased = scanId;
             started = new Run(scanId, plan, scanDeadline);
             return new JsonObject { ["scanId"] = scanId };
         }));
+        }
+        catch when (leased is not null)
+        {
+            _lease.Release(WorkLease.Scan, leased);
+            throw;
+        }
 
         if (started is not null)
         {
@@ -168,6 +183,7 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
         finally
         {
             lock (_gate) _runs.Remove(run.ScanId);
+            _lease.Release(WorkLease.Scan, run.ScanId);
             run.Deadline.Dispose();
         }
     }
@@ -330,6 +346,8 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
             ("$st", status), ("$f", finishedAt), ("$r", reportId), ("$s", scanId));
         db.AppendEvent(Stream(scanId), "scan.progress", ProgressEvent(db, scanId, null));
         db.AppendEvent(Stream(scanId), "scan.finished", new JsonObject { ["status"] = status, ["reportId"] = reportId });
+        // Released before the events publish, so a client reacting to scan.finished can start the next run at once.
+        _lease.Release(WorkLease.Scan, scanId);
     }
 
     public static string Stream(string scanId) => "scan:" + scanId;

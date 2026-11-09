@@ -29,7 +29,7 @@ public class StoreTests
         using (var store = Store.Open(dir)) { }
         using var conn = Open(dir);
         Assert.Equal((long)Store.SchemaVersion, Scalar(conn, "PRAGMA user_version"));
-        Assert.Equal(6, Store.SchemaVersion);
+        Assert.Equal(7, Store.SchemaVersion);
     }
 
     [Fact]
@@ -70,8 +70,10 @@ public class StoreTests
         var dir = TestHost.NewDataDir();
         using (var store = Store.Open(dir)) { }
         using (var conn = Open(dir)) Scalar(conn, "PRAGMA user_version = 99");
-        var ex = Assert.Throws<InvalidOperationException>(() => Store.Open(dir));
+        var ex = Assert.Throws<DataTooNewException>(() => Store.Open(dir));
         Assert.Contains("newer", ex.Message);
+        Assert.Equal(99, ex.Found);
+        Assert.Equal(Migrations.Latest, ex.Supported);
     }
 
     [Fact]

@@ -402,7 +402,7 @@ public class ProjectionTests
             .Select(c => c.Id).Where(id => id.StartsWith("win.", StringComparison.Ordinal)).Distinct().Order(StringComparer.Ordinal).ToList();
         Assert.NotEmpty(ids);
         foreach (var id in ids) Assert.True(EvidenceProjection.For(id) is not null, $"no projector for {id}");
-        Assert.Equal(ids, EvidenceProjection.CollectorIds);                 // and no projector for a collector that does not exist
+        Assert.Equal(ids, EvidenceProjection.CollectorIds.Where(id => id.StartsWith("win.", StringComparison.Ordinal))); // and no projector for a collector that does not exist (bench.* are engine-owned, m6)
         Assert.NotNull(EvidenceProjection.For("fixture.anything"));
         Assert.Null(EvidenceProjection.For("win.unknown.collector"));
     }
@@ -411,7 +411,7 @@ public class ProjectionTests
     public void EveryProjectorIsExercisedByTheHostileSamples()
     {
         var sampled = Samples("x").Select(s => s.Collector).Where(c => c.StartsWith("win.", StringComparison.Ordinal)).ToHashSet();
-        Assert.DoesNotContain(EvidenceProjection.CollectorIds, id => !sampled.Contains(id));
+        Assert.DoesNotContain(EvidenceProjection.CollectorIds, id => id.StartsWith("win.", StringComparison.Ordinal) && !sampled.Contains(id));
     }
 
     [Fact]

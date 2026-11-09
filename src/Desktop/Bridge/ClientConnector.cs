@@ -104,8 +104,8 @@ public sealed partial class ClientConnector
     private readonly SemaphoreSlim _installGate = new(1, 1);
     /// <summary>Resolved CLI per client for the window's lifetime; dropped when the file is gone or fails the identity or capability check.</summary>
     private readonly ConcurrentDictionary<string, CliCandidate> _resolved = new(StringComparer.Ordinal);
-    /// <summary>Conclusive capability probes per CLI path and version (true = has everything the app passes).</summary>
-    private readonly ConcurrentDictionary<(string Path, string Version), bool> _capable = new();
+    /// <summary>Conclusive capability probes per CLI path and version (Capable = has everything the app passes).</summary>
+    private readonly ConcurrentDictionary<(string Path, string Version), Probe> _capable = new();
     /// <summary>The last provider.setClient sent per client, re-sent when the host connection comes back (m5 §2).</summary>
     private readonly ConcurrentDictionary<string, JsonObject> _reports = new(StringComparer.Ordinal);
     private readonly NpmShimEnvironment _npm;
@@ -206,7 +206,10 @@ public sealed partial class ClientConnector
     /// needs; never cached). <see cref="Blocked"/>: no CLI could be used, but a candidate exists that could not be started
     /// (a fixed reason code).
     /// </summary>
-    private sealed record Resolution(CliCandidate? Cli, string? Version, bool Outdated = false, string? Blocked = null);
+    private sealed record Resolution(CliCandidate? Cli, string? Version, bool Outdated = false, string? Blocked = null, IReadOnlyList<string>? CodexFeatures = null);
+
+    /// <summary>A capability probe: Capable, and (Codex, capable only) the §0 features this Codex has, to disable.</summary>
+    private sealed record Probe(bool Capable, IReadOnlyList<string>? CodexFeatures = null);
 
     /// <summary>
     /// The cached CLI when its file still exists (re-identified and re-probed only when <paramref name="identify"/>),
@@ -221,7 +224,8 @@ public sealed partial class ClientConnector
             if (_fileExists(cached.Path))
             {
                 if (!identify) return new(cached, null);
-                if ((await IdentifyAsync(c, cached.Path, log, ct)).Version is { } v && await CapableAsync(c, cached.Path, v, log, ct)) return new(cached, v);
+                if ((await IdentifyAsync(c, cached.Path, log, ct)).Version is { } v && await CapableAsync(c, cached.Path, v, log, ct) is { Capable: true } p)
+                    return new(cached, v, CodexFeatures: p.CodexFeatures);
             }
             _resolved.TryRemove(c.Id, out _);
             log.Info($"shell: {c.Id} cached CLI dropped, resolving again");
@@ -238,7 +242,8 @@ public sealed partial class ClientConnector
                 log.Info($"shell: {c.Id} skipped a {candidate.Source} candidate ({launch ?? "not the CLI"})");
                 continue;
             }
-            if (!await CapableAsync(c, candidate.Path, version, log, ct))
+            var probe = await CapableAsync(c, candidate.Path, version, log, ct);
+            if (!probe.Capable)
             {
                 outdated ??= (candidate, version);
                 log.Info($"shell: {c.Id} skipped a {candidate.Source} candidate (outdated)");
@@ -246,7 +251,7 @@ public sealed partial class ClientConnector
             }
             _resolved[c.Id] = candidate;
             log.Info($"shell: {c.Id} resolved ({candidate.Source})");
-            return new(candidate, version);
+            return new(candidate, version, CodexFeatures: probe.CodexFeatures);
         }
         if (outdated is { } o) return new(o.Cli, o.Version, Outdated: true);
         return new(null, null, Blocked: blocked);
@@ -278,18 +283,45 @@ public sealed partial class ClientConnector
     }
 
     /// <summary>
-    /// The capability probe (cached per path and version when conclusive): false only when the help text was printed
-    /// (exit 0) and misses a flag or subcommand the app passes. A probe that fails or times out does not block the CLI.
+    /// The capability probe (cached per path and version when conclusive). Help: not capable only when the help text was
+    /// printed (exit 0) and misses a flag or subcommand the app passes; a help probe that fails or times out does not
+    /// block the CLI. Codex also needs (m6 §0, fail closed) a version of at least <see cref="CodexLockdown.CodexMinVersion"/>
+    /// and a <c>features list</c> that names the required features; a features probe that fails or times out makes the
+    /// CLI outdated (not cached, so the next status tries again).
     /// </summary>
-    private async Task<bool> CapableAsync(Client c, string cli, string version, DesktopLog log, CancellationToken ct)
+    private async Task<Probe> CapableAsync(Client c, string cli, string version, DesktopLog log, CancellationToken ct)
     {
         if (_capable.TryGetValue((cli, version), out var known)) return known;
+        var codex = c.Id == "codex";
+        if (codex && !CodexLockdown.VersionSupported(version))
+        {
+            log.Info($"shell: {c.Id} version too old or unreadable");
+            return _capable[(cli, version)] = new(false);
+        }
         var r = await RunAsync(c, cli, c.HelpArgs, QueryTimeout, "help", log, ct);
-        if (r is not { TimedOut: false, ExitCode: 0, LaunchError: null } || r.Stdout.Length == 0) return true;
-        var capable = HasCapabilities(c.Id, r.Stdout);
-        _capable[(cli, version)] = capable;
-        return capable;
+        var helpConclusive = r is { TimedOut: false, ExitCode: 0, LaunchError: null } && r.Stdout.Length > 0;
+        if (helpConclusive && !HasCapabilities(c.Id, r!.Stdout)) return _capable[(cli, version)] = new(false);
+        if (!codex)
+        {
+            Probe probe = new(true);
+            if (helpConclusive) _capable[(cli, version)] = probe;
+            return probe;
+        }
+
+        var f = await RunAsync(c, cli, CodexFeaturesArgs, QueryTimeout, "features", log, ct);
+        if (f is not { TimedOut: false, ExitCode: 0, LaunchError: null }) return new(false);
+        if (CodexLockdown.ParseFeatures(f.Stdout) is not { } features)
+        {
+            log.Info($"shell: {c.Id} features list lacks a required feature");
+            return _capable[(cli, version)] = new(false);
+        }
+        Probe found = new(true, features);
+        if (helpConclusive) _capable[(cli, version)] = found;
+        return found;
     }
+
+    /// <summary><c>codex features list</c> (m6 §0 probe).</summary>
+    private static readonly string[] CodexFeaturesArgs = ["features", "list"];
 
     /// <summary>True when <paramref name="help"/> lists every flag and the subcommand the app passes to that client.</summary>
     public static bool HasCapabilities(string clientId, string help)
@@ -336,7 +368,7 @@ public sealed partial class ClientConnector
         if (!string.IsNullOrEmpty(version)) result["version"] = version;
         if (resolution.Outdated) result["outdated"] = true;
 
-        result["registered"] = Name(await GetRegistrationAsync(c, cli, log, ct));
+        result["registered"] = Name(await RegistrationRepairedAsync(c, cli, log, ct));
         var (signedIn, auth) = await SignedInAsync(c, cli, log, ct);
         result["signedIn"] = signedIn;
         if (auth is not null) result["auth"] = auth;
@@ -345,6 +377,7 @@ public sealed partial class ClientConnector
         if (!string.IsNullOrEmpty(version)) report["version"] = version;
         if (auth is not null) report["auth"] = auth;
         if (resolution.Outdated) report["compatible"] = false;
+        else if (resolution.CodexFeatures is { } features) report["codexFeatures"] = new JsonArray([.. features.Select(f => (JsonNode?)JsonValue.Create(f))]);
         await ReportClientAsync(c, report, backend, log, ct);
         return result;
     }
@@ -594,10 +627,53 @@ public sealed partial class ClientConnector
         return r;
     }
 
-    private async Task<Registration> GetRegistrationAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
+    private async Task<Registration> GetRegistrationAsync(Client c, string cli, DesktopLog log, CancellationToken ct) =>
+        (await GetRegistrationWithCommandAsync(c, cli, log, ct)).State;
+
+    private async Task<(Registration State, string? Command)> GetRegistrationWithCommandAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
     {
         var r = await RunAsync(c, cli, GetArgs(), QueryTimeout, "get", log, ct);
-        return r is null ? Registration.Unknown : ParseGet(r, _bridgePath);
+        return r is null ? (Registration.Unknown, null) : (ParseGet(r, _bridgePath), RegisteredCommand(r));
+    }
+
+    /// <summary>
+    /// The registration for a status check, repaired when the install moved (onboarding §2): an entry that points at
+    /// an <c>OptimizationTool.Mcp.exe</c> which no longer exists (e.g. the old <c>Program Files\Optimization Tool</c>
+    /// folder an upgrade removed) is the user's earlier approved registration of this app, so it is replaced with this
+    /// install's bridge without asking again. Any other entry elsewhere stays Outdated (the user reconnects).
+    /// </summary>
+    private async Task<Registration> RegistrationRepairedAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
+    {
+        var (state, command) = await GetRegistrationWithCommandAsync(c, cli, log, ct);
+        if (state != Registration.Outdated || !IsMovedBridge(command) || !_fileExists(_bridgePath)) return state;
+
+        log.Info($"shell: {c.Id} registration points at a removed bridge, re-registering");
+        await RunAsync(c, cli, RemoveArgs(c), ChangeTimeout, "remove", log, ct);
+        await RunAsync(c, cli, AddArgs(c), ChangeTimeout, "add", log, ct);
+        return await GetRegistrationAsync(c, cli, log, ct); // whatever the CLI now holds: yes, or no/outdated to reconnect
+    }
+
+    /// <summary>True for a fully qualified path to an OptimizationTool.Mcp.exe that is not there any more.</summary>
+    private bool IsMovedBridge(string? command)
+    {
+        if (string.IsNullOrEmpty(command)) return false;
+        try
+        {
+            return Path.IsPathFullyQualified(command)
+                && string.Equals(Path.GetFileName(command), Path.GetFileName(_bridgePath), StringComparison.OrdinalIgnoreCase)
+                && !_fileExists(command);
+        }
+        catch (ArgumentException) { return false; }
+    }
+
+    /// <summary>The registered command path from <c>mcp get</c> output (quotes trimmed), or null.</summary>
+    internal static string? RegisteredCommand(ProcessResult r)
+    {
+        if (r.TimedOut || r.ExitCode != 0) return null;
+        var m = CommandLinePattern().Match(r.Stdout);
+        if (!m.Success) return null;
+        var command = m.Groups["cmd"].Value.Trim().Trim('"', '\'').Trim();
+        return command.Length == 0 ? null : command;
     }
 
     /// <summary>

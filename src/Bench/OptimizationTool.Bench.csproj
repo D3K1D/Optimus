@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Benchmark worker (contracts/m6-benchmark.md §4). Started by the Host with redirected stdio and CreateNoWindow;
+       speaks the JSON-lines wire documented in src/Engine/Bench/BenchSeams.cs. Standalone: no Engine reference. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>OptimizationTool.Bench</AssemblyName>
+    <RootNamespace>OptimizationTool.Bench</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Product>Optimus</Product>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- MIT licence (https://github.com/amerkoleci/Vortice.Windows). Vortice.DXGI comes in transitively; pinned here too. -->
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.DXGI" Version="3.8.3" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Shader bytecode precompiled with d3dcompiler_47 (cs_5_0); sources kept beside it. See Gpu/Shaders.cs. -->
+    <EmbeddedResource Include="Gpu\Shaders\*.cso" LogicalName="OptimizationTool.Bench.Shaders.%(Filename).cso" />
+    <None Include="Gpu\Shaders\*.hlsl" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OptimizationTool.Bench.Tests" />
+  </ItemGroup>
+</Project>

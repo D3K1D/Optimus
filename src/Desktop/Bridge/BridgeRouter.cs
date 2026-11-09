@@ -30,6 +30,8 @@ public sealed class BridgeRouter
     public const string AppOrigin = "https://app.optimizationtool.invalid/";
     public const string StartUrl = AppOrigin + "index.html";
     public const int MaxMessageBytes = 256 * 1024;
+    /// <summary>Only shell.saveImage may exceed <see cref="MaxMessageBytes"/>: a ≤ 4 MB PNG as base64 plus the envelope.</summary>
+    public const int MaxImageMessageBytes = 6 * 1024 * 1024;
     public const int MaxMethodLength = 64;
 
     /// <summary>Desktop allowlist (§6, plus events.read from §5). session.hello is shell-only.</summary>
@@ -52,11 +54,14 @@ public sealed class BridgeRouter
         // v1.3 (m4-actions.md §4). action.challenge and action.approve are shell-only (sent by PlanApproval).
         "action.catalog", "action.preview", "action.get", "action.decline", "action.undo",
         "operation.get", "operation.list", "manual.recheck",
+        // v1.5 (m6-benchmark.md §2).
+        "bench.capabilities", "bench.start", "bench.get", "bench.cancel", "bench.list", "bench.evidence",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>Renderer-callable methods the shell handles itself (§9). Never forwarded to the backend.</summary>
-    public static readonly FrozenSet<string> ShellMethods = new[] { SettingsLauncher.Method, SettingsLauncher.UrlMethod, ApiKeyRequest.Method, PlanApproval.Method,
-        ClientConnector.StatusMethod, ClientConnector.RegisterMethod, ClientConnector.UnregisterMethod, ClientConnector.InstallMethod, ClientConnector.OpenMethod, ClientConnector.SignInMethod }.ToFrozenSet(StringComparer.Ordinal);
+    public static readonly FrozenSet<string> ShellMethods = new[] { SettingsLauncher.Method, SettingsLauncher.UrlMethod, ApiKeyRequest.Method, PlanApproval.Method, ImageSave.Method,
+        ClientConnector.StatusMethod, ClientConnector.RegisterMethod, ClientConnector.UnregisterMethod, ClientConnector.InstallMethod, ClientConnector.OpenMethod, ClientConnector.SignInMethod,
+        Backend.BackendConnection.RetryMethod }.ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly JsonDocumentOptions ParseOptions = new() { MaxDepth = 64 };
 
@@ -77,7 +82,10 @@ public sealed class BridgeRouter
         if (json is null) return Invalid(null, "json", "Empty message.");
 
         // chars >= bytes for UTF-16 → UTF-8 in the worst case direction we care about, so test cheaply first.
-        if (json.Length > MaxMessageBytes || Encoding.UTF8.GetByteCount(json) > MaxMessageBytes)
+        // A large message is parsed only if it can be a shell.saveImage call, and then only that method is accepted.
+        var large = json.Length > MaxMessageBytes || Encoding.UTF8.GetByteCount(json) > MaxMessageBytes;
+        if (large && (json.Length > MaxImageMessageBytes || Encoding.UTF8.GetByteCount(json) > MaxImageMessageBytes
+                      || !json.Contains("\"" + ImageSave.Method + "\"", StringComparison.Ordinal)))
             return Invalid(null, "size", "Message too large.");
 
         JsonNode? root;
@@ -97,6 +105,7 @@ public sealed class BridgeRouter
         if (msg["method"] is not JsonValue methodValue || !methodValue.TryGetValue<string>(out var method)
             || method.Length == 0 || method.Length > MaxMethodLength)
             return Invalid(id, "method", "Missing method.");
+        if (large && method != ImageSave.Method) return Invalid(null, "size", "Message too large.");
 
         var isShell = ShellMethods.Contains(method);
         if (!isShell && !DesktopMethods.Contains(method))

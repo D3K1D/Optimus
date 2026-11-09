@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using OptimizationTool.Engine.Actions;
 using OptimizationTool.Engine.Agent;
+using OptimizationTool.Engine.Bench;
 
 namespace OptimizationTool.Engine;
 
@@ -31,6 +32,9 @@ public sealed class EngineOptions
     /// <summary>M4 compiled action handlers and switches. Defaults: no handlers.</summary>
     public ActionOptions Actions { get; init; } = new();
 
+    /// <summary>M6a benchmark seams (sensors, hardware, worker launcher) and timings. Defaults: benchmarks unsupported.</summary>
+    public BenchOptions Bench { get; init; } = new();
+
     public Action<string>? Log { get; init; }
 }
 
@@ -55,6 +59,7 @@ public sealed class AuditEngine : IAsyncDisposable
         "review.preview", "review.submit", "review.export", "review.import",
         "action.catalog", "action.preview", "action.get", "action.decline", "action.undo", "action.challenge", "action.approve",
         "operation.get", "operation.list", "manual.recheck",
+        "bench.capabilities", "bench.start", "bench.get", "bench.cancel", "bench.list", "bench.evidence",
     ];
 
     private readonly OnboardingService _onboarding;
@@ -72,6 +77,10 @@ public sealed class AuditEngine : IAsyncDisposable
 
     public AgentService Agent { get; }
     public ActionService Actions { get; }
+    public BenchService Bench { get; }
+
+    /// <summary>m6 §2: the one per-user lease shared by scans, benchmarks, sensors.snapshot and performance actions.</summary>
+    public WorkLease Lease { get; } = new();
 
     private static readonly Lazy<string?> LocalSid = new(() => { using var id = System.Security.Principal.WindowsIdentity.GetCurrent(); return id.User?.Value; });
 
@@ -89,12 +98,13 @@ public sealed class AuditEngine : IAsyncDisposable
         Catalog = catalog;
         _onboarding = new OnboardingService(store, fixture);
         _inventory = new InventoryService(store, fixture, catalog, options.FixtureSpeed, log);
-        _scans = new ScanCoordinator(store, fixture, catalog, options.ScanDeadline, options.Time, log);
+        _scans = new ScanCoordinator(store, fixture, catalog, options.ScanDeadline, options.Time, log, Lease);
         _reports = new ReportService(store);
         _followups = new Followups(store, fixture);
         _events = new EventService(store);
-        Actions = new ActionService(store, catalog, options.Time, options.Actions, log);
-        Agent = new AgentService(store, catalog, options.Time, options.Agent, log) { Actions = Actions, DataDir = options.DataDir };
+        Actions = new ActionService(store, catalog, options.Time, options.Actions, log) { Lease = Lease };
+        Bench = new BenchService(store, Lease, options.Bench, options.DataDir, log);
+        Agent = new AgentService(store, catalog, options.Time, options.Agent, log) { Actions = Actions, DataDir = options.DataDir, Bench = Bench };
     }
 
     public static AuditEngine Open(EngineOptions options)
@@ -111,6 +121,7 @@ public sealed class AuditEngine : IAsyncDisposable
         engine._onboarding.EnsureRow();
         engine._scans.RecoverInterrupted();
         engine._inventory.RecoverInterrupted();
+        engine.Bench.RecoverInterrupted(); // m6 §2: starting|running|stopping → interrupted
         engine.Agent.RecoverAfterRestart();
         engine.Actions.ReconcileAsync().GetAwaiter().GetResult(); // m4 §5: never repeats a write
         log(catalog.IsFixture
@@ -119,7 +130,7 @@ public sealed class AuditEngine : IAsyncDisposable
         return engine;
     }
 
-    public bool HasActiveWork => _scans.HasActiveWork || _inventory.HasActiveWork || Agent.HasActiveWork || Actions.HasActiveWork;
+    public bool HasActiveWork => _scans.HasActiveWork || _inventory.HasActiveWork || Agent.HasActiveWork || Actions.HasActiveWork || Bench.HasActiveWork;
 
     public JsonObject UserCursor() => new() { ["stream"] = "user", ["seq"] = Store.Read(db => db.LastSeq("user")) };
 
@@ -178,12 +189,19 @@ public sealed class AuditEngine : IAsyncDisposable
             "operation.get" => Actions.OperationGet(p),
             "operation.list" => Actions.OperationList(p),
             "manual.recheck" => await Actions.ManualRecheckAsync(p).ConfigureAwait(false),
+            "bench.capabilities" => await Bench.CapabilitiesAsync().ConfigureAwait(false),
+            "bench.start" => await Bench.StartAsync(p).ConfigureAwait(false),
+            "bench.get" => Bench.Get(p),
+            "bench.cancel" => Bench.Cancel(p),
+            "bench.list" => Bench.List(p),
+            "bench.evidence" => Bench.Evidence(p),
             _ => throw new RpcError(ErrorCodes.MethodNotFound, $"Unknown method {method}."),
         };
     }
 
     public async ValueTask DisposeAsync()
     {
+        await Bench.StopAllAsync().ConfigureAwait(false);
         await _scans.StopAllAsync().ConfigureAwait(false);
         await _inventory.StopAllAsync().ConfigureAwait(false);
         await Agent.StopAllAsync().ConfigureAwait(false);

@@ -32,7 +32,7 @@ public sealed class BridgeTests
         Assert.Contains("Never say a change happened unless get_operation returns a verified receipt", instructions);
 
         var tools = await mcp.Client.ListToolsAsync();
-        Assert.Equal(["add_card", "get_cards", "get_findings", "get_operation", "get_pc_specs", "get_report_history", "list_capabilities", "note_card", "request_action", "run_diagnostic"], tools.Select(t => t.Name).Order().ToArray());
+        Assert.Equal(["add_card", "get_benchmarks", "get_cards", "get_fan_guidance", "get_findings", "get_operation", "get_pc_specs", "get_report_history", "list_capabilities", "note_card", "request_action", "run_diagnostic"], tools.Select(t => t.Name).Order().ToArray());
         foreach (var tool in tools)
         {
             var annotations = tool.ProtocolTool.Annotations!;
@@ -47,7 +47,8 @@ public sealed class BridgeTests
         }
 
         var run = JsonNode.Parse(tools.Single(t => t.Name == "run_diagnostic").ProtocolTool.InputSchema.GetRawText())!;
-        Assert.Equal(9, run["properties"]!["diagnosticId"]!["enum"]!.AsArray().Count);
+        Assert.Equal(10, run["properties"]!["diagnosticId"]!["enum"]!.AsArray().Count);
+        Assert.Contains("sensors.snapshot", run["properties"]!["diagnosticId"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
         Assert.Equal("diagnosticId", run["required"]![0]!.GetValue<string>());
         Assert.Equal(["system", "application", "update", "defender", "exposed", "all"], run["properties"]!["target"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
         var findings = JsonNode.Parse(tools.Single(t => t.Name == "get_findings").ProtocolTool.InputSchema.GetRawText())!;
@@ -71,6 +72,50 @@ public sealed class BridgeTests
         Assert.Equal(["actionId"], ra["required"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
 
         Assert.Equal(0, host.Connections); // listing tools never touches the host
+    }
+
+    [Fact]
+    public async Task BenchmarkTools_HaveSchemas()
+    {
+        await using var host = new StubAgentHost();
+        await using var mcp = await McpHarness.StartAsync(host.PipeName);
+        var tools = await mcp.Client.ListToolsAsync();
+
+        var bench = tools.Single(t => t.Name == "get_benchmarks");
+        Assert.True(bench.ProtocolTool.Annotations!.ReadOnlyHint);
+        var b = JsonNode.Parse(bench.ProtocolTool.InputSchema.GetRawText())!;
+        Assert.Equal(["runId", "limit"], b["properties"]!.AsObject().Select(p => p.Key).ToArray());
+        Assert.Null(b["required"]); // runId or limit, both optional
+        Assert.Equal("string", b["properties"]!["runId"]!["type"]!.GetValue<string>());
+        Assert.Equal(1, b["properties"]!["limit"]!["minimum"]!.GetValue<int>());
+        Assert.Equal(5, b["properties"]!["limit"]!["maximum"]!.GetValue<int>());
+
+        var fan = tools.Single(t => t.Name == "get_fan_guidance");
+        Assert.True(fan.ProtocolTool.Annotations!.ReadOnlyHint);
+        var f = JsonNode.Parse(fan.ProtocolTool.InputSchema.GetRawText())!;
+        Assert.Equal(["cpu", "gpu", "ram", "disk"], f["properties"]!["part"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        Assert.Equal(["part"], f["required"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+    }
+
+    [Fact]
+    public async Task BenchmarkTools_ForwardedAsToolCall()
+    {
+        var (host, mcp) = await PairedAsync();
+        await using var _ = host;
+        await using var __ = mcp;
+        host.ToolHandler = (name, args) => StubAgentHost.Result(new JsonObject { ["untrusted"] = "x", ["tool"] = name });
+
+        var r = await mcp.CallAsync("get_benchmarks", new { limit = 2 });
+        Assert.False(r.IsError);
+        var call = host.Last("tool.call")!;
+        Assert.Equal("get_benchmarks", call["name"]!.GetValue<string>());
+        Assert.Equal(2, call["arguments"]!["limit"]!.GetValue<int>());
+
+        r = await mcp.CallAsync("get_fan_guidance", new { part = "gpu" });
+        Assert.False(r.IsError);
+        call = host.Last("tool.call")!;
+        Assert.Equal("get_fan_guidance", call["name"]!.GetValue<string>());
+        Assert.Equal("gpu", call["arguments"]!["part"]!.GetValue<string>());
     }
 
     [Fact]

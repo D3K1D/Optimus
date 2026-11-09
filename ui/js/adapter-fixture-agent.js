@@ -27,7 +27,7 @@
   var CATEGORY_DIAG = { performance: 'process.sample', storage: 'storage.volumes', security: 'security.status', diagnostics: 'events.recent',
     customization: 'display.modes', misc: 'display.modes' };
   var SAMPLE_SECONDS = 10;
-  var INSTALL = '%LOCALAPPDATA%\\Programs\\OptimizationTool\\OptimizationTool.Mcp.exe';
+  var INSTALL = 'C:\\Program Files\\Optimus\\OptimizationTool.Mcp.exe';
   var CLIENT = { claude_code_mcp: 'claude_code', codex_mcp: 'codex' };
 
   // In-app kinds: two with API keys, and the ChatGPT plan through a browser sign-in.
@@ -335,6 +335,12 @@
       if (!isApi(t.recipient.kind) && !headless) throw E(-32013, 'invalid_state', { reason: 'native_client' });
       var origin = headless ? CLIENT[t.recipient.kind] : 'in_app';
       if (A().turnOf[t.taskId]) throw E(-32013, 'invalid_state', { reason: 'turn_running' });
+      // M6a §8: context {benchRunId, part} is validated: the run exists, is done, and has that part.
+      if (p.context != null) {
+        var run = p.context && ctx.benchRun ? ctx.benchRun(p.context.benchRunId) : null;
+        var hasPart = run && run.state === 'done' && run.tests.some(function (x) { return x.part === p.context.part; });
+        if (!hasPart) throw E(-32602, 'invalid params', { field: 'context' });
+      }
       if (t.used.turns >= t.grant.limits.turns) { stopTask(t, 'exhausted'); throw E(-32013, 'invalid_state', { reason: 'exhausted' }); }
       var turnId = 'turn-' + ctx.randomHex(8), n = t.used.turns + 1, s = stream(t.taskId);
       // As the host (m5 §9): the question joins the task's history with the ask, before its run starts.
@@ -353,6 +359,16 @@
         finding = scopedFindings(t, null).filter(function (f) { return cats.indexOf(f.category) >= 0; })[0] || null;
       }
       if (SCAN_ASK.test(p.text || '')) { firstLook(t, turnId, n, origin); return { taskId: t.taskId, turnId: turnId }; }   // starts its own turn
+      // M6a §8: benchmark context, the voltage warning and the Run benchmark suggestion get short scripted answers.
+      var scripted = benchScript(p);
+      if (scripted) {
+        t.used.turns = n; t.lastActivityAt = new Date().toISOString();
+        A().turnOf[t.taskId] = { turnId: turnId, n: n };
+        ctx.emit(s, 'agent.turn', { turnId: turnId, n: n, status: 'started' });
+        ctx.emit(s, 'agent.task', { status: t.status, used: clone(t.used) });
+        wait(s, 900).then(function () { if (t.status === 'active') answer(t, turnId, n, scripted.text, [], scripted.extra); });
+        return { taskId: t.taskId, turnId: turnId };
+      }
       t.used.turns = n; t.lastActivityAt = new Date().toISOString();
       A().turnOf[t.taskId] = { turnId: turnId, n: n };
       ctx.emit(s, 'agent.turn', { turnId: turnId, n: n, status: 'started' });
@@ -383,14 +399,28 @@
       });
       return { taskId: t.taskId, turnId: turnId };
     }
-    function answer(t, turnId, n, text, cited) {
+    var VOLTAGE_ASK = /undervolt|overclock|voltage|vcore|curve optimi[sz]er/i;
+    var BENCH_ASK = /benchmark|how fast is|is my pc (slow|fast)/i;
+    function benchScript(p) {
+      var text = p.text || '';
+      if (p.context && p.context.part === 'gpu') return { text: 'During the GPU test the card reached 87 °C and slowed itself down for about 9 s to stay safe. ' +
+        'Check that the fans spin and the dust filters are clean, and keep the GPU on its default fan curve. Nothing on this PC was changed.' };
+      if (p.context) return { text: 'The ' + String(p.context.part).toUpperCase() + ' scored lower than your last runs, and a repeat confirmed it. ' +
+        'Windows reported a performance limit of 82% (power limited). Check that the PC is plugged in and on a balanced or faster power plan. Nothing on this PC was changed.' };
+      if (VOLTAGE_ASK.test(text)) return { text: 'Undervolting runs the CPU or GPU at a lower voltage, which can cut heat and fan noise. ' +
+        'Too little voltage makes a PC crash or corrupt data, so every step needs long stability tests. Optimus explains it but never applies it.', extra: { warnings: ['voltage'] } };
+      if (BENCH_ASK.test(text)) return { text: 'A benchmark loads the CPU, GPU, RAM and disk for about 2 minutes and compares the result with your last run.', extra: { suggest: 'benchmark' } };
+      return null;
+    }
+    function answer(t, turnId, n, text, cited, extra) {
       var s = stream(t.taskId), cur = A().turnOf[t.taskId];
       if (!cur || cur.turnId !== turnId) return;   // cancelled (agent.cancel) or replaced meanwhile
       delete A().turnOf[t.taskId];
       t.used.inputTokens += 1400; t.used.outputTokens += 160;
       // As the host (m5 §7): the answer's "Next:" line arrives as follow-up questions.
-      ctx.emit(s, 'agent.message', { turnId: turnId, text: text, citations: cited.filter(Boolean), dropped: 0,
-        followUps: ['What should I fix first?', 'Explain that more simply', 'Check this again in a minute'] });
+      // M6a §8: warnings ["voltage"] and suggest "benchmark" ride on the message (extra).
+      ctx.emit(s, 'agent.message', Object.assign({ turnId: turnId, text: text, citations: cited.filter(Boolean), dropped: 0,
+        followUps: ['What should I fix first?', 'Explain that more simply', 'Check this again in a minute'] }, extra || {}));
       ctx.emit(s, 'agent.turn', { turnId: turnId, n: n, status: 'finished', usage: { inputTokens: 1400, outputTokens: 160 } });
       ctx.emit(s, 'agent.task', { status: t.status, used: clone(t.used) });
       ctx.save();

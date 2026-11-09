@@ -46,6 +46,8 @@ public sealed partial class ActionService
     private readonly Action<string> _log;
     private readonly object _gate = new();
     private readonly Dictionary<string, SemaphoreSlim> _locks = [];
+    /// <summary>planId → the approve call that holds its target lock (a duplicate approve of that plan waits on it, briefly).</summary>
+    private readonly Dictionary<string, Task> _approving = [];
     private readonly List<Task> _background = [];
     private readonly CancellationTokenSource _stopping = new();
 
@@ -57,6 +59,9 @@ public sealed partial class ActionService
         _options = options;
         _log = log;
     }
+
+    /// <summary>m6 §2: the per-user lease shared with scans, benchmarks and sensor snapshots.</summary>
+    internal WorkLease Lease { get; init; } = new();
 
     internal bool HasActiveWork
     {
@@ -351,13 +356,36 @@ public sealed partial class ActionService
         var handler = Handler(plan.Text("actionId")) ?? throw RpcError.State("unavailable", "That action is not available in this build.");
 
         var sem = Lock(TargetKey(plan.Text("actionId"), plan["target"]!.AsObject()));
-        await sem.WaitAsync().ConfigureAwait(false);
+        // Never queue behind a change already running on this target (a Defender scan holds it for hours, and the app's
+        // connection answers one request at a time): refuse at once. A repeated approve of a plan that ran replays.
+        if (!sem.Wait(0))
+        {
+            Task? first;
+            lock (_gate) _approving.TryGetValue(planId, out first);
+            if (first is not null)
+            {
+                // The same plan is being approved right now (a racing duplicate): its call returns within the resolve and
+                // write timeouts, so wait for it, then replay its operation (or try once more if it was refused).
+                await first.ConfigureAwait(false);
+                return await ApproveAsync(p, ctx).ConfigureAwait(false);
+            }
+            existing = _store.Read(db => OperationOfPlan(db, planId));
+            if (existing is not null) return existing;
+            throw new RpcError(ErrorCodes.InvalidState, "A change is being applied.", new JsonObject { ["reason"] = "action_active" });
+        }
+        var approving = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lock (_gate) _approving[planId] = approving.Task;
         var release = true;
+        // m6 §2: executing a performance-affecting action takes the shared lease (approving alone does not). It is
+        // taken before the nonce is consumed, so a busy refusal leaves the plan waiting for another approve.
+        var leaseId = WorkLease.AffectsPerformance(plan.Text("actionId")) ? planId : null;
+        var leaseKept = false;
         try
         {
             // Inside the lock: replay first, then the approval binding.
             existing = _store.Read(db => OperationOfPlan(db, planId));
             if (existing is not null) return existing;
+            if (leaseId is not null) Lease.Acquire(WorkLease.Action, leaseId);
             _store.Write(db => Bind(db, planId, planHash, nonce, ctx));
 
             var request = new ActionRequest(plan.Text("actionId"), plan["target"]!.DeepClone().AsObject(), plan["parameters"]?.DeepClone() as JsonObject, null);
@@ -383,14 +411,25 @@ public sealed partial class ActionService
             var execution = new ActionExecution(planId, plan.Text("planHash"), plan["target"]!.DeepClone().AsObject(), plan["before"]!.DeepClone().AsObject(),
                 plan["after"]!.DeepClone().AsObject(), plan["parameters"]?.DeepClone() as JsonObject);
             var operationId = _store.Write(db => Prepare(db, planId, live.Before));
+            if (leaseId is not null)
+            {
+                Lease.Rename(WorkLease.Action, leaseId, operationId);
+                leaseId = operationId;
+            }
 
             if (handler.Kind == "provider")
             {
                 release = false; // the background run holds the target lock until the provider operation ends
+                leaseKept = true; // and the shared lease
+                var held = leaseId;
                 Track(Task.Run(async () =>
                 {
                     try { await RunAsync(handler, execution, operationId, provider: true).ConfigureAwait(false); }
-                    finally { sem.Release(); }
+                    finally
+                    {
+                        if (held is not null) Lease.Release(WorkLease.Action, held);
+                        sem.Release();
+                    }
                 }));
                 return _store.Read(db => OperationView(db, operationId));
             }
@@ -399,7 +438,11 @@ public sealed partial class ActionService
         }
         finally
         {
+            if (leaseId is not null && !leaseKept) Lease.Release(WorkLease.Action, leaseId);
+            lock (_gate) _approving.Remove(planId);
             if (release) sem.Release();
+            approving.TrySetResult(); // after the release, so a waiting duplicate can take the lock itself
+
         }
     }
 

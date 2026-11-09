@@ -468,6 +468,12 @@ public sealed partial class AgentService
                 SELECT e.body FROM agent_evidence e JOIN agent_released r ON r.task_id = e.task_id AND r.evidence_id = e.evidence_id
                 WHERE e.task_id = $t ORDER BY e.rowid
                 """, r => (JsonObject)Json.Parse(r.GetString(0))!, ("$t", taskId));
+            // m6: benchmark evidence released to this task (get_benchmarks, or an ask's benchmark context) resolves too,
+            // so the UI's citation chips find it.
+            released.AddRange(db.Query("""
+                SELECT b.body FROM bench_evidence b JOIN agent_released r ON r.evidence_id = b.evidence_id
+                WHERE r.task_id = $t ORDER BY b.rowid
+                """, r => (JsonObject)Json.Parse(r.GetString(0))!, ("$t", taskId)));
             view["evidence"] = Project(db, taskId, released, new ShareOptions(GrantOf(task).ShareNames), new ProjectionStats()).Items;
             return (JsonNode)view;
         });

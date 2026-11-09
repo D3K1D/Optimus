@@ -47,7 +47,7 @@ internal sealed class Connection(NamedPipeServerStream pipe, HostServer server, 
                 }
 
                 var response = await server.HandleAsync(this, message).ConfigureAwait(false);
-                if (response is not null) Send(Serialize(response));
+                if (response is not null) Send(Fit(response));
             }
         }
         catch (FrameException ex)
@@ -85,6 +85,15 @@ internal sealed class Connection(NamedPipeServerStream pipe, HostServer server, 
     }
 
     private static byte[] Serialize(JsonObject message) => JsonSerializer.SerializeToUtf8Bytes(message);
+
+    /// <summary>A response over the frame cap becomes a small error with the same id, so the request still settles.</summary>
+    internal static byte[] Fit(JsonObject response, int maxBytes = Frame.MaxPayloadBytes)
+    {
+        var bytes = Serialize(response);
+        if (bytes.Length <= maxBytes) return bytes;
+        return Serialize(HostServer.Error(response["id"]?.DeepClone(), ErrorCodes.InternalError, "The response was too large to send.",
+            new JsonObject { ["reason"] = "response_too_large", ["bytes"] = bytes.Length }));
+    }
 
     public async ValueTask DisposeAsync()
     {

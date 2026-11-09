@@ -8,7 +8,7 @@ namespace OptimizationTool.Desktop.Tests;
 public sealed class ClientSignInTests
 {
     private const string Doc = "https://app.optimizationtool.invalid/index.html";
-    private const string Bridge = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
+    private const string Bridge = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe";
     private const string NpmDir = @"C:\Users\u\AppData\Roaming\npm";
     private const string ClaudeCmd = NpmDir + @"\claude.cmd";
     private const string CodexExe = @"C:\Tools\codex\codex.exe";
@@ -59,7 +59,8 @@ public sealed class ClientSignInTests
             var claude = c.Argv[0].Contains("claude", StringComparison.OrdinalIgnoreCase);
             ProcessResult r = c.Argv.Skip(1).ToArray() switch
             {
-                ["--version"] => new(0, claude ? "2.1.318 (Claude Code)\n" : "codex-cli 0.166.0\n", "", false),
+                ["--version"] => new(0, claude ? "2.1.318 (Claude Code)\n" : "codex-cli 0.167.0\n", "", false),
+                ["features", "list"] => new(0, CliHelp.CodexFeatures, "", false),
                 ["mcp", "get", _] => new(1, "", "No MCP server found with name: optimization-tool\n", false),
                 ["auth", "status"] or ["login", "status"] => Auth,
                 _ => new(2, "", "unknown", false),

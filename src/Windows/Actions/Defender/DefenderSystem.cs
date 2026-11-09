@@ -150,13 +150,19 @@ internal sealed class WindowsDefenderSystem : IDefenderSystem
         var at = since.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
         var xpath = $"*[System[(EventID=1000 or EventID=1001 or EventID=1002 or EventID=1005 or EventID=1116 or EventID=2000 or EventID=2001) and TimeCreated[@SystemTime>='{at}']]]";
         var raw = EventReader.Read(Channel, xpath, 500, ct);
-        return raw.Status == "ok" ? DefenderEventParser.Parse(raw.Events) : DefenderEvents.Unreadable;
+        return DefenderEventParser.FromChannel(raw);
     }
 }
 
 /// <summary>Pure: Defender/Operational rows → scan records, detection counts and signature results. Keeps no names or paths.</summary>
 internal static class DefenderEventParser
 {
+    /// <summary>Scan records are kept from whatever was read, but the history counts as readable (so "no threats" can be
+    /// claimed) only when the whole query was read: no row cap, no interruption and no row that failed to render.</summary>
+    public static DefenderEvents FromChannel(RawChannel raw) =>
+        raw.Status != "ok" ? DefenderEvents.Unreadable
+        : Parse(raw.Events) with { Readable = !raw.RowCapHit && !raw.Interrupted && raw.Unreadable == 0 };
+
     public static DefenderEvents Parse(IEnumerable<RawEvent> events)
     {
         var scans = new List<ScanEvent>();

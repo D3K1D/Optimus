@@ -1,0 +1,31 @@
+/* Loading screen (design/design-system/components/LoadingScreen). Plain HTML in index.html so it paints before any script;
+   ui/js/loading.js swaps the is-* state and removes it when the app is ready. */
+.ot-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ot-load { position: fixed; inset: 0; z-index: 1000; display: grid; place-items: center; overflow: hidden; padding-bottom: min(10vh, 80px);
+  background: var(--ground); color: var(--ink); animation: ot-load-in 200ms ease-out 300ms both; }
+/* Only "starting" waits 300 ms before showing; a known problem shows at once. */
+.ot-load:not(.is-starting) { animation-delay: 0ms; }
+.ot-load.is-leaving { animation: ot-load-out 150ms ease-in forwards; pointer-events: none; }
+@keyframes ot-load-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ot-load-out { from { opacity: 1; } to { opacity: 0; } }
+/* The still sea: hex digits on a plane tilted toward a horizon, fading out before it reaches the logo. */
+.ot-load-sea { position: absolute; left: -60%; right: -60%; bottom: 0; height: 70%; pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='96'%3E%3Cg font-family='ui-monospace,Consolas,monospace' font-size='13' font-weight='500'%3E%3Ctext x='2' y='18' fill='%233a7bff' fill-opacity='0.9' letter-spacing='3'%3E3F A0 7C 1E 9B 04 D2 6A%3C/text%3E%3Ctext x='14' y='42' fill='%232cc6d9' fill-opacity='0.7' letter-spacing='3'%3EE1 5B 08 C4 77 2D F0 93%3C/text%3E%3Ctext x='2' y='66' fill='%233a7bff' fill-opacity='0.6' letter-spacing='3'%3E0x 4E 61 B7 A9 3C 58 1F%3C/text%3E%3Ctext x='14' y='90' fill='%238f5cf7' fill-opacity='0.5' letter-spacing='3'%3EC8 12 6F E5 30 9D 47 BA%3C/text%3E%3C/g%3E%3C/svg%3E");
+  background-size: 320px 120px; transform: perspective(900px) rotateX(50deg); transform-origin: 50% 100%;
+  -webkit-mask-image: linear-gradient(to top, #000 0%, rgba(0,0,0,.55) 45%, transparent 80%); mask-image: linear-gradient(to top, #000 0%, rgba(0,0,0,.55) 45%, transparent 80%); opacity: .55; }
+[data-theme="light"] .ot-load-sea { opacity: .38; }
+.ot-load::before { content: ''; position: absolute; left: 50%; top: 54%; width: min(720px, 140vw); aspect-ratio: 2 / 1; transform: translate(-50%, 0); pointer-events: none;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--wave-6) 16%, transparent), transparent); }
+.ot-load-center { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--space-3); width: min(100% - 32px, 360px); text-align: center; }
+.ot-load-logo { margin-bottom: var(--space-1); }
+.ot-load-logo.is-spinning .ot-gear-b, .ot-load-logo.is-spinning .ot-gear-s { animation-play-state: running; animation-duration: 4.5s; }
+.ot-load-name { margin: 0; }
+.ot-load-status { min-height: 1.5em; }
+.ot-load-msg { margin: 0; font-size: 15px; line-height: 1.5; text-wrap: balance; }
+.ot-load-msg.is-later { animation: ot-load-in 400ms ease-out 10s both; }
+.ot-load-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); margin-top: var(--space-2); }
+.ot-load-actions[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .ot-load, .ot-load.is-leaving, .ot-load-msg.is-later { animation-duration: 1ms; }
+  .ot-load-logo.is-spinning .ot-gear-b, .ot-load-logo.is-spinning .ot-gear-s { animation: none; }
+}

@@ -210,6 +210,31 @@ public class ActionTests
     }
 
     [Fact]
+    public async Task SecondPlan_ForABusyTarget_IsRefusedAtOnce_AndTheRunningPlanStillReplays()
+    {
+        var (host, pc) = Start();
+        await using var _ = host;
+        var c = await host.ConnectAsync();
+        var first = await Act.Preview(c, "defender.quick_scan", scheme: null);
+        var firstNonce = await Act.Nonce(c, first.Str("planId"));
+        var op = await c.Call("action.approve", Act.ApproveParams(first, firstNonce));
+        await c.WaitForEvent(e => e.Str("type") == "operation.state" && e["payload"].Str("progress") == "Scanning · quick");
+
+        // The scan holds its target for its whole run: a second plan must not queue behind it (the app's connection is serial).
+        var second = await Act.Preview(c, "defender.quick_scan", scheme: null);
+        var busy = await c.Fails("action.approve", Act.ApproveParams(second, await Act.Nonce(c, second.Str("planId"))))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(ErrorCodes.InvalidState, busy.Code);
+        Assert.Equal("action_active", busy.ErrorData.Str("reason"));
+        // The connection still answers, and re-approving the running plan replays its operation.
+        Assert.Equal(op.Str("operationId"), (await c.Call("action.approve", Act.ApproveParams(first, firstNonce))).Str("operationId"));
+
+        pc.ProviderGate.SetResult();
+        await c.WaitForEvent(e => e.Str("type") == "operation.state" && e["payload"].Str("state") == "verified");
+        Assert.Equal(1, pc.ProviderRuns);
+    }
+
+    [Fact]
     public async Task ProviderOperation_ReportsProgress_ThenCompletes()
     {
         var (host, pc) = Start();

@@ -48,29 +48,43 @@ public static partial class HeadlessCommand
     ];
 
     /// <summary>
-    /// Codex: <c>exec --json --skip-git-repo-check --ignore-user-config --sandbox read-only --disable shell_tool --disable
-    /// unified_exec -C &lt;runDir&gt; -c mcp_servers.optimization-tool.command='&lt;bridge&gt;' -c
-    /// mcp_servers.optimization-tool.env.OT_RUN_TOKEN='&lt;token&gt;' -</c>. A later ask resumes the thread:
+    /// Every Codex feature an in-app run may turn off (contracts/m6-benchmark.md §0), in its order. The shell reports which
+    /// of them this Codex has (provider.setClient codexFeatures); a name outside this set is never passed.
+    /// </summary>
+    public static readonly IReadOnlyList<string> CodexLockdownFeatures =
+    [
+        "shell_tool", "unified_exec", "apps", "browser_use", "browser_use_external", "computer_use", "in_app_browser",
+        "image_generation", "plugins", "remote_plugin", "tool_suggest", "skill_mcp_dependency_install", "multi_agent",
+    ];
+
+    /// <summary>
+    /// Codex: <c>exec --sandbox read-only -C &lt;runDir&gt; --json --skip-git-repo-check --ignore-user-config -c
+    /// web_search='disabled' --disable &lt;feature&gt;… -c mcp_servers.optimization-tool.command='&lt;bridge&gt;' -c
+    /// mcp_servers.optimization-tool.env.OT_RUN_TOKEN='&lt;token&gt;' -</c>, with one <c>--disable</c> per probed §0
+    /// feature in <paramref name="disable"/> (m6 §0: no web, browser, apps or shell tool). A later ask resumes the thread:
     /// <c>exec --sandbox read-only -C &lt;runDir&gt; resume &lt;threadId&gt; --json …same… -</c> (the resume subcommand has no
     /// --sandbox/-C of its own, so they go on exec before it). Values are TOML single-quoted literals (no double quotes,
     /// which a cmd.exe line cannot carry); a bridge path with an apostrophe is written as a TOML basic string instead
     /// (fine for an .exe or a resolved npm shim; a plain .cmd refuses it). <paramref name="credentialsStore"/> (the user's
     /// <c>cli_auth_credentials_store</c>, see <see cref="CodexConfig"/>) is passed on as
     /// <c>-c cli_auth_credentials_store='…'</c>, because <c>--ignore-user-config</c> would otherwise drop it and the run
-    /// would not find a keyring sign-in. Null when the bridge path or a token cannot be written safely.
+    /// would not find a keyring sign-in. Null when the bridge path or a token cannot be written safely, or a feature is
+    /// outside <see cref="CodexLockdownFeatures"/>.
     /// </summary>
-    public static IReadOnlyList<string>? Codex(string runDir, string bridgePath, string runToken, string? threadId, string? credentialsStore = null)
+    public static IReadOnlyList<string>? Codex(string runDir, string bridgePath, string runToken, string? threadId, IReadOnlyList<string> disable, string? credentialsStore = null)
     {
         if (bridgePath.Contains('"') || bridgePath.Any(char.IsControl) || !TokenPattern().IsMatch(runToken)) return null;
         if (threadId is not null && !ThreadPattern().IsMatch(threadId)) return null;
         if (credentialsStore is not null && !CodexConfig.CredentialStores.Contains(credentialsStore)) return null;
+        if (disable.Any(f => !CodexLockdownFeatures.Contains(f, StringComparer.Ordinal)) || disable.Distinct(StringComparer.Ordinal).Count() != disable.Count) return null;
         var command = bridgePath.Contains('\'') ? "\"" + bridgePath.Replace("\\", "\\\\", StringComparison.Ordinal) + "\"" : $"'{bridgePath}'";
-        List<string> common =
+        List<string> common = ["--json", "--skip-git-repo-check", "--ignore-user-config", "-c", "web_search='disabled'"];
+        foreach (var feature in disable) common.AddRange(["--disable", feature]);
+        common.AddRange(
         [
-            "--json", "--skip-git-repo-check", "--ignore-user-config", "--disable", "shell_tool", "--disable", "unified_exec",
             "-c", $"mcp_servers.{ServerName}.command={command}",
             "-c", $"mcp_servers.{ServerName}.env.OT_RUN_TOKEN='{runToken}'",
-        ];
+        ]);
         if (credentialsStore is not null) common.AddRange(["-c", $"cli_auth_credentials_store='{credentialsStore}'"]);
         return threadId is null
             ? ["exec", "--sandbox", "read-only", "-C", runDir, .. common, "-"]
@@ -149,8 +163,12 @@ public static partial class CodexConfig
 /// answer), turn.completed usage, turn.failed / error. Lines that are not JSON objects, or whose fields have unexpected
 /// types, are ignored.
 /// </summary>
-public sealed partial class HeadlessStream(bool codex)
+public sealed partial class HeadlessStream(bool codex, Action? onBlocked = null)
 {
+    /// <summary>Codex item types the runtime guard stops (m6 §0). collab_tool_call (sub-agents) is allowed.</summary>
+    private static readonly string[] BlockedCodexItems = ["web_search", "command_execution", "file_change"];
+    private const string OwnToolPrefix = "mcp__" + HeadlessCommand.ServerName + "__";
+
     private readonly List<string> _errors = [];
     private string? _lastText;
     private string? _result;
@@ -160,12 +178,19 @@ public sealed partial class HeadlessStream(bool codex)
     public long OutputTokens { get; private set; }
     public bool Failed { get; private set; }
 
+    /// <summary>
+    /// Set by the runtime guard (m6 §0) when the run tried a tool it must not have: a loggable description (the item type,
+    /// plus the MCP server name when it is a plain identifier; never arguments or text). The run is to be killed; later
+    /// lines are ignored and there is no answer.
+    /// </summary>
+    public string? Blocked { get; private set; }
+
     /// <summary>The final answer, or null when the run produced none.</summary>
-    public string? Answer => Failed ? null : !string.IsNullOrWhiteSpace(_result) ? _result : !string.IsNullOrWhiteSpace(_lastText) ? _lastText : null;
+    public string? Answer => Failed || Blocked is not null ? null : !string.IsNullOrWhiteSpace(_result) ? _result : !string.IsNullOrWhiteSpace(_lastText) ? _lastText : null;
 
     public void Feed(string line)
     {
-        if (line.Length == 0 || line[0] != '{') return;
+        if (Blocked is not null || line.Length == 0 || line[0] != '{') return;
         JsonObject? e;
         try { e = JsonNode.Parse(line) as JsonObject; }
         catch (System.Text.Json.JsonException) { return; }
@@ -179,6 +204,15 @@ public sealed partial class HeadlessStream(bool codex)
     private static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue<string>(out var s) ? s : null;
     private static long Num(JsonNode? n) => n is JsonValue v && Json.Number(v) is double d && d >= 0 ? (long)d : 0;
 
+    private void Block(string what)
+    {
+        Blocked = what;
+        onBlocked?.Invoke();
+    }
+
+    /// <summary>A name safe to log (a plain identifier), else "other".</summary>
+    private static string LogName(string? name) => name is not null && LogNamePattern().IsMatch(name) ? name : "other";
+
     private void FeedClaude(JsonObject e)
     {
         switch (Str(e["type"]))
@@ -187,8 +221,19 @@ public sealed partial class HeadlessStream(bool codex)
                 Session ??= Str(e["session_id"]);
                 break;
             case "assistant":
-                var texts = (e["message"]?["content"] as JsonArray ?? [])
-                    .Where(b => Str(b?["type"]) == "text").Select(b => Str(b?["text"])).OfType<string>().ToList();
+                var content = e["message"]?["content"] as JsonArray ?? [];
+                // Runtime guard (m6 §0): any tool but ours (built-in, server-side or another MCP server's) ends the run.
+                var foreign = content.FirstOrDefault(b => Str(b?["type"]) is "tool_use" or "server_tool_use"
+                    && !(Str(b?["name"]) ?? "").StartsWith(OwnToolPrefix, StringComparison.Ordinal));
+                if (foreign is not null)
+                {
+                    var name = Str(foreign["name"]) ?? "";
+                    var server = name.StartsWith("mcp__", StringComparison.Ordinal) && name.IndexOf("__", 5, StringComparison.Ordinal) is var end and > 5
+                        ? LogName(name[5..end]) : null;
+                    Block(Str(foreign["type"]) + (server is null ? "" : " server " + server));
+                    return;
+                }
+                var texts = content.Where(b => Str(b?["type"]) == "text").Select(b => Str(b?["text"])).OfType<string>().ToList();
                 if (texts.Count > 0) _lastText = string.Join("\n", texts);
                 break;
             case "result":
@@ -213,6 +258,8 @@ public sealed partial class HeadlessStream(bool codex)
             case "thread.started":
                 Session = Str(e["thread_id"]) ?? Session;
                 break;
+            case "item.started" or "item.updated" or "item.completed" when GuardCodex(e["item"]):
+                return;
             case "item.completed":
                 var item = e["item"];
                 if (Str(item?["type"]) == "agent_message" && Str(item?["text"]) is { } text) _lastText = text;
@@ -232,6 +279,22 @@ public sealed partial class HeadlessStream(bool codex)
                 break;
         }
     }
+
+    /// <summary>
+    /// Runtime guard (m6 §0): a web_search, command_execution or file_change item, or an mcp_tool_call to a server other
+    /// than ours, blocks the run at its first event (item.started, else item.completed). True when blocked.
+    /// </summary>
+    private bool GuardCodex(JsonNode? item)
+    {
+        var type = Str(item?["type"]);
+        if (type is null) return false;
+        if (BlockedCodexItems.Contains(type, StringComparer.Ordinal)) Block(type);
+        else if (type == "mcp_tool_call" && Str(item?["server"]) is var server && server != HeadlessCommand.ServerName) Block(type + " server " + LogName(server));
+        return Blocked is not null;
+    }
+
+    [GeneratedRegex("^[A-Za-z0-9_.-]{1,64}$")]
+    private static partial Regex LogNamePattern();
 
     /// <summary>Error text (stream errors plus stderr) that looks like a sign-in problem: login, not logged in, 401.</summary>
     public bool LooksLikeAuth(string stderr) => AuthPattern().IsMatch(string.Join("\n", _errors) + "\n" + stderr);

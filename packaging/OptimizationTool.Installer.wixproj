@@ -7,7 +7,7 @@
     <StagingDir Condition="'$(StagingDir)' == ''">$(_OtRepoRoot)artifacts\publish\OptimizationTool</StagingDir>
     <OutputType>Package</OutputType>
     <InstallerPlatform>x64</InstallerPlatform>
-    <OutputName>OptimizationTool-$(Version)-x64</OutputName>
+    <OutputName>Optimus-$(Version)-x64</OutputName>
     <OutputPath>$(_OtRepoRoot)artifacts\installer\</OutputPath>
     <IntermediateOutputPath>$(_OtRepoRoot)artifacts\pkg-build\wix\obj\$(Configuration)\</IntermediateOutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

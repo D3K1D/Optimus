@@ -8,6 +8,8 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Product>Optimus</Product>
+    <!-- The gear logo (design/design-system/assets/Logos/app-icon*.svg, each size rendered from its own file). -->
+    <ApplicationIcon>Assets\optimus.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OptimizationTool.Desktop.Tests" />
@@ -21,19 +23,23 @@
     <_OtWithMcp Condition="Exists('$(_OtMcpProject)') and '$(OtSkipMcp)' != 'true'">true</_OtWithMcp>
     <_OtBrokerProject>$(MSBuildThisFileDirectory)..\Broker\OptimizationTool.Broker.csproj</_OtBrokerProject>
     <_OtWithBroker Condition="Exists('$(_OtBrokerProject)') and '$(OtSkipBroker)' != 'true'">true</_OtWithBroker>
+    <_OtBenchProject>$(MSBuildThisFileDirectory)..\Bench\OptimizationTool.Bench.csproj</_OtBenchProject>
+    <_OtWithBench Condition="Exists('$(_OtBenchProject)') and '$(OtSkipBench)' != 'true'">true</_OtWithBench>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" PrivateAssets="all" />
     <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
     <!-- Build-order only: the companion exes are copied next to OptimizationTool.exe by _OtCopyCompanions below.
-         Conditional so this project builds before they exist. -p:OtSkipHost / OtSkipMcp / OtSkipBroker=true opt out.
+         Conditional so this project builds before they exist. -p:OtSkipHost / OtSkipMcp / OtSkipBroker / OtSkipBench=true opt out.
          The broker (requireAdministrator manifest) is only copied, never run by the build. -->
     <ProjectReference Include="$(_OtHostProject)" Condition="'$(_OtWithHost)' == 'true'"
                       ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="$(_OtMcpProject)" Condition="'$(_OtWithMcp)' == 'true'"
                       ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="$(_OtBrokerProject)" Condition="'$(_OtWithBroker)' == 'true'"
+                      ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="$(_OtBenchProject)" Condition="'$(_OtWithBench)' == 'true'"
                       ReferenceOutputAssembly="false" Private="false" SkipGetTargetFrameworkProperties="true" />
   </ItemGroup>
 
@@ -59,9 +65,10 @@
   </ItemGroup>
 
   <!-- Companion exes: the whole output (exe, dll, runtimeconfig, deps, dependencies) of the host, the MCP bridge and the
-       elevation broker is copied next to OptimizationTool.exe. The shell launches the host by a fixed absolute path; the
-       host finds OptimizationTool.Mcp.exe (m3-agent.md §1) and OptimizationTool.Broker.exe (m4-actions.md §5) beside itself.
-       Shared files: first copy wins, in the order host, MCP, broker; later companions only add files not already there.
+       elevation broker and the benchmark worker is copied next to OptimizationTool.exe. The shell launches the host by a fixed
+       absolute path; the host finds OptimizationTool.Mcp.exe (m3-agent.md §1), OptimizationTool.Broker.exe (m4-actions.md §5)
+       and OptimizationTool.Bench.exe (m6-benchmark.md §4) beside itself.
+       Shared files: first copy wins, in the order host, MCP, broker, bench; later companions only add files not already there.
        A shared DLL whose bytes differ from the copy that won (e.g. two package versions) is reported as a warning. -->
   <Target Name="_OtResolveCompanions">
     <MSBuild Projects="$(_OtHostProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" Condition="'$(_OtWithHost)' == 'true'">
@@ -73,7 +80,11 @@
     <MSBuild Projects="$(_OtBrokerProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" Condition="'$(_OtWithBroker)' == 'true'">
       <Output TaskParameter="TargetOutputs" ItemName="_OtBrokerTargetPath" />
     </MSBuild>
+    <MSBuild Projects="$(_OtBenchProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)" Condition="'$(_OtWithBench)' == 'true'">
+      <Output TaskParameter="TargetOutputs" ItemName="_OtBenchTargetPath" />
+    </MSBuild>
     <PropertyGroup>
+      <_OtBenchOutDir>@(_OtBenchTargetPath->'%(RootDir)%(Directory)')</_OtBenchOutDir>
       <_OtHostOutDir>@(_OtHostTargetPath->'%(RootDir)%(Directory)')</_OtHostOutDir>
       <_OtMcpOutDir>@(_OtMcpTargetPath->'%(RootDir)%(Directory)')</_OtMcpOutDir>
       <_OtBrokerOutDir>@(_OtBrokerTargetPath->'%(RootDir)%(Directory)')</_OtBrokerOutDir>
@@ -103,6 +114,16 @@
       <_OtBrokerOnly Remove="@(_OtHostFiles)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
       <_OtBrokerOnly Remove="@(_OtMcpOnly)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
     </ItemGroup>
+    <ItemGroup Condition="'$(_OtBenchOutDir)' != ''">
+      <_OtBenchFiles Include="$(_OtBenchOutDir)**\*" Exclude="$(_OtBenchOutDir)ui\**;$([MSBuild]::Escape('$(_OtBenchOutDir)'))$(_OtOwn.Replace(';', ';$(_OtBenchOutDir)'))" />
+      <_OtBenchFiles>
+        <Rel>%(_OtBenchFiles.RecursiveDir)%(_OtBenchFiles.Filename)%(_OtBenchFiles.Extension)</Rel>
+      </_OtBenchFiles>
+      <_OtBenchOnly Include="@(_OtBenchFiles)" />
+      <_OtBenchOnly Remove="@(_OtHostFiles)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
+      <_OtBenchOnly Remove="@(_OtMcpOnly)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
+      <_OtBenchOnly Remove="@(_OtBrokerOnly)" MatchOnMetadata="Rel" MatchOnMetadataOptions="CaseInsensitive" />
+    </ItemGroup>
     <!-- DLLs a later companion also ships but did not get to copy: compared against the copy that won. -->
     <ItemGroup>
       <_OtShared Include="@(_OtMcpFiles)" Condition="'%(_OtMcpFiles.Extension)' == '.dll'" />
@@ -110,6 +131,9 @@
       <_OtSharedBroker Include="@(_OtBrokerFiles)" Condition="'%(_OtBrokerFiles.Extension)' == '.dll'" />
       <_OtSharedBroker Remove="@(_OtBrokerOnly)" />
       <_OtShared Include="@(_OtSharedBroker)" />
+      <_OtSharedBench Include="@(_OtBenchFiles)" Condition="'%(_OtBenchFiles.Extension)' == '.dll'" />
+      <_OtSharedBench Remove="@(_OtBenchOnly)" />
+      <_OtShared Include="@(_OtSharedBench)" />
     </ItemGroup>
   </Target>
 
@@ -117,6 +141,7 @@
     <Copy SourceFiles="@(_OtHostFiles)" DestinationFiles="@(_OtHostFiles->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_OtMcpOnly)" DestinationFiles="@(_OtMcpOnly->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_OtBrokerOnly)" DestinationFiles="@(_OtBrokerOnly->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_OtBenchOnly)" DestinationFiles="@(_OtBenchOnly->'$(OutDir)%(Rel)')" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="_OtCheckSharedFiles" AfterTargets="_OtCopyCompanions" Condition="'@(_OtShared)' != ''" Outputs="%(_OtShared.Identity)">

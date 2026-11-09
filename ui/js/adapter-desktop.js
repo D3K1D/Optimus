@@ -22,9 +22,11 @@
     var pending = {};            // rpc id → {method, params, resolve, reject, sent}
     var eventFns = [], stateFns = [];
     var state = null;            // null until the shell reports one; calls are posted straight away
+    var lastDetail = null;       // the shell's detail for that state (a code such as "other_session", or null)
     var lastSeq = {};            // stream → last delivered seq (drops duplicates after a reconnect)
 
     var MAX_RETRIES = 8;
+    var RETRY = 'shell.retryBackend';   // shell-handled: relaunch the host now (protocol-v1 §7)
     function holding() { return state === 'connecting' || state === 'reconnecting'; }
 
     function post(entry) {
@@ -38,7 +40,8 @@
       return new Promise(function (resolve, reject) {
         var entry = { method: method, params: params || {}, resolve: resolve, reject: reject, sent: false };
         if (state === 'incompatible') { reject(rpcError({ code: -32010, message: 'incompatible_protocol' })); return; }
-        if (holding()) { held.push(entry); return; }
+        // "Try again" exists for exactly the time there is no backend, so it is never held.
+        if (holding() && method !== RETRY) { held.push(entry); return; }
         post(entry);
       });
     }
@@ -56,6 +59,7 @@
     function setState(next, detail) {
       var prev = state;
       state = next;
+      lastDetail = detail === undefined ? null : detail;
       if (next === 'incompatible') {
         var all = held.concat(Object.keys(pending).map(function (id) { return pending[id]; }));
         held = []; pending = {};
@@ -105,6 +109,8 @@
       onEvent: function (fn) { return sub(eventFns, fn); },
       onState: function (fn) { return sub(stateFns, fn); },
       state: function () { return state || 'ready'; },
+      known: function () { return state !== null; },   // false until the shell's first state message (the loading screen waits for it)
+      detail: function () { return lastDetail; },
       dispose: function () { if (webview.removeEventListener) webview.removeEventListener('message', onMessage); }
     };
   }

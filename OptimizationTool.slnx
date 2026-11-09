@@ -5,6 +5,9 @@
     <Project Path="src/Host/OptimizationTool.Host.csproj" />
     <Project Path="src/Desktop/OptimizationTool.Desktop.csproj" />
   </Folder>
+  <Folder Name="/src/Bench/">
+    <Project Path="src/Bench/OptimizationTool.Bench.csproj" />
+  </Folder>
   <Folder Name="/src/Broker/">
     <Project Path="src/Broker/OptimizationTool.Broker.csproj" />
   </Folder>
@@ -20,6 +23,7 @@
     <Project Path="src/Windows/OptimizationTool.Windows.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/OptimizationTool.Bench.Tests/OptimizationTool.Bench.Tests.csproj" />
     <Project Path="tests/OptimizationTool.Broker.Tests/OptimizationTool.Broker.Tests.csproj" />
     <Project Path="tests/OptimizationTool.Mcp.Tests/OptimizationTool.Mcp.Tests.csproj" />
     <Project Path="tests/OptimizationTool.Providers.Tests/OptimizationTool.Providers.Tests.csproj" />

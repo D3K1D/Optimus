@@ -123,3 +123,33 @@ test('reload resumes at the report', async () => {
   const r = await be2.call('report.get', { reportId: o.resume.reportId });
   assert.equal(r.findings.length, 9);
 });
+
+test('fixture mirrors the shell\'s startup states and shell.retryBackend', async () => {
+  const be = adapter();
+  await be.ready;
+  assert.equal(be.state(), 'ready');
+  assert.equal(be.detail(), null);
+  const seen = [];
+  be.onState((state, info) => seen.push([state, info.detail]));
+
+  await be.call('fixture.setBackendState', { state: 'connecting', detail: 'needs_update' });
+  assert.equal(be.state(), 'connecting');
+  assert.equal(be.detail(), 'needs_update');
+
+  // Try again: plain connecting at once, then the same ending again.
+  assert.deepEqual(await be.call('shell.retryBackend', {}), { retrying: true });
+  assert.equal(be.detail(), null);
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(be.detail(), 'needs_update');
+
+  await be.call('fixture.setBackendState', { state: 'connecting', detail: 'cant_start', recoverOnRetry: true });
+  await be.call('shell.retryBackend', {});
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(be.state(), 'ready');
+  assert.equal(be.detail(), null);
+  assert.deepEqual(seen, [['connecting', 'needs_update'], ['connecting', null], ['connecting', 'needs_update'],
+    ['connecting', 'cant_start'], ['connecting', null], ['ready', null]]);
+
+  await assert.rejects(be.call('shell.retryBackend', { x: 1 }), (e) => e.code === -32602);
+  await assert.rejects(be.call('fixture.setBackendState', { state: 'nope' }), (e) => e.code === -32602);
+});

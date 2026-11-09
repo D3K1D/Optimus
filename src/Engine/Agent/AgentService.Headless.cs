@@ -10,9 +10,11 @@ public sealed partial class AgentService
     /// <summary>
     /// What the shell last reported about a CLI. Kept in memory for the host's lifetime (the shell sends it again when it
     /// reconnects). Compatible false: an outdated CLI. Blocked: a CLI exists but cannot be started. Auth: subscription |
-    /// api_key | other (how the CLI bills; informational).
+    /// api_key | other (how the CLI bills; informational). CodexFeatures (Codex only): the probed m6 §0 features each run
+    /// disables; a compatible Codex without them is treated as outdated (fail closed).
     /// </summary>
-    private sealed record ClientReport(string? Path, bool? SignedIn, string? Version, bool Compatible = true, bool Blocked = false, string? Auth = null)
+    private sealed record ClientReport(string? Path, bool? SignedIn, string? Version, bool Compatible = true, bool Blocked = false, string? Auth = null,
+        IReadOnlyList<string>? CodexFeatures = null)
     {
         public bool Usable => Path is not null && Compatible && !Blocked;
     }
@@ -72,7 +74,10 @@ public sealed partial class AgentService
         var compatible = OptionalBool(p, "compatible") ?? true;
         var blocked = OptionalBool(p, "blocked") ?? false;
         var auth = p["auth"] is null ? null : P.OneOf(p, "auth", AuthKinds);
+        var codexFeatures = CodexFeatures(p, kind);
         if (blocked && path is not null) throw RpcError.Params("blocked", "A blocked client has no path.");
+        // m6 §0, fail closed: a Codex the shell did not probe for its features is not used in-app.
+        if (kind == "codex_mcp" && path is not null && compatible && !blocked && codexFeatures is null) compatible = false;
         if (path is not null)
         {
             var valid = path.All(ch => !char.IsControl(ch)) && Path.IsPathFullyQualified(path)
@@ -84,12 +89,32 @@ public sealed partial class AgentService
         {
             // signedIn null (the check failed or timed out) is "unknown": the previous sign-in state of an installed CLI stays.
             if (path is not null && signedIn is null && _clients.TryGetValue(kind, out var previous) && previous.Path is not null) signedIn = previous.SignedIn;
-            _clients[kind] = new ClientReport(path, path is null ? null : signedIn, version, compatible, blocked, path is null ? null : auth);
+            _clients[kind] = new ClientReport(path, path is null ? null : signedIn, version, compatible, blocked, path is null ? null : auth, path is null ? null : codexFeatures);
         }
         var state = blocked ? "blocked" : path is null ? "not installed" : !compatible ? "outdated"
             : signedIn switch { true => "signed in", false => "signed out", _ => "unknown" };
         _log($"provider {kind}: client {state}{(auth is null || path is null ? "" : " (" + auth + ")")}");
         return FreshEntry(kind);
+    }
+
+    /// <summary>
+    /// codexFeatures (m6 §0, Codex only, optional): the §0 features this Codex lists, to disable on every run. Each must be
+    /// one of <see cref="HeadlessCommand.CodexLockdownFeatures"/>, at most once; anything else → -32602.
+    /// </summary>
+    private static IReadOnlyList<string>? CodexFeatures(JsonObject p, string kind)
+    {
+        if (p["codexFeatures"] is null) return null;
+        const string message = "codexFeatures must be a list of distinct m6 §0 Codex feature names.";
+        if (kind != "codex_mcp" || p["codexFeatures"] is not JsonArray list) throw RpcError.Params("codexFeatures", message);
+        List<string> features = [];
+        foreach (var item in list)
+        {
+            if (item is not JsonValue v || !v.TryGetValue<string>(out var name)
+                || !HeadlessCommand.CodexLockdownFeatures.Contains(name, StringComparer.Ordinal) || features.Contains(name, StringComparer.Ordinal))
+                throw RpcError.Params("codexFeatures", message);
+            features.Add(name);
+        }
+        return features;
     }
 
     private static bool? OptionalBool(JsonObject p, string name) => p[name] switch
@@ -205,7 +230,14 @@ public sealed partial class AgentService
         var kind = task["recipient"].Text("kind");
         var codex = kind == "codex_mcp";
         string? cli;
-        lock (_gate) cli = _clients.TryGetValue(kind, out var c) && c.Usable && c.SignedIn != false ? c.Path : null;
+        IReadOnlyList<string>? codexFeatures = null;
+        lock (_gate)
+        {
+            var usable = _clients.TryGetValue(kind, out var c) && c.Usable && c.SignedIn != false;
+            cli = usable ? c!.Path : null;
+            if (usable) codexFeatures = c!.CodexFeatures;
+        }
+        if (codex && codexFeatures is null) cli = null; // m6 §0: never run a Codex whose features were not probed
         var bridge = _options.McpExecutablePath;
         if (cli is null || bridge is null || _options.CliRunner is not { } runner || DataDir is null)
         {
@@ -229,7 +261,7 @@ public sealed partial class AgentService
             string stdin;
             if (codex)
             {
-                args = HeadlessCommand.Codex(runDir, bridge, run.Token, session, CodexCredentialsStore());
+                args = HeadlessCommand.Codex(runDir, bridge, run.Token, session, codexFeatures!, CodexCredentialsStore());
                 stdin = first ? SystemPrompt + "\n\n" + prompt : prompt;
             }
             else
@@ -250,21 +282,29 @@ public sealed partial class AgentService
             var seconds = Math.Min(MaxRunSeconds, grant.Limits.Turns * grant.Limits.TurnSeconds);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
-            var stream = new HeadlessStream(codex);
+            // m6 §0 runtime guard: a tool the run must not have kills the process tree at once (cancelling the run).
+            using var guard = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+            var stream = new HeadlessStream(codex, () => { try { guard.Cancel(); } catch (ObjectDisposedException) { } });
             CliExit? exit = null;
-            string? stopped = null; // cancelled | timeout | internal: the run ended before the CLI did
+            string? stopped = null; // cancelled | timeout | tool_blocked | internal: the run ended before the CLI did
             try
             {
-                exit = await runner.RunAsync(new CliLaunch(cli, args, stdin, runDir), stream.Feed, deadline.Token).ConfigureAwait(false);
+                exit = await runner.RunAsync(new CliLaunch(cli, args, stdin, runDir), stream.Feed, guard.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                stopped = ct.IsCancellationRequested ? "cancelled" : "timeout";
+                stopped = ct.IsCancellationRequested ? "cancelled" : stream.Blocked is not null ? "tool_blocked" : "timeout";
             }
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 _log($"task {taskId} headless run: {ex.GetType().Name}");
                 stopped = "internal";
+            }
+            if (stream.Blocked is { } blockedTool)
+            {
+                // Even if the CLI ended before the kill landed, the run is refused: no answer, code tool_blocked.
+                _log($"task {taskId} headless run stopped: tool blocked ({blockedTool})");
+                if (stopped is null or "timeout" or "internal") stopped = "tool_blocked";
             }
             if (exit is { Started: false })
             {

@@ -3,6 +3,17 @@ using Microsoft.Data.Sqlite;
 namespace OptimizationTool.Engine;
 
 /// <summary>
+/// The data folder's database was migrated by a newer build: this build must not open it (the host exits with
+/// <c>HostExitCodes.NeedsUpdate</c> and the shell asks the user to update).
+/// </summary>
+public sealed class DataTooNewException(int found, int supported)
+    : InvalidOperationException($"Database schema v{found} is newer than this build supports (v{supported}).")
+{
+    public int Found { get; } = found;
+    public int Supported { get; } = supported;
+}
+
+/// <summary>
 /// Versioned schema migrations tracked in PRAGMA user_version. Version 0 is an empty file. Before upgrading an
 /// existing database the file is backed up next to itself as state.db.v{old}.bak. A database newer than this
 /// build is refused rather than guessed at.
@@ -80,6 +91,16 @@ internal static class Migrations
         """
         CREATE TABLE agent_transcripts (task_id TEXT PRIMARY KEY, body TEXT NOT NULL, updated_at TEXT NOT NULL);
         """,
+        // v7 (M6a): benchmark runs (body = the BenchRun as stored; parts = successful parts, sorted, for comparability)
+        // and their evidence (ev- + H(runId, part, metric)).
+        """
+        CREATE TABLE bench_runs (run_id TEXT PRIMARY KEY, state TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT,
+            bench_version TEXT NOT NULL, config_id TEXT, score REAL, partial INTEGER NOT NULL DEFAULT 0, parts TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL);
+        CREATE INDEX bench_runs_state ON bench_runs (state, config_id);
+        CREATE TABLE bench_evidence (evidence_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, part TEXT NOT NULL, metric TEXT NOT NULL, body TEXT NOT NULL);
+        CREATE INDEX bench_evidence_run ON bench_evidence (run_id);
+        """,
     ];
 
     public static int Latest => Steps.Length;
@@ -95,7 +116,7 @@ internal static class Migrations
     {
         var current = CurrentVersion(conn);
         if (current > Latest)
-            throw new InvalidOperationException($"Database schema v{current} is newer than this build supports (v{Latest}).");
+            throw new DataTooNewException(current, Latest);
         if (current >= target) return;
 
         if (current > 0)

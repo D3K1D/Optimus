@@ -225,9 +225,12 @@ internal sealed class DefenderHandler(DefenderOp op, IDefenderSystem system, Tim
         }
         if (advanced || end?.EventId == 1001)
         {
-            observed["result"] = found ? "threats_found" : "no_threats";
-            observed["manualUri"] = found ? ManualUri : null;
-            var text = !found ? $"{label} finished. No threats found."
+            // "No threats" needs the complete event history; without it the scan still finished, but its result is unknown.
+            var unknown = !found && !threatsKnown;
+            observed["result"] = found ? "threats_found" : unknown ? "threats_unknown" : "no_threats";
+            observed["manualUri"] = found || unknown ? ManualUri : null;
+            var text = unknown ? $"{label} finished. Threat result unknown; check Windows Security."
+                : !found ? $"{label} finished. No threats found."
                 : threatsKnown && threatCount > 0
                     ? $"{label} finished. Defender found {(threatCount == 1 ? "1 threat" : $"{threatCount} threats")}; review in Windows Security."
                     : $"{label} finished. Defender found threats; review in Windows Security.";

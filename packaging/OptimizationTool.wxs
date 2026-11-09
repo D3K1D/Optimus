@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Optimus: per-machine MSI (contracts/onboarding.md §1). Built by OptimizationTool.Installer.wixproj from the
      staging folder packaging/publish.ps1 writes. ProductVersion and StagingDir come from MSBuild (DefineConstants).
-     Shown name is "Optimus"; internal names (install folder, data folders, exe names) stay "Optimization Tool"/"OptimizationTool". -->
+     Shown name is "Optimus", install folder included; internal names (data folders, exe names) stay "OptimizationTool". -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <!-- UpgradeCode: generated once (2026-11-04) and fixed forever. Every version (0.6.x/0.7.x shipped as "Optimization Tool")
@@ -34,9 +34,12 @@
     <Launch Condition="Installed OR (WV2_MACHINE_PV AND WV2_MACHINE_PV &lt;&gt; &quot;0.0.0.0&quot;) OR (WV2_USER_PV AND WV2_USER_PV &lt;&gt; &quot;0.0.0.0&quot;)"
             Message="Optimus needs the Microsoft Edge WebView2 Runtime. Download it from https://developer.microsoft.com/microsoft-edge/webview2/ (Evergreen Bootstrapper), then run this installer again." />
 
-    <!-- %ProgramFiles%\Optimization Tool: admin-protected, as the elevation broker requires. -->
+    <!-- %ProgramFiles%\Optimus: admin-protected, as the elevation broker requires. Up to 0.8.x it was
+         %ProgramFiles%\Optimization Tool: MajorUpgrade (default schedule) uninstalls that product, files included, before
+         this one installs, and the app re-registers a Claude Code/Codex entry left pointing at the removed bridge
+         (src/Desktop/Bridge/ClientConnector.cs). -->
     <StandardDirectory Id="ProgramFiles64Folder">
-      <Directory Id="INSTALLFOLDER" Name="Optimization Tool" />
+      <Directory Id="INSTALLFOLDER" Name="Optimus" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
     <StandardDirectory Id="DesktopFolder" />
@@ -83,7 +86,7 @@
                     Description="Audit and tune this PC" WorkingDirectory="INSTALLFOLDER" Advertise="no" />
         </File>
       </Component>
-      <!-- Everything else in the staging folder (host, MCP bridge, broker, runtime, ui/), subfolders included. -->
+      <!-- Everything else in the staging folder (host, MCP bridge, broker, benchmark worker, runtime, ui/), subfolders included. -->
       <Files Include="$(var.StagingDir)\**">
         <Exclude Files="$(var.StagingDir)\OptimizationTool.exe" />
       </Files>

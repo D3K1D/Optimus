@@ -16,6 +16,8 @@ internal sealed class FakeDefender : IDefenderSystem
     public DefenderEvents Events = new(true, [], 0, 0, 0, 0);
     public List<IReadOnlyList<string>> Runs { get; } = [];
     public bool Killed;
+    /// <summary>Completes when the hung tool has seen its cancellation (the kill).</summary>
+    public TaskCompletionSource KilledSignal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private bool _ran;
 
     public static DefenderState State(string mode = "primary", string? sig = "1.400.10.0", DateTime? quick = null, DateTime? full = null) =>
@@ -31,7 +33,7 @@ internal sealed class FakeDefender : IDefenderSystem
         if (Hang)
         {
             try { await Task.Delay(Timeout.Infinite, ct); }
-            catch (OperationCanceledException) { Killed = true; throw; }
+            catch (OperationCanceledException) { Killed = true; KilledSignal.TrySetResult(); throw; }
         }
         return Exit;
     }
@@ -179,6 +181,32 @@ public class DefenderActionTests
     private static readonly DateTimeOffset Soon = DateTimeOffset.UtcNow.AddSeconds(5);
 
     [Fact]
+    public async Task Finished_scan_with_unreadable_history_reports_threats_unknown_not_no_threats()
+    {
+        var f = new FakeDefender
+        {
+            After = new(FakeDefender.State(quick: DateTime.UtcNow.AddMinutes(1)), null),
+            Events = new(false, [new(1000, "{U}", "quick", Soon), new(1001, "{U}", "quick", Soon.AddMinutes(2))], 0, 0, 0, 0),
+        };
+        var (o, _) = await Run(H(DefenderOp.QuickScan, f), f);
+        Assert.Equal("completed", o.State);
+        Assert.Equal("threats_unknown", o.Observed["result"]!.GetValue<string>());
+        Assert.DoesNotContain("No threats", o.ReceiptText);
+        Assert.Equal(DefenderHandler.ManualUri, o.Observed["manualUri"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(true, false, 0)]
+    [InlineData(false, true, 0)]
+    [InlineData(false, false, 1)]
+    public void Incomplete_event_history_is_not_readable(bool capHit, bool interrupted, int unreadable)
+    {
+        Assert.False(DefenderEventParser.FromChannel(new RawChannel("ok", null, [], capHit, interrupted, unreadable)).Readable);
+        Assert.True(DefenderEventParser.FromChannel(new RawChannel("ok", null, [], false, false, 0)).Readable);
+        Assert.False(DefenderEventParser.FromChannel(new RawChannel("denied", "x", [], false, false, 0)).Readable);
+    }
+
+    [Fact]
     public async Task Quick_scan_correlates_scan_id_and_reports_threats_without_remediating()
     {
         var f = new FakeDefender
@@ -225,13 +253,32 @@ public class DefenderActionTests
     [Fact]
     public async Task Cancel_kills_the_tool_and_is_indeterminate_with_progress_ticks()
     {
+        // No timers: the cancel is sent by the first progress tick itself, so a tick has always been seen and the tool is
+        // always running when it arrives, however slowly this machine schedules the test.
         var f = new FakeDefender { Hang = true };
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
-        var (o, progress) = await Run(H(DefenderOp.FullScan, f), f, Confirm, cts.Token);
+        using var cts = new CancellationTokenSource();
+        var h = H(DefenderOp.FullScan, f);
+        var res = await h.ResolveAsync(Req(h, Confirm), default);
+        Assert.True(res.Eligible, res.IneligibleCode);
+        var progress = new List<string>();
+        var onTick = new CancelOnTick(progress, cts);
+        var o = await h.ExecuteAsync(new ActionExecution("plan-x", "hash", res.Target, res.Before, res.After, Confirm), onTick, cts.Token)
+            .WaitAsync(TimeSpan.FromSeconds(60));
         Assert.Equal("indeterminate", o.State);
         Assert.Equal("cancelled", o.Code);
+        await f.KilledSignal.Task.WaitAsync(TimeSpan.FromSeconds(60)); // the kill is observed, not assumed to be instant
         Assert.True(f.Killed);
-        Assert.Contains(progress, p => p.StartsWith("Scanning · full · ", StringComparison.Ordinal));
+        lock (progress) Assert.Contains(progress, p => p.StartsWith("Scanning · full · ", StringComparison.Ordinal));
+    }
+
+    /// <summary>Records progress and cancels as soon as a timed tick ("Scanning · full · N min") arrives.</summary>
+    private sealed class CancelOnTick(List<string> lines, CancellationTokenSource cts) : IProgress<string>
+    {
+        public void Report(string value)
+        {
+            lock (lines) lines.Add(value);
+            if (value.StartsWith("Scanning · full · ", StringComparison.Ordinal)) cts.Cancel();
+        }
     }
 
     [Fact]

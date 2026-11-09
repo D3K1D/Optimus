@@ -5,7 +5,37 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const { taskEnded, turnsFromHistory, runningTurn, reconcileAnswers, answerKey, answerPanels, menuStep } = require('../js/connection-state.js');
+const { taskEnded, turnsFromHistory, runningTurn, reconcileAnswers, answerKey, answerPanels, menuStep, keepInView, citeKind, citeRegistry, citeLabel } = require('../js/connection-state.js');
+
+test('citation chips name the kind of check instead of a raw running id', () => {
+  const reg = citeRegistry();
+  assert.equal(citeLabel(reg, 'ev-a', { collectorId: 'win.security.listeners' }), 'Ports');
+  assert.equal(citeLabel(reg, 'ev-b', { collectorId: 'win.process.sample' }), 'CPU');
+  assert.equal(citeLabel(reg, 'ev-c', { collectorId: 'win.security.listeners' }), 'Ports 2');   // the second of a kind
+  assert.equal(citeLabel(reg, 'ev-a', null), 'Ports');                                           // stable once named
+  assert.equal(citeLabel(reg, 'ev-d', null), 'm4');                                              // kind not known yet
+  assert.equal(citeLabel(reg, 'ev-d', { collectorId: 'bench.gpu' }), 'GPU');                     // named once it loads
+  assert.equal(citeKind({ collectorId: 'win.security.startup' }), 'Startup');                    // the specific word wins
+  assert.equal(citeKind({ collectorId: 'win.security.defender' }), 'Security');
+  assert.equal(citeKind({ collectorId: 'win.custom.display' }), 'Display');
+  assert.equal(citeKind({ collectorId: 'something.else' }), null);
+  // The check that produced it is enough (the evidence itself may not be loaded yet).
+  assert.equal(citeKind('process.sample'), 'CPU');
+  assert.equal(citeKind('network.listeners'), 'Ports');
+  assert.equal(citeKind('sensors.snapshot'), 'Sensors');
+  assert.equal(citeKind('get_benchmarks'), 'Bench');
+  assert.equal(citeKind('get_findings'), null);
+  // No label is longer than a short word and a number: the chip stays the size it was.
+  for (const id of ['win.security.wsc', 'win.system.volumes', 'win.devices.pnp', 'win.events.system', 'bench.disk'])
+    assert.ok(citeKind({ collectorId: id }).length <= 8);
+});
+
+test('a popover is kept whole inside the viewport, not just its focused row', () => {
+  const calls = [];
+  keepInView({ scrollIntoView: (o) => calls.push(o) });
+  assert.deepEqual(calls, [{ block: 'nearest', inline: 'nearest' }]);
+  keepInView(null); keepInView({});   // nothing to scroll: no throw
+});
 const { createDesktopAdapter } = require('../js/adapter-desktop.js');
 const { createFixtureAdapter } = require('../js/adapter-fixture.js');
 const fixture = JSON.parse(readFileSync(new URL('../fixtures/m1-simulated-audit.json', import.meta.url), 'utf8'));

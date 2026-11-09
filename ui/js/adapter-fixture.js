@@ -80,6 +80,17 @@
     var F = null, S = null;
     var eventFns = [], stateFns = [], timers = {};   // timers: job id → [timeout]
     var samplers = {};                              // scan id → the running skippable collector
+    var bench = null;                               // M6a benchmark simulation (set below)
+    // The shell's backend state as the page sees it (protocol-v1 §7). Always ready unless a dev hook sets another.
+    var BACKEND_STATES = ['connecting', 'ready', 'reconnecting', 'incompatible'];
+    var backendState = 'ready', backendDetail = null, recoverOnRetry = false;
+    function setBackendState(next, detail) {
+      var prev = backendState;
+      if (prev === next && JSON.stringify(backendDetail) === JSON.stringify(detail)) return;
+      backendState = next; backendDetail = detail;
+      var info = { previous: prev, detail: detail, resumed: prev === 'reconnecting' && next === 'ready' };
+      stateFns.slice().forEach(function (fn) { try { fn(next, info); } catch (e) { setTimeout(function () { throw e; }); } });
+    }
 
     function fresh() {
       return { v: 1, onboarding: { revision: 1, step: 'provider',
@@ -106,6 +117,7 @@
       Object.keys(S.inventories).forEach(function (id) { var inv = S.inventories[id]; if (inv.status === 'running') inv.status = 'cancelled'; });
       Object.keys(S.scans).forEach(function (id) { var sc = S.scans[id]; if (sc.status === 'running' || sc.status === 'queued') jobs.push(endScan(sc, 'interrupted', false)); });
       if (agent) agent.__restart();
+      if (bench) bench.__restart();
       return Promise.all(jobs).then(save);
     });
 
@@ -237,6 +249,9 @@
       else throw rpcError(-32602, 'invalid params', { field: 'intent' });
       var active = Object.keys(S.scans).filter(function (id) { var s = S.scans[id].status; return s === 'running' || s === 'queued'; })[0];
       if (active) throw rpcError(-32004, 'scan_active', { scanId: active });
+      // M6a: one lease for scans and benchmarks (§2).
+      var benchRun = bench && bench.active();
+      if (benchRun) throw rpcError(-32013, 'invalid_state', { reason: 'bench_active', runId: benchRun.runId });
       if (!base) base = previousReport(intent);
       var scanId = 'scan-' + randomHex(16), catIds = cats.map(function (c) { return c.id; });
       var planned = F.collectors.filter(function (c) { return catIds.indexOf(c.category) >= 0 && (!c.onlyOnRescan || rescan); });
@@ -604,6 +619,24 @@
         if (SETTINGS_CATALOG.indexOf(p.uri) < 0) throw rpcError(-32602, 'invalid params', { field: 'uri' });
         return { opened: false };
       },
+      // Shell-handled on the desktop (protocol-v1 §7): "Try again" on the startup screen. As the shell: back to plain
+      // connecting at once, then the simulated host ends the same way again (or opens, when set with recoverOnRetry).
+      'shell.retryBackend': function (p) {
+        if (Object.keys(p).length) throw rpcError(-32602, 'invalid params', { field: 'params' });
+        if (backendState === 'ready' || backendState === 'incompatible') return { retrying: true };
+        var outcome = recoverOnRetry ? ['ready', null] : [backendState, backendDetail];
+        setBackendState(backendState, null);
+        later('backend', function () { setBackendState(outcome[0], outcome[1]); }, 1200);
+        return { retrying: true };
+      },
+      // Dev hook: show a startup state (state connecting|reconnecting|ready|incompatible, detail null or a §7 code
+      // such as other_session|needs_update|cant_start). recoverOnRetry: the next shell.retryBackend ends in ready.
+      'fixture.setBackendState': function (p) {
+        if (BACKEND_STATES.indexOf(p.state) < 0) throw rpcError(-32602, 'invalid params', { field: 'state' });
+        recoverOnRetry = !!p.recoverOnRetry;
+        setBackendState(p.state, p.detail == null ? null : p.detail);
+        return { state: backendState, detail: backendDetail };
+      },
       'fixture.summary': function (p) {
         var sc = S.scans[getReport(p.reportId).scanId];
         return { lines: F.mockAiSummary.filter(function (l) { return l.evidence.every(function (k) { return sc.keys[k]; }); })
@@ -621,11 +654,17 @@
       } }) : null;
     if (actions) Object.keys(actions.methods).forEach(function (k) { METHODS[k] = actions.methods[k]; });
 
+    // M6a: the benchmark (adapter-fixture-bench.js), with invented numbers.
+    var makeBench = (root.OptTool && root.OptTool.createFixtureBench) || (typeof require === 'function' ? require('./adapter-fixture-bench.js').createFixtureBench : null);
+    bench = makeBench ? makeBench({ state: function () { return S; }, emit: emit, later: later, stop: stop, withIdem: withIdem, rpcError: rpcError, clone: clone, randomHex: randomHex, H: H, save: save }) : null;
+    if (bench) Object.keys(bench.methods).forEach(function (k) { METHODS[k] = bench.methods[k]; });
+
     // M3: the agent gateway simulation (adapter-fixture-agent.js).
     var makeAgent = (root.OptTool && root.OptTool.createFixtureAgent) || (typeof require === 'function' ? require('./adapter-fixture-agent.js').createFixtureAgent : null);
     var agent = makeAgent ? makeAgent({ state: function () { return S; }, fixture: function () { return F; }, emit: emit, later: later, stop: stop, H: H,
       withIdem: withIdem, getReport: getReport, rpcError: rpcError, clone: clone, randomHex: randomHex, save: save,
-      manual: function () { return !!(S && S.agent && S.agent.manual); }, actions: actions }) : null;
+      manual: function () { return !!(S && S.agent && S.agent.manual); }, actions: actions,
+      benchRun: function (runId) { var b = S && S.bench; return b && b.runs[runId] ? clone(b.runs[runId]) : null; } }) : null;
     if (agent) Object.keys(agent).forEach(function (k) { if (k !== '__restart') METHODS[k] = agent[k]; });
 
     function call(method, params) {
@@ -643,7 +682,8 @@
       call: call,
       onEvent: function (fn) { return sub(eventFns, fn); },
       onState: function (fn) { return sub(stateFns, fn); },
-      state: function () { return 'ready'; },
+      state: function () { return backendState; },
+      detail: function () { return backendDetail; },
       reset: function () { Object.keys(timers).forEach(stop); S = fresh(); save(); }
     };
   }

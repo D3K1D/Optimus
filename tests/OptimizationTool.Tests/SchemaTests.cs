@@ -46,7 +46,7 @@ public class SchemaTests
     [Fact]
     public void AllSchemaFiles_Load()
     {
-        Assert.Equal(["action-plan", "agent-task", "compare", "event", "evidence", "finding", "followup", "hello", "onboarding", "operation", "provider-list", "report", "review", "scan", "tool-result"],
+        Assert.Equal(["action-plan", "agent-task", "bench-run", "compare", "event", "evidence", "finding", "followup", "hello", "onboarding", "operation", "provider-list", "report", "review", "scan", "tool-result"],
             Schemas.Value.Keys.Order(StringComparer.Ordinal));
     }
 

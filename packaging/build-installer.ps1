@@ -1,4 +1,4 @@
-# Publishes the app (packaging\publish.ps1) and builds artifacts\installer\OptimizationTool-<version>-x64.msi.
+# Publishes the app (packaging\publish.ps1) and builds artifacts\installer\Optimus-<version>-x64.msi.
 #   powershell -ExecutionPolicy Bypass -File packaging\build-installer.ps1 [-AcceptWixEula] [-SkipPublish]
 #              [-Sign -CertThumbprint <sha1> [-TimestampUrl <url>]]
 # -AcceptWixEula passes -p:AcceptEula=wix7: WiX v7 refuses to build until its OSMF EULA is accepted
@@ -17,7 +17,7 @@ $repo = Split-Path -Parent $PSScriptRoot
 $version = ([xml](Get-Content (Join-Path $repo "Directory.Build.props") -Raw)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Directory.Build.props has no x.y.z <Version> (found '$version')." }
 $staging = Join-Path $repo "artifacts\publish\OptimizationTool"
-$msi = Join-Path $repo "artifacts\installer\OptimizationTool-$version-x64.msi"
+$msi = Join-Path $repo "artifacts\installer\Optimus-$version-x64.msi"
 
 function Find-SignTool {
     $cmd = Get-Command signtool.exe -ErrorAction SilentlyContinue

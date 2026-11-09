@@ -11,7 +11,7 @@
       "type": "object",
       "required": ["code", "message"],
       "properties": {
-        "code": { "enum": ["revoked", "expired", "exhausted", "not_allowed", "invalid_arguments", "unavailable", "timeout", "cancelled", "too_large"] },
+        "code": { "enum": ["revoked", "expired", "exhausted", "not_allowed", "invalid_arguments", "unavailable", "timeout", "cancelled", "too_large", "busy"], "description": "busy (m6 §8): sensors.snapshot while a benchmark, scan or change runs." },
         "message": { "type": "string" }
       }
     },

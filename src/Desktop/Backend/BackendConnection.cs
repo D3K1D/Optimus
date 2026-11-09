@@ -22,6 +22,8 @@ public sealed record BackendOptions
     /// <summary>Retry budget before the state detail reports "unavailable"; retries continue after it with a slower cadence.</summary>
     public TimeSpan ConnectBudget { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan HelloTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>Wait before relaunching after the Nth failed launch in a row (last entry repeats). Default <see cref="BackendConnection.DefaultLaunchBackoff"/>; tests shorten it.</summary>
+    public IReadOnlyList<TimeSpan>? LaunchBackoff { get; init; }
 }
 
 /// <summary>
@@ -181,24 +183,79 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         catch (Exception ex) { log.Error($"backend: event handler failed ({ex.GetType().Name})"); }
     }
 
+    /// <summary>Wait before relaunching after the Nth consecutive failed launch (1-based; the last entry repeats).</summary>
+    public static readonly IReadOnlyList<TimeSpan> DefaultLaunchBackoff =
+        [TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30)];
+
+    /// <summary>Consecutive failed launches after which the detail becomes "cant_start" (a slow retry continues).</summary>
+    public const int CantStartAfter = 5;
+
+    /// <summary>Renderer-callable <c>shell.retryBackend</c> (protocol-v1 §7): relaunch now, forgetting the backoff and a "needs_update" stop.</summary>
+    public const string RetryMethod = "shell.retryBackend";
+
+    // Launch bookkeeping, used only on the connect loop's thread (RetryNow only sets _retryRequested and wakes it).
+    private bool _launchPending;          // a host we launched has not been connected to yet
+    private int _failedLaunches;          // consecutive launches that exited before we connected
+    private long _nextLaunchAt;           // Stopwatch ticks; no launch before this
+    private bool _needsUpdate;            // the host said the data is newer than it supports: never relaunch on our own
+    private int _retryRequested;
+    private readonly SemaphoreSlim _wake = new(0, 1);
+
+    /// <summary>
+    /// The page's "Try again": relaunch the host at once. Clears the backoff, the failure count and a "needs_update"
+    /// stop (the user may have updated in the meantime). No effect while connected.
+    /// </summary>
+    public void RetryNow()
+    {
+        Interlocked.Exchange(ref _retryRequested, 1);
+        try { _wake.Release(); }
+        catch (SemaphoreFullException) { } // already woken
+        catch (ObjectDisposedException) { } // closing
+    }
+
     private async Task<JsonRpcClient> ConnectWithRetryAsync(CancellationToken ct)
     {
         var started = Stopwatch.StartNew();
         var delay = TimeSpan.FromMilliseconds(100);
         var reportedUnavailable = false;
+        string? startup = null; // other_session | needs_update | cant_start, from how the launched host ended
         while (true)
         {
             ct.ThrowIfCancellationRequested();
+            if (Interlocked.Exchange(ref _retryRequested, 0) == 1)
+            {
+                log.Info("backend: retry requested");
+                _needsUpdate = false;
+                _failedLaunches = 0;
+                _nextLaunchAt = 0;
+                delay = TimeSpan.FromMilliseconds(100);
+                if (startup is not null) SetDetail(null); // back to plain connecting until this launch ends
+                startup = null;
+            }
+
             var (client, failure) = await TryConnectOnceAsync(ct).ConfigureAwait(false);
             if (client is not null)
             {
                 log.Info($"backend: connected after {started.ElapsedMilliseconds} ms");
+                _launchPending = false;
+                _failedLaunches = 0;
+                _nextLaunchAt = 0;
                 return client;
             }
 
             if (failure == ConnectFailure.NotListening && options.LaunchHost
                 && (_hostProcess is null || HasExited(_hostProcess)) && !PipeExists(options.PipeName))
-                LaunchHost();
+            {
+                if (_launchPending && _hostProcess is { } exited)
+                {
+                    _launchPending = false;
+                    startup = OnLaunchedHostExited(ExitCode(exited), startup);
+                }
+                if (!_needsUpdate && Stopwatch.GetTimestamp() >= _nextLaunchAt)
+                {
+                    _launchPending = LaunchHost();
+                }
+            }
 
             var overBudget = started.Elapsed > options.ConnectBudget;
             if (overBudget && !reportedUnavailable)
@@ -207,13 +264,55 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
                 log.Warn($"backend: not available after {options.ConnectBudget.TotalSeconds:0} s ({failure}), still retrying");
                 var current = Current.State;
                 SetState(current == BackendState.Ready ? BackendState.Reconnecting : current,
-                    JsonValue.Create(failure == ConnectFailure.Untrusted ? "untrusted_host" : "unavailable"));
+                    JsonValue.Create(startup ?? (failure == ConnectFailure.Untrusted ? "untrusted_host" : "unavailable")));
             }
 
-            await Task.Delay(delay, ct).ConfigureAwait(false);
-            var cap = overBudget ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(1);
+            await _wake.WaitAsync(delay, ct).ConfigureAwait(false); // RetryNow wakes it early
+            var cap = overBudget || startup is not null ? TimeSpan.FromSeconds(5) : TimeSpan.FromSeconds(1);
             delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, cap.Ticks));
         }
+    }
+
+    /// <summary>
+    /// A host we launched ended before we could connect. Exit 4 (needs_update): stop relaunching until the page asks.
+    /// Exit 3 (other_session): keep retrying with backoff; it clears when the other session's host goes. Anything else
+    /// is a failed start: back off 2 s, 5 s, 10 s, then every 30 s, and after <see cref="CantStartAfter"/> in a row
+    /// report "cant_start". Returns the startup detail now in force (also posted to the page at once).
+    /// </summary>
+    private string? OnLaunchedHostExited(int? exitCode, string? previous)
+    {
+        if (exitCode == HostExitCodes.AlreadyServing) return previous; // another host has the pipe: just connect to it
+        if (exitCode == HostExitCodes.NeedsUpdate)
+        {
+            if (!_needsUpdate) log.Warn("backend: the host needs a newer Optimus (its data was written by a newer version); not relaunching");
+            _needsUpdate = true;
+            SetDetail(JsonValue.Create("needs_update"));
+            return "needs_update";
+        }
+
+        _failedLaunches++;
+        var backoff = options.LaunchBackoff is { Count: > 0 } b ? b : DefaultLaunchBackoff;
+        var wait = backoff[Math.Min(_failedLaunches, backoff.Count) - 1];
+        _nextLaunchAt = Stopwatch.GetTimestamp() + (long)(wait.TotalSeconds * Stopwatch.Frequency);
+        if (exitCode == HostExitCodes.OtherSession)
+        {
+            // This user's Optimus already runs in another Windows session (one host per user and data folder). Say so
+            // at once, and keep trying: it works when that one closes.
+            if (previous != "other_session") log.Warn("backend: the host is already running in another session");
+            SetDetail(JsonValue.Create("other_session"));
+            return "other_session";
+        }
+
+        log.Warn($"backend: host exited with code {exitCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"} before connecting "
+            + $"({_failedLaunches} in a row), next launch in {wait.TotalSeconds:0} s");
+        if (_failedLaunches < CantStartAfter)
+        {
+            if (previous != "other_session") return previous;
+            SetDetail(null); // the other session's host is gone; this is a plain failed start
+            return null;
+        }
+        SetDetail(JsonValue.Create("cant_start"));
+        return "cant_start";
     }
 
     private enum ConnectFailure { None, NotListening, Untrusted, Error }
@@ -286,14 +385,14 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         return false;
     }
 
-    private void LaunchHost()
+    private bool LaunchHost()
     {
         var path = Path.GetFullPath(options.HostPath);
         if (!File.Exists(path))
         {
             log.Error($"backend: host not found at {path}");
             SetDetail(JsonValue.Create("host_missing"));
-            return;
+            return false;
         }
         try
         {
@@ -307,11 +406,13 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             _hostProcess?.Dispose();
             _hostProcess = Process.Start(psi);
             log.Info($"backend: launched host pid {_hostProcess?.Id}");
+            return _hostProcess is not null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
             log.Error($"backend: host launch failed ({ex.Message})");
             SetDetail(JsonValue.Create("host_launch_failed"));
+            return false;
         }
     }
 
@@ -320,6 +421,11 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
     {
         try { return Directory.EnumerateFiles(@"\\.\pipe\", name).Any(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException) { return false; }
+    }
+
+    private static int? ExitCode(Process p)
+    {
+        try { return p.HasExited ? p.ExitCode : null; } catch (InvalidOperationException) { return null; }
     }
 
     private static bool HasExited(Process p)
@@ -357,5 +463,6 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         if (_client is { } c) await c.DisposeAsync().ConfigureAwait(false);
         _hostProcess?.Dispose(); // The host is a per-user backend; it is not stopped with the window.
         _cts.Dispose();
+        _wake.Dispose();
     }
 }

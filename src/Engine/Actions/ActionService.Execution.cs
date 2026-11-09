@@ -121,7 +121,7 @@ public sealed partial class ActionService
         var plan = LoadPlan(db, op.Text("planId"));
         if (!provider) Step(db, operationId, "attempted", null);
 
-        // Provider operations end "completed" on success (Observed.result: updated | already_current | no_threats | threats_found).
+        // Provider operations end "completed" on success (Observed.result: updated | already_current | no_threats | threats_found | threats_unknown).
         var (state, planStatus) = outcome.State switch
         {
             "verified" or "completed" => ("verified", "verified"),
