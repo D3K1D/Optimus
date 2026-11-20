@@ -355,6 +355,49 @@ public class ProjectionTests
         Assert.Equal("Contoso Paint reports about 150 MiB.", p.Display);
     }
 
+    /// <summary>
+    /// m9 §3.1: the local fields actions resolve targets from (a startup entry's entryKey, a sampled process's PID, start
+    /// time and exact creation time) never leave the PC, with names off or on.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ActionTargetFields_StayLocal(bool names)
+    {
+        const string EntryKey = "5e1f0c0ffee5e1f0c0ffee5e1f0c0ffee5e1f0c0ffee5e1f0c0ffee5e1f0c0ff";
+        const long CreateTime = 133_712_345_678_901_234;
+        var startup = EvidenceProjection.Project(Item("win.security.startup", "startup.run.hkcu.33333333", new JsonObject
+        {
+            ["source"] = "run", ["location"] = "hkcu", ["view"] = "64", ["valueType"] = "REG_SZ", ["name"] = "Helper", ["image"] = @"%LOCALAPPDATA%\Helper\helper.exe",
+            ["hasArguments"] = false, ["signature"] = "valid", ["signer"] = "Contoso Ltd", ["enabled"] = true, ["trigger"] = "logon", ["signIn"] = true,
+            ["entryKey"] = EntryKey,
+        }), new AliasMap(), new ShareOptions(names))!;
+        var process = EvidenceProjection.Project(Item("win.perf.sample", "perf.process.77777777", new JsonObject
+        {
+            ["image"] = "helper.exe", ["pid"] = 98765, ["startTime"] = "2026-11-03T09:00:00Z", ["createTime"] = CreateTime, ["cpuAvgPercent"] = 25.5,
+            ["validIntervals"] = 2, ["totalIntervals"] = 2,
+        }), new AliasMap(), new ShareOptions(names))!;
+        var package = EvidenceProjection.Project(Item("win.apps.installed", "apps.package.44444444", new JsonObject
+        {
+            ["name"] = "Photo Fun", ["publisher"] = "Contoso Ltd", ["version"] = "1.2.3.0", ["source"] = "package", ["scope"] = "user", ["kind"] = "app",
+            ["sizeBytes"] = null, ["sizeQuality"] = "unknown", ["familyName"] = "Contoso.PhotoFunLocalOnly_8wekyb3d8bbwe",
+        }), new AliasMap(), new ShareOptions(names))!;
+        Assert.NotNull(package);
+        Assert.Null(package.Value["familyName"]);
+        Assert.DoesNotContain("PhotoFunLocalOnly", Json(package), StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("8wekyb3d8bbwe", Json(package), StringComparison.OrdinalIgnoreCase);
+        foreach (var p in new[] { startup, process })
+        {
+            Assert.NotNull(p);
+            foreach (var key in new[] { "entryKey", "pid", "startTime", "createTime" }) Assert.Null(p.Value[key]);
+            var json = Json(p);
+            Assert.DoesNotContain(EntryKey, json, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("98765", json, StringComparison.Ordinal);
+            Assert.DoesNotContain(CreateTime.ToString(CultureInfo.InvariantCulture), json, StringComparison.Ordinal);
+            Assert.DoesNotContain("09:00:00", json, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void NamesOn_SensitiveNameFallsBackToAlias_AndIsCounted()
     {
@@ -400,6 +443,11 @@ public class ProjectionTests
         var ids = OptimizationTool.Windows.WindowsModules.All
             .SelectMany(m => m.Collectors(new CollectorOptions()))
             .Select(c => c.Id).Where(id => id.StartsWith("win.", StringComparison.Ordinal)).Distinct().Order(StringComparer.Ordinal).ToList();
+        // m9 §6.10: the inventory is local-only evidence with no projector: no read tool releases it (the check-up reads it on the host).
+        var inventory = ids.Where(id => id.StartsWith(ScanInventory.CollectorPrefix, StringComparison.Ordinal)).ToList();
+        Assert.Equal(ScanInventory.Areas.Select(ScanInventory.CollectorId).Order(StringComparer.Ordinal), inventory);
+        foreach (var id in inventory) Assert.Null(EvidenceProjection.For(id));
+        ids = ids.Except(inventory).ToList();
         Assert.NotEmpty(ids);
         foreach (var id in ids) Assert.True(EvidenceProjection.For(id) is not null, $"no projector for {id}");
         Assert.Equal(ids, EvidenceProjection.CollectorIds.Where(id => id.StartsWith("win.", StringComparison.Ordinal))); // and no projector for a collector that does not exist (bench.* are engine-owned, m6)

@@ -36,7 +36,8 @@ internal sealed class Followups(Store store, Fixture fixture)
         labels.Insert(at < 0 ? labels.Count : at, "Intended");
         card["options"] = Json.Array(labels);
     }
-    private static readonly string[] Internal = ["key", "ruleId", "fingerprint", "severity", "subject", "ruleOrder", "noteTaskId", "aiTaskId"];
+    /// <summary>Stored card fields the renderer never gets (m9 §5.5 taint marks included): removed from every card view.</summary>
+    internal static readonly string[] Internal = ["key", "ruleId", "fingerprint", "severity", "subject", "ruleOrder", "noteTaskId", "aiTaskId", "noteTainted", "aiTainted", "checkupKey"];
 
     public static JsonObject CardFromFixture(RuleDef rule, string reportId, JsonObject finding)
     {
@@ -160,7 +161,7 @@ internal sealed class Followups(Store store, Fixture fixture)
             .ToList();
     }
 
-    public JsonNode Get(string reportId) => store.Read(db => View(reportId, Load(db, reportId)));
+    public JsonNode Get(string reportId) => store.Read(db => View(db, reportId, Load(db, reportId)));
 
     public JsonNode Respond(JsonObject p)
     {
@@ -187,7 +188,7 @@ internal sealed class Followups(Store store, Fixture fixture)
         {
             var (revision, state) = Load(db, reportId);
             if (expected != revision)
-                throw new RpcError(ErrorCodes.StaleRevision, "The follow-up queue changed.", new JsonObject { ["current"] = View(reportId, (revision, state)) });
+                throw new RpcError(ErrorCodes.StaleRevision, "The follow-up queue changed.", new JsonObject { ["current"] = View(db, reportId, (revision, state)) });
 
             if (scope == "report") Rerank(state, text!);
             else if (option == "intended") Intend(db, state, reportId, cardId!);
@@ -197,6 +198,32 @@ internal sealed class Followups(Store store, Fixture fixture)
             return Save(db, reportId, revision, state);
         }));
         return result;
+    }
+
+    /// <summary>Most cards followup.front moves at once (the check-up keeps at most 8 per report).</summary>
+    public const int MaxFront = 8;
+
+    /// <summary>
+    /// followup.front {reportId, cardIds:[≤ 8]} (design v55: "Show" on the new check-up cards chip): moves those cards, in the
+    /// given order, to the front of the report's undecided queue. Unknown, repeated and already-decided IDs are ignored;
+    /// nothing else changes. Returns the followup.get view (its revision moves only when the order changed).
+    /// </summary>
+    public JsonNode Front(JsonObject p)
+    {
+        var reportId = P.Req(p, "reportId", 64);
+        if (p["cardIds"] is not JsonArray raw || raw.Count is 0 or > MaxFront || raw.Any(x => x is not JsonValue v || !v.TryGetValue<string>(out var s) || s.Length is 0 or > 64))
+            throw RpcError.Params("cardIds", $"cardIds must be 1 to {MaxFront} card IDs.");
+        var ids = raw.Select(x => x!.GetValue<string>()).Distinct(StringComparer.Ordinal).ToList();
+        return store.Write(db =>
+        {
+            var (revision, state) = Load(db, reportId);
+            var queue = IdList(Queue(state));
+            var front = ids.Where(queue.Contains).ToList();
+            var reordered = front.Concat(queue.Where(id => !front.Contains(id))).ToList();
+            if (reordered.SequenceEqual(queue)) return (JsonNode)View(db, reportId, (revision, state));
+            SetQueue(state, reordered);
+            return Save(db, reportId, revision, state);
+        });
     }
 
     /// <summary>finding.setDisposition: stores the disposition and takes the affected cards out of this report's queue.</summary>
@@ -264,11 +291,18 @@ internal sealed class Followups(Store store, Fixture fixture)
     /// M4: a verified change (or a manual task verified by re-scan) closes the finding's card: decision "verified",
     /// linked to its operation and whether it can be undone. The card leaves the queue; review state only.
     /// </summary>
-    internal static void MarkVerified(Db db, string reportId, string findingId, string? operationId, bool undoAvailable)
+    internal static void MarkVerified(Db db, string reportId, string findingId, string? operationId, bool undoAvailable) =>
+        MarkVerifiedWhere(db, reportId, c => c.Text("findingId") == findingId, operationId, undoAvailable);
+
+    /// <summary>m9 §17.3: a verified, not reduced fix of a card-bound plan closes that card (report, AI-added or check-up).</summary>
+    internal static void MarkVerifiedCard(Db db, string reportId, string cardId, string operationId, bool undoAvailable) =>
+        MarkVerifiedWhere(db, reportId, c => c.Text("id") == cardId, operationId, undoAvailable);
+
+    private static void MarkVerifiedWhere(Db db, string reportId, Func<JsonNode?, bool> match, string? operationId, bool undoAvailable)
     {
         if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return;
         var (revision, state) = Load(db, reportId);
-        var card = state["cards"]!.AsArray().FirstOrDefault(c => c.Text("findingId") == findingId)?.AsObject();
+        var card = state["cards"]!.AsArray().FirstOrDefault(match)?.AsObject();
         if (card is null) return;
         var cardId = card.Text("id");
         SetDecision(state, cardId, "verified", via: operationId is null ? "rescan" : "action");
@@ -280,6 +314,15 @@ internal sealed class Followups(Store store, Fixture fixture)
     }
 
     /// <summary>The card's catalog action parameters for a finding (M4 preview from a card), or null.</summary>
+    /// <summary>Whether the finding's card has a non-blank guide line (design v60: a guided task with no Windows page).</summary>
+    internal static bool HasGuide(Db db, string reportId, string findingId)
+    {
+        if (db.Scalar("SELECT state FROM followups WHERE report_id = $r", ("$r", reportId)) is not string text) return false;
+        var card = (Json.Parse(text)?["cards"] as JsonArray)?.FirstOrDefault(c => c.Text("findingId") == findingId);
+        return card?["guide"] is JsonArray lines
+            && lines.Any(l => l is JsonValue v && v.TryGetValue<string>(out var s) && !string.IsNullOrWhiteSpace(s));
+    }
+
     internal static (string? ActionId, JsonObject? Parameters) CardAction(Db db, string reportId, string findingId)
     {
         if (db.Scalar("SELECT state FROM followups WHERE report_id = $r", ("$r", reportId)) is not string text) return (null, null);
@@ -304,8 +347,16 @@ internal sealed class Followups(Store store, Fixture fixture)
     /// fails the sensitive-string check is withheld for every reader (the note is left out, the title is <see cref="AiTitleFallback"/>). Null when the
     /// report has no deck.
     /// </summary>
-    internal static JsonArray? AgentCards(Db db, string reportId, bool shareNames, string? taskId)
+    internal static JsonArray? AgentCards(Db db, string reportId, bool shareNames, string? taskId) => AgentCards(db, reportId, shareNames, taskId, out _);
+
+    /// <summary>
+    /// <see cref="AgentCards(Db, string, bool, string?)"/>, also saying whether any AI text it lets through came from a
+    /// web-tainted writer (m9 §5.5: the writer's mark stored at write time; an AI title or note without a mark, written
+    /// before marks existed, counts as tainted). The caller marks the reading task when it releases the list.
+    /// </summary>
+    internal static JsonArray? AgentCards(Db db, string reportId, bool shareNames, string? taskId, out bool webTainted)
     {
+        webTainted = false;
         if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return null;
         var (_, state) = Load(db, reportId);
         var queue = IdList(Queue(state));
@@ -314,7 +365,7 @@ internal sealed class Followups(Store store, Fixture fixture)
         var seen = listed.Select(x => x.Id).ToHashSet();
         listed.AddRange(state["cards"]!.AsArray().Select(c => c.Text("id")).Where(id => !seen.Contains(id)).Select(id => (Id: id, Status: "open")));
         // Free text a model wrote leaves as is for the task that wrote it or one that shares names. To another task it
-        // leaves only when its writer did not see names either (share.names off) and it passes the sensitive-string check.
+        // leaves only when its writer never saw names (everSharedNames, m9 §1.2) and it passes the sensitive-string check.
         var writerShared = new Dictionary<string, bool>();
         bool WriterSharedNames(string? from)
         {
@@ -323,7 +374,7 @@ internal sealed class Followups(Store store, Fixture fixture)
             var shared = true; // an unknown or unreadable writer counts as one that saw names
             if (db.Scalar("SELECT body FROM agent_tasks WHERE task_id = $t", ("$t", from)) is string body)
             {
-                try { shared = Json.Parse(body)?["grant"]?["share"]?["names"]?.GetValue<bool>() ?? true; }
+                try { shared = Json.Parse(body) is not JsonObject writer || Agent.AgentService.EverSharedNames(writer); } // the sticky mark (m9 §1.2)
                 catch (Exception ex) when (ex is System.Text.Json.JsonException or InvalidOperationException or FormatException) { }
             }
             return writerShared[from] = shared;
@@ -333,6 +384,16 @@ internal sealed class Followups(Store store, Fixture fixture)
             if (Agent.Sanitize.LooksSensitive(text)) return null; // a path, address or credential never leaves, whoever wrote it
             if (shareNames || (from is not null && from == taskId)) return Agent.AgentService.Clean(text);
             return WriterSharedNames(from) ? null : Agent.AgentService.Clean(text);
+        }
+        var tainted = false;
+        string AiTitle(JsonObject card)
+        {
+            // m9 §6.8: a check-up card was written from real names and versions by a web-tainted run (no task): it reads
+            // like an AI card from a writer that saw names, so a task without share.names gets the fallback title.
+            if (card["checkup"] is JsonObject && !shareNames) return AiTitleFallback;
+            if (AiText(card.Text("title"), card["aiTaskId"]?.GetValue<string>()) is not { } shown) return AiTitleFallback;
+            if (Tainted(card["aiTainted"])) tainted = true;
+            return shown;
         }
         var cards = new JsonArray();
         foreach (var (id, status) in listed)
@@ -344,7 +405,7 @@ internal sealed class Followups(Store store, Fixture fixture)
             {
                 ["cardId"] = id,
                 ["findingId"] = card["findingId"]?.GetValue<string>() is { Length: > 0 } f ? f : null,
-                ["title"] = ai ? AiText(card.Text("title"), card["aiTaskId"]?.GetValue<string>()) ?? AiTitleFallback : Agent.FindingTitles.For(card.Text("ruleId"), card.Text("category"), card.Text("title"), shareNames),
+                ["title"] = ai ? AiTitle(card) : Agent.FindingTitles.For(card.Text("ruleId"), card.Text("category"), card.Text("title"), shareNames),
                 ["category"] = card.Text("category"),
                 ["status"] = status switch
                 {
@@ -352,14 +413,30 @@ internal sealed class Followups(Store store, Fixture fixture)
                 },
                 ["origin"] = ai ? "ai" : "report",
             };
-            if (card["note"]?.GetValue<string>() is { Length: > 0 } note && AiText(note, card["noteTaskId"]?.GetValue<string>()) is { } shown) view["note"] = shown; // withheld: no note
+            if (card["note"]?.GetValue<string>() is { Length: > 0 } note && AiText(note, card["noteTaskId"]?.GetValue<string>()) is { } shown)
+            {
+                view["note"] = shown; // withheld: no note
+                if (Tainted(card["noteTainted"])) webTainted = true;
+            }
             cards.Add(view);
         }
+        if (tainted) webTainted = true;
         return cards;
     }
 
+    /// <summary>A writer's web-taint mark on an AI artefact; missing (unknown provenance) counts as tainted.</summary>
+    private static bool Tainted(JsonNode? mark) => mark is not JsonValue v || !v.TryGetValue<bool>(out var b) || b;
+
+    /// <summary>True when the card is an AI card whose writer was web-tainted (or unmarked): its title is web-derived text.</summary>
+    internal static bool AiTitleTainted(Db db, string reportId, string cardId)
+    {
+        if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return false;
+        var card = Load(db, reportId).State["cards"]!.AsArray().FirstOrDefault(c => c.Text("id") == cardId);
+        return card?["origin"]?.GetValue<string>() == "ai" && Tainted(card["aiTainted"]);
+    }
+
     /// <summary>note_card: sets the card's AI note (one per card; a later note replaces it). False when the card is not in the deck.</summary>
-    internal static bool NoteCard(Db db, string reportId, string cardId, string text, string taskId, string by)
+    internal static bool NoteCard(Db db, string reportId, string cardId, string text, string taskId, string by, bool writerTainted = true)
     {
         if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return false;
         var (revision, state) = Load(db, reportId);
@@ -368,13 +445,14 @@ internal sealed class Followups(Store store, Fixture fixture)
         card["note"] = text;
         card["noteBy"] = by;
         card["noteTaskId"] = taskId;
+        card["noteTainted"] = writerTainted; // m9 §5.5: the writer's web-taint mark at write time
         Save(db, reportId, revision, state);
         return true;
     }
 
     /// <summary>add_card: appends an origin "ai" card (no action) to the end of the queue. Null when the task already added <see cref="MaxAiCards"/>.</summary>
     internal static string? AddAiCard(Db db, string reportId, string taskId, string title, string why, string category,
-        IReadOnlyList<string> findingIds, IReadOnlyList<string> evidenceIds, string by)
+        IReadOnlyList<string> findingIds, IReadOnlyList<string> evidenceIds, string by, bool writerTainted = true)
     {
         if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return null;
         var (revision, state) = Load(db, reportId);
@@ -389,16 +467,64 @@ internal sealed class Followups(Store store, Fixture fixture)
             ["guide"] = null, ["preview"] = null, ["actionId"] = null, ["settingsUri"] = null,
             ["origin"] = "ai", ["findingIds"] = Json.Array(findingIds), ["addedBy"] = by,
             ["aiTaskId"] = taskId, ["ruleId"] = "", ["fingerprint"] = "", ["severity"] = "info", ["subject"] = "",
+            ["aiTainted"] = writerTainted, // m9 §5.5: the writer's web-taint mark at write time
         });
         SetQueue(state, IdList(Queue(state)).Append(cardId));
         Save(db, reportId, revision, state);
         return cardId;
     }
+    /// <summary>
+    /// m9 §6.8: stores one check-up result as an origin "ai" card with no action, marked web-tainted, after the report's
+    /// own cards. A card with the same <paramref name="key"/> (area, entry name, kind) on this report is replaced in
+    /// place (its place in the deck and any decision stay); a new one is refused once the report holds
+    /// <paramref name="maxCards"/> check-up cards. Returns the card ID, or null when nothing was stored.
+    /// </summary>
+    internal static string? UpsertCheckupCard(Db db, string reportId, string key, string kind, string title, string what, string category,
+        JsonArray sources, string by, int maxCards, string checkedAt)
+    {
+        if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return null;
+        var (revision, state) = Load(db, reportId);
+        var cards = state["cards"]!.AsArray();
+        var card = cards.OfType<JsonObject>().FirstOrDefault(c => c["checkupKey"]?.GetValue<string>() == key);
+        if (card is null)
+        {
+            if (cards.Count(c => c?["checkup"] is JsonObject) >= maxCards) return null;
+            card = new JsonObject
+            {
+                ["id"] = "card-" + Ids.Hash16(reportId, "checkup", key), ["findingId"] = null, ["evidenceIds"] = new JsonArray(),
+                ["options"] = Json.Array(["Ask about this", "Ignore"]), ["guide"] = null, ["preview"] = null, ["actionId"] = null, ["settingsUri"] = null,
+                ["origin"] = "ai", ["findingIds"] = new JsonArray(), ["aiTaskId"] = null, ["checkupKey"] = key,
+                ["ruleId"] = "", ["fingerprint"] = "", ["severity"] = "info", ["subject"] = "",
+            };
+            cards.Add(card);
+            SetQueue(state, IdList(Queue(state)).Append(card.Text("id")));
+        }
+        card["category"] = category;
+        card["title"] = title;
+        card["text"] = what;
+        card["why"] = what;
+        card["checkup"] = new JsonObject { ["kind"] = kind, ["sources"] = sources.DeepClone(), ["checkedAt"] = checkedAt }; // when it was found (a replacement: found again)
+        card["addedBy"] = by;
+        card["aiTainted"] = true; // m9 §5.5/§6.8: web-derived, always
+        Save(db, reportId, revision, state);
+        return card.Text("id");
+    }
+
+    /// <summary>m9 §6.8 read side: the report's check-up card IDs in deck order (queued, then decided, then the rest).</summary>
+    internal static JsonArray CheckupCardIds(Db db, string reportId)
+    {
+        if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null) return [];
+        var (_, state) = Load(db, reportId);
+        var checkup = state["cards"]!.AsArray().OfType<JsonObject>().Where(c => c["checkup"] is JsonObject).Select(c => c.Text("id")).ToHashSet(StringComparer.Ordinal);
+        var order = IdList(Queue(state)).Concat(Decisions(state).Select(d => d.Text("cardId"))).Concat(checkup).Distinct().Where(checkup.Contains);
+        return Json.Array(order.ToList());
+    }
+
     private static JsonObject Save(Db db, string reportId, long revision, JsonObject state)
     {
         db.Exec("UPDATE followups SET revision = $v, state = $s WHERE report_id = $r",
             ("$v", revision + 1), ("$s", Json.Write(state)), ("$r", reportId));
-        return View(reportId, (revision + 1, state));
+        return View(db, reportId, (revision + 1, state));
     }
 
     private static (long Revision, JsonObject State) Load(Db db, string reportId)
@@ -502,7 +628,7 @@ internal sealed class Followups(Store store, Fixture fixture)
         };
     }
 
-    private static JsonObject View(string reportId, (long Revision, JsonObject State) loaded)
+    private static JsonObject View(Db db, string reportId, (long Revision, JsonObject State) loaded)
     {
         var (revision, state) = loaded;
         var cards = state["cards"]!.AsArray();
@@ -519,6 +645,7 @@ internal sealed class Followups(Store store, Fixture fixture)
             view["note"] ??= null;
             view["noteBy"] = view["note"] is null ? null : view["noteBy"]?.DeepClone();
             view["reply"] = state["replies"]![id]?.DeepClone();
+            view["fix"] = FixAttempts.Derive(db, id); // m9 §17.3: derived on read, never stored (null: no fix on this card)
             return view;
         }
         var card = queue.Count > 0 ? CardView(queue[0]) : null;

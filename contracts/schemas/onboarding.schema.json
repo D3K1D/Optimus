@@ -19,8 +19,9 @@
               "type": "object",
               "required": ["value", "label"],
               "properties": {
-                "value": { "enum": ["local", "later", "claude-code", "codex", "api", "chatgpt"] },
-                "label": { "type": "string", "minLength": 1 }
+                "value": { "enum": ["local", "later", "claude-code", "codex", "api", "chatgpt"], "description": "codex: legacy, read only (a profile saved before M9 loads as stored; onboarding.save refuses it)." },
+                "label": { "type": "string", "minLength": 1 },
+                "kind": { "enum": ["claude_code_mcp", "chatgpt_plan", "anthropic_api", "openai_api"], "description": "The exact recipient kind chosen (absent for local and later, and in a profile saved before it existed). onboarding.save refuses a kind that does not match value: claude-code ↔ claude_code_mcp, chatgpt ↔ chatgpt_plan, api ↔ anthropic_api or openai_api." }
               }
             }
           ]

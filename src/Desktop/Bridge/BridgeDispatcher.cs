@@ -14,13 +14,16 @@ public sealed class BackendUnavailableException(string message, Exception? inner
 /// <summary>
 /// Turns one renderer message into the bridge message to post back (or null). Testable without WebView2.
 /// </summary>
-public sealed class BridgeDispatcher(BridgeRouter router, IBackend backend, DesktopLog log,
+public sealed class BridgeDispatcher(BridgeRouter router, IBackend backend, AppLog log,
     SettingsLauncher? settings = null, ApiKeyRequest? apiKeys = null, PlanApproval? approvals = null,
-    ClientConnector? clients = null, SettingsLauncher? links = null, ImageSave? images = null, Action? retryBackend = null)
+    ClientConnector? clients = null, SettingsLauncher? links = null, ImageSave? images = null, Action? retryBackend = null,
+    SourceOpener? sources = null, ProblemReporter? problems = null)
 {
     public const int MaxInFlight = 64;
     private readonly SettingsLauncher _settings = settings ?? new SettingsLauncher();
     private readonly SettingsLauncher _links = links ?? SettingsLauncher.ForWebLinks();
+    private readonly SourceOpener _sources = sources ?? new SourceOpener();
+    private readonly ProblemReporter _problems = problems ?? new ProblemReporter();
     private int _inFlight;
 
     public async Task<string?> HandleAsync(string? json, string? source, bool isTopLevel, CancellationToken ct)
@@ -54,6 +57,10 @@ public sealed class BridgeDispatcher(BridgeRouter router, IBackend backend, Desk
                 return clients is null
                     ? BridgeMessages.Error(shell.Id, -32013, "Not available.", new JsonObject { ["reason"] = "unavailable" })
                     : await clients.HandleAsync(shell.Method, shell.Id, shell.Params, log, ct, backend);
+            case BridgeDecision.Shell shell when ProblemReporter.Methods.Contains(shell.Method):
+                return _problems.Handle(shell.Method, shell.Id, shell.Params, log);
+            case BridgeDecision.Shell shell when shell.Method == SourceOpener.Method:
+                return await _sources.HandleAsync(shell.Id, shell.Params, backend, log, ct);
             case BridgeDecision.Shell shell when shell.Method == Backend.BackendConnection.RetryMethod:
                 return RetryBackend(shell);
             case BridgeDecision.Forward fwd:

@@ -13,7 +13,7 @@ public sealed class OpenUrlTests
 
     public OpenUrlTests()
     {
-        _dispatcher = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled,
+        _dispatcher = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), AppLog.Disabled,
             new SettingsLauncher(_ => throw new InvalidOperationException("settings opened")),
             links: SettingsLauncher.ForWebLinks(_opened.Add, () => _now));
     }
@@ -30,11 +30,9 @@ public sealed class OpenUrlTests
 
     [Theory]
     [InlineData("https://claude.com/claude-code")]
-    [InlineData("https://developers.openai.com/codex")]
     [InlineData("https://chatgpt.com/")]
     [InlineData("https://claude.com/download")]
-    [InlineData("https://chatgpt.com/codex")]
-    public async Task Opens_the_five_allowed_links(string url)
+    public async Task Opens_the_allowed_links(string url)
     {
         var reply = await Open(new JsonObject { ["url"] = url }.ToJsonString());
         Assert.True(reply["result"]!["opened"]!.GetValue<bool>());
@@ -57,7 +55,8 @@ public sealed class OpenUrlTests
     [InlineData("https://chatgpt.com")]
     [InlineData("https://chatgpt.com/?q=1")]
     [InlineData("https://ch\u0430tgpt.com/")] // Cyrillic a (U+0430)
-    [InlineData("https://developers.openai.com/codex\n")]
+    [InlineData("https://developers.openai.com/codex")] // M9: the Codex pages are no longer opened
+    [InlineData("https://chatgpt.com/codex")]
     [InlineData("https://claude.com/download/")]
     [InlineData("https://claude.com/download?os=win")]
     [InlineData("https://chatgpt.com/codex/")]

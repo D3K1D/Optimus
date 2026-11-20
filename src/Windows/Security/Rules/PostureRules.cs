@@ -80,6 +80,8 @@ internal sealed class WildcardListenerPublicRule : IRule
     public string Id => "net.wildcard_listener_public";
     public string Version => "1.0.0";
     public string Category => "security";
+    /// <summary>m9 §6.1: game launchers, sync and remote-play tools commonly listen on all networks; research says what the port is for.</summary>
+    public string? Research => "port";
     public IReadOnlyList<string> Inputs { get; } = [ListenersCollector.CollectorId, FirewallCollector.CollectorId];
 
     public RuleResult Evaluate(RuleContext c)

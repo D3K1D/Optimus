@@ -193,6 +193,27 @@ public class ChatGptPlanTests
     }
 
     [Fact]
+    public async Task Connected_IsPushedAsSoonAsTheBrowserComesBack_WithoutAPoll()
+    {
+        var gate = new TaskCompletionSource();
+        var signIn = new FakeSignIn { Gate = gate }; // the user is still signing in on the website
+        var (host, _, _) = Start(signIn, new FakePlanAdapter(tools: true));
+        await using var _h = host;
+        var c = await host.ConnectAsync(minor: 4);
+        await c.Call("provider.connect", new JsonObject { ["kind"] = "chatgpt_plan" });
+        await BenchTests.WaitUntil(() => !signIn.Opened.IsEmpty);
+        await Task.Delay(300);
+        Assert.Equal(["checking"], Statuses(c));
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        gate.TrySetResult(); // the browser came back with the callback
+        // Only events are watched here (no provider.list): the host pushes provider.status itself.
+        await BenchTests.WaitUntil(() => Statuses(c).LastOrDefault() == "connected", timeoutMs: 5000);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"took {watch.Elapsed}");
+        Assert.Equal(["checking", "connected"], Statuses(c));
+    }
+
+    [Fact]
     public async Task ABrowserThatNeverComesBack_EndsAsCallbackTimeout_NotChecking()
     {
         var signIn = new FakeSignIn { Gate = new TaskCompletionSource() }; // the loopback callback never arrives
@@ -257,10 +278,57 @@ public class ChatGptPlanTests
             ["scope"] = new JsonObject { ["reportId"] = reportId }, ["grant"] = AgentSetup.Grant(),
         });
         Assert.Equal("tools_unavailable", refused.ErrorData.Str("reason"));
+        // m9 §17.1 review: an explicit grant asking only for administrator rights is refused the same way.
+        var adminOnly = AgentSetup.Grant([]);
+        adminOnly["admin"] = true;
+        var adminRefused = await c.Fails("agent.start", new JsonObject
+        {
+            ["idempotencyKey"] = "a-admin", ["goal"] = "Check", ["recipientKind"] = "chatgpt_plan",
+            ["scope"] = new JsonObject { ["reportId"] = reportId }, ["grant"] = adminOnly,
+        });
+        Assert.Equal("tools_unavailable", adminRefused.ErrorData.Str("reason"));
 
         var taskId = (await AgentSetup.StartTask(c, reportId, "chatgpt_plan", grant: AgentSetup.Grant([]))).Str("taskId");
         await AgentSetup.Ask(c, taskId);
         await AgentSetup.TaskEvent(c, taskId, "agent.message");
         Assert.Empty(adapter.Requests.Single().Tools); // explain-only: no tools offered
+    }
+
+    [Fact]
+    public async Task ExplainOnly_DefaultsGrantNoTools_AndPermissionsSayToolsAreUnavailable()
+    {
+        var adapter = new FakePlanAdapter(tools: false);
+        var (host, _, _) = Start(new FakeSignIn(), adapter);
+        await using var _h = host;
+        var c = await host.ConnectAsync(minor: 5);
+        var reportId = await AgentSetup.Report(c);
+        await c.Call("provider.connect", new JsonObject { ["kind"] = "chatgpt_plan" });
+        await Until(c, 2);
+        var onboarding = await c.Call("onboarding.get");
+        await c.Call("onboarding.save", new JsonObject
+        {
+            ["expectedRevision"] = (long)onboarding["revision"]!, ["patch"] = new JsonObject { ["provider"] = new JsonObject { ["value"] = "chatgpt" } },
+        });
+        var saved = await c.Call("ai.setPermissions", new JsonObject
+        {
+            ["idempotencyKey"] = "p", ["revision"] = 0,
+            ["permissions"] = new JsonObject
+            {
+                ["see"] = new JsonObject { ["specs"] = true, ["history"] = true, ["names"] = false },
+                ["do"] = new JsonObject { ["checks"] = true, ["changes"] = "fix", ["scripts"] = false, ["web"] = true, ["admin"] = false },
+            },
+        });
+        Assert.False((bool)saved["available"]!["tools"]!);
+        Assert.Equal("fix", saved["permissions"]!["do"].Str("changes")); // the record keeps the user's answer
+
+        // A task built from the record never exceeds the provider: no checks, changes or web, instead of tools_unavailable.
+        var task = await c.Call("agent.start", new JsonObject
+        {
+            ["idempotencyKey"] = "t", ["goal"] = "Explain", ["recipientKind"] = "chatgpt_plan", ["scope"] = new JsonObject { ["reportId"] = reportId },
+        });
+        Assert.Empty(task["grant"]!["diagnostics"]!.AsArray());
+        Assert.Equal("off", task["grant"].Str("changes"));
+        Assert.False((bool)task["grant"]!["web"]!);
+        Assert.False((bool)task["grant"]!["scripts"]!);
     }
 }

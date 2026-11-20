@@ -52,7 +52,7 @@ public sealed class StdioProcessTests
 
         await SendAsync("""{"jsonrpc":"2.0","id":2,"method":"tools/list"}""");
         var list = await ReadResponseAsync(2);
-        Assert.Equal(12, list["result"]!["tools"]!.AsArray().Count);
+        Assert.Equal(16, list["result"]!["tools"]!.AsArray().Count); // m9 §2 added get_app_guide, §4 propose_fix, §5 propose_script, §7 web_lookup
 
         await SendAsync("""{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_capabilities","arguments":{}}}""");
         var call = await ReadResponseAsync(3);

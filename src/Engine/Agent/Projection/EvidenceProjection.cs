@@ -42,7 +42,7 @@ public static class EvidenceProjection
         new SecureBootProjector(), new UacProjector(), new WscProjector(),
         new OsProjector(), new HardwareProjector(), new VolumesProjector(), new PowerProjector(), new PerfProjector(),
         new AppsProjector(), new DevicesProjector(), new DisplayProjector(), new EventsProjector(),
-        new DiagDataProjector(), new StartSuggestionsProjector(), new BenchProjector(),
+        new DiagDataProjector(), new StartSuggestionsProjector(), new BenchProjector(), new AdminChecksProjector(),
     ];
 
     private static readonly FixtureProjector Fixture = new();

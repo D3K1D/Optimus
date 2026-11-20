@@ -11,7 +11,9 @@ internal sealed record DefenderStatusRaw(
     string? SignatureVersion, DateTime? SignatureUpdatedUtc, long? SignatureAgeDays,
     DateTime? QuickScanEndUtc, DateTime? FullScanEndUtc, bool? TamperProtected);
 
-internal sealed record ThreatDetectionRaw(long ThreatId, int StatusId, long AdditionalActions, DateTime? InitialDetectionUtc, DateTime? LastStatusChangeUtc);
+/// <summary>Resources: the file names (only) of the detection's file resources, local only (m9 §6.2 rule 4, the research threat veto).</summary>
+internal sealed record ThreatDetectionRaw(long ThreatId, int StatusId, long AdditionalActions, DateTime? InitialDetectionUtc, DateTime? LastStatusChangeUtc,
+    IReadOnlyList<string>? Resources = null);
 
 internal sealed record ThreatRaw(long ThreatId, string Name, int CategoryId, int SeverityId, bool IsActive);
 
@@ -75,11 +77,11 @@ internal sealed class DefenderCollector(CollectorOptions options) : SecurityColl
             var truncated = false;
             try
             {
-                var det = Query(service!, "SELECT ThreatID, ThreatStatusID, AdditionalActionsBitMask, InitialDetectionTime, LastThreatStatusChangeTime FROM MSFT_MpThreatDetection", RowCap + 1);
+                var det = Query(service!, "SELECT ThreatID, ThreatStatusID, AdditionalActionsBitMask, InitialDetectionTime, LastThreatStatusChangeTime, Resources FROM MSFT_MpThreatDetection", RowCap + 1);
                 truncated |= det.Count > RowCap;
                 detections = det.Take(RowCap).Select(r => new ThreatDetectionRaw(
                     Long(r, "ThreatID") ?? 0, (int)(Long(r, "ThreatStatusID") ?? 0), Long(r, "AdditionalActionsBitMask") ?? 0,
-                    Dmtf(Str(r, "InitialDetectionTime")), Dmtf(Str(r, "LastThreatStatusChangeTime")))).ToList();
+                    Dmtf(Str(r, "InitialDetectionTime")), Dmtf(Str(r, "LastThreatStatusChangeTime")), ResourceFiles(Prop(r, "Resources")))).ToList();
                 ct.ThrowIfCancellationRequested();
                 var thr = Query(service!, "SELECT ThreatID, ThreatName, CategoryID, SeverityID, IsActive FROM MSFT_MpThreat", RowCap + 1);
                 truncated |= thr.Count > RowCap;
@@ -170,6 +172,9 @@ internal sealed class DefenderCollector(CollectorOptions options) : SecurityColl
                 ["active"] = t?.IsActive,
                 ["severityId"] = t?.SeverityId,
                 ["detectedAt"] = Text.IsoOrNull(d.InitialDetectionUtc),
+                // Local only (m9 §6.2 rule 4): the detected files' names, so research never labels the same file "considered safe".
+                // The projector's allowlist never releases it.
+                ["resourceFiles"] = d.Resources is { Count: > 0 } files ? new JsonArray(files.Select(n => (JsonNode?)JsonValue.Create(n)).ToArray()) : null,
             }, $"Microsoft Defender detected {name}; its status is {StatusName(d.StatusId).Replace('_', ' ')}.");
         }
 
@@ -201,6 +206,24 @@ internal sealed class DefenderCollector(CollectorOptions options) : SecurityColl
 
     // ThreatStatusID: 0 unknown, 1 detected, 2 cleaned, 3 quarantined, 4 removed, 5 allowed, 6 blocked,
     // 102 quarantine failed, 103 remove failed, 104 allow failed, 105 abandoned, 107 block failed.
+    /// <summary>
+    /// MSFT_MpThreatDetection.Resources entries look like "file:_C:\dir\name.exe"; only the file name of file resources is kept
+    /// (at most 8). Paths, processes, registry and other resource kinds are dropped.
+    /// </summary>
+    internal static IReadOnlyList<string>? ResourceFiles(object? value)
+    {
+        if (value is not System.Collections.IEnumerable items || value is string) return null;
+        var names = new List<string>();
+        foreach (var item in items)
+        {
+            if (item is not string s || !s.StartsWith("file:_", StringComparison.OrdinalIgnoreCase)) continue;
+            var name = PathRoots.FileName(s["file:_".Length..]);
+            if (name.Length > 0 && !names.Contains(name, StringComparer.OrdinalIgnoreCase)) names.Add(name);
+            if (names.Count >= 8) break;
+        }
+        return names.Count == 0 ? null : names;
+    }
+
     internal static bool NeedsAction(ThreatDetectionRaw d, ThreatRaw? t) =>
         t?.IsActive == true || d.StatusId is 1 or 102 or 103 or 105 or 107 || (d.StatusId is not (2 or 3 or 4 or 5 or 6) && d.AdditionalActions != 0);
 

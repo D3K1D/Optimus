@@ -10,8 +10,8 @@ namespace OptimizationTool.Engine.Agent;
 // provider.status on the user stream exactly when (status, detail, code) changes. Every change point calls it.
 public sealed partial class AgentService
 {
-    public static readonly string[] ProviderKinds = ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"];
-    public static readonly string[] McpKinds = ["claude_code_mcp", "codex_mcp"];
+    public static readonly string[] ProviderKinds = ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp"];
+    public static readonly string[] McpKinds = ["claude_code_mcp"];
     public static readonly string[] ProviderKindsWithSignIn = ["chatgpt_plan"];
     public static readonly TimeSpan CheckTimeout = TimeSpan.FromSeconds(20);
 
@@ -54,13 +54,11 @@ public sealed partial class AgentService
         lock (_gate) return _api.TryGetValue(kind, out var s) && s.Tools == false;
     }
 
-    private static string ClientOf(string kind) => kind == "codex_mcp" ? "codex" : "claude_code";
+    /// <summary>The pairing client of an MCP kind (claude_code_mcp is the only one).</summary>
+    private static string ClientOf(string kind) => "claude_code";
 
-    /// <summary>MCP kinds a pairing client counts for ("unknown" counts for both).</summary>
-    private static string[] KindsOf(string client) => client switch
-    {
-        "codex" => ["codex_mcp"], "claude_code" => ["claude_code_mcp"], _ => McpKinds,
-    };
+    /// <summary>MCP kinds a pairing client counts for: every pairing counts for claude_code_mcp (the only MCP kind).</summary>
+    private static string[] KindsOf(string client) => McpKinds;
 
     // ---------------------------------------------------------------- status (§9)
 
@@ -135,6 +133,7 @@ public sealed partial class AgentService
     private void StartStatusSweep()
     {
         RefreshProviders(ProviderKinds);
+        _nextCheckupGate = Now() + CheckupGateInterval; // m9 §6.8: the first weekly look is an hour after start
         var token = _sweep.Token;
         _sweepTask = Task.Run(async () =>
         {
@@ -145,6 +144,10 @@ public sealed partial class AgentService
                     await Task.Delay(SweepInterval, token).ConfigureAwait(false);
                     try { RefreshProviders(McpKinds); }
                     catch (Exception ex) when (ex is not OperationCanceledException) { _log($"provider sweep: {ex.GetType().Name}"); }
+                    try { CheckupTick(); } // m9 §6.8: the weekly check-up between scans, looked at hourly
+                    catch (Exception ex) when (ex is not OperationCanceledException) { _log($"checkup tick: {ex.GetType().Name}"); }
+                    try { CheckRequestsTick(); } // m9 §17.2: requests that waited 10 minutes expire
+                    catch (Exception ex) when (ex is not OperationCanceledException) { _log($"checks tick: {ex.GetType().Name}"); }
                 }
             }
             catch (OperationCanceledException) { }
@@ -194,18 +197,20 @@ public sealed partial class AgentService
     });
 
     /// <summary>The §3.3 diagnostics whose collectors exist in this build (none on the fixture source), for the grant sheet.
-    /// sensors.snapshot has no collector: it is offered when the benchmark sensors are available (m6 §8).</summary>
+    /// sensors.snapshot has no collector: it is offered when the benchmark sensors are available (m6 §8). m9 §17.2: the
+    /// administrator checks (tier admin) only with --enable-admin-actions and an elevation path for reads.</summary>
     private JsonArray AvailableDiagnostics()
     {
         var ids = _catalog.IsFixture ? [] : _catalog.Collectors.Select(c => c.Id).ToHashSet();
         var all = new Grant([.. Diagnostics.All.Select(d => d.Id)], false, new Limits(), 900);
         var runSchema = Diagnostics.Tools(all).First(t => t.Name == Diagnostics.RunDiagnostic).InputSchema;
         return new JsonArray(Diagnostics.All
-            .Where(d => d.Id == Diagnostics.SensorsSnapshot ? Bench?.SensorsAvailable == true
+            .Where(d => d.Admin ? AdminChecksAvailable
+                : d.Id == Diagnostics.SensorsSnapshot ? Bench?.SensorsAvailable == true
                 : d.TakesTarget ? Diagnostics.EventTargets.Any(t => ids.Contains($"win.events.{t}")) : d.CollectorIds.Any(ids.Contains))
             .Select(d => (JsonNode?)new JsonObject
             {
-                ["id"] = d.Id, ["description"] = d.Description, ["arguments"] = ArgumentSchema(d, all, runSchema),
+                ["id"] = d.Id, ["description"] = d.Description, ["arguments"] = ArgumentSchema(d, all, runSchema), ["tier"] = d.Tier,
             }).ToArray());
     }
 
@@ -235,6 +240,8 @@ public sealed partial class AgentService
             if (id is not null) entry["pairingId"] = id;
         }
         if (InAppKinds.Contains(kind)) entry["capabilities"] = new JsonObject { ["tools"] = !ToolsDisabled(kind) };
+        // m9 §6.4: research availability for this kind and its model.
+        entry["web"] = db is null ? _store.Read(d => WebFor(d, kind, ResearchModel(kind))) : WebFor(db, kind, ResearchModel(kind));
         return entry;
     }
 
@@ -373,6 +380,7 @@ public sealed partial class AgentService
             }
             RefreshProviders(kind);
         }
+        if (error is null) AccountChanged(kind); // m9 §6.3: a new key, sign-in or model ends a research run on this kind
         if (error is null) _log($"provider {kind}: connected (model {model})");
         return (error is null, error);
     }
@@ -447,8 +455,11 @@ public sealed partial class AgentService
                 _signIns[kind] = cancel;
             }
             RefreshProviders(kind);
+            // The reply is built before the sign-in starts: a sign-in that finishes at once (or a request thread that
+            // is preempted) must not turn this call's answer into its outcome. provider.status events report that.
+            var reply = Entry(kind);
             Track(Task.Run(() => SignInAsync(kind, signIn, adapter, cancel)));
-            return FreshEntry(kind);
+            return reply;
         }
         if (InAppKinds.Contains(kind))
         {
@@ -464,7 +475,6 @@ public sealed partial class AgentService
         entry["registration"] = new JsonObject
         {
             ["claude"] = $"claude mcp add --scope user optimization-tool -- \"{exe}\"",
-            ["codex"] = $"codex mcp add optimization-tool -- \"{exe}\"",
         };
         return entry;
     }
@@ -595,6 +605,7 @@ public sealed partial class AgentService
                 _api[kind].Tools = null;
             }
         }
+        AccountChanged(kind); // m9 §6.3: a provider change cancels research on it
         lock (_gate) _mcpOutcome.Remove(kind);
         _store.Write(db =>
         {

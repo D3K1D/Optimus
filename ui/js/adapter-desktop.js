@@ -26,7 +26,8 @@
     var lastSeq = {};            // stream → last delivered seq (drops duplicates after a reconnect)
 
     var MAX_RETRIES = 8;
-    var RETRY = 'shell.retryBackend';   // shell-handled: relaunch the host now (protocol-v1 §7)
+    // Report a problem is built by the shell itself, so it works while there is no backend (docs/error-logging.md §2).
+    var NO_BACKEND = { 'shell.retryBackend': 1, 'shell.problemReport': 1, 'shell.openIssue': 1, 'shell.crashStatus': 1, 'shell.crashDismiss': 1 };
     function holding() { return state === 'connecting' || state === 'reconnecting'; }
 
     function post(entry) {
@@ -41,7 +42,7 @@
         var entry = { method: method, params: params || {}, resolve: resolve, reject: reject, sent: false };
         if (state === 'incompatible') { reject(rpcError({ code: -32010, message: 'incompatible_protocol' })); return; }
         // "Try again" exists for exactly the time there is no backend, so it is never held.
-        if (holding() && method !== RETRY) { held.push(entry); return; }
+        if (holding() && !NO_BACKEND[method]) { held.push(entry); return; }
         post(entry);
       });
     }

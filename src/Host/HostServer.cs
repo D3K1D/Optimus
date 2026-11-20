@@ -7,6 +7,7 @@ using System.Text.Json.Nodes;
 using OptimizationTool.Engine;
 using OptimizationTool.Engine.Actions;
 using OptimizationTool.Transport;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Host;
 
@@ -21,6 +22,8 @@ public sealed class HostOptions
 
     public CollectorOptions CollectorOptions { get; init; } = new();
     public TimeSpan ScanDeadline { get; init; } = TimeSpan.FromSeconds(120);
+    /// <summary>A setting write's deadline (tests shorten it).</summary>
+    public TimeSpan SettingTimeout { get; init; } = TimeSpan.FromSeconds(90);
     public TimeProvider Time { get; init; } = TimeProvider.System;
 
     /// <summary>Exit after this long with no clients and no active work. Null never exits on idle.</summary>
@@ -40,11 +43,20 @@ public sealed class HostOptions
     public IReadOnlyList<IActionModule> ActionModules { get; init; } = [];
     public IElevation? Elevation { get; init; }
 
+    /// <summary>m9 §5: approved scripts (runner, parser, policy reader, restore point). Default: no script path.</summary>
+    public OptimizationTool.Engine.Actions.Scripts.ScriptOptions Scripts { get; init; } = new();
+
     /// <summary>firewall.enable_public stays off unless set (--enable-firewall-handler), m4 §2.</summary>
     public bool EnableFirewallHandler { get; init; }
 
+    /// <summary>m9 §3.2 (D6): every administrator action added in M9 stays off unless set (--enable-admin-actions).</summary>
+    public bool EnableAdminActions { get; init; }
+
     /// <summary>M6a: sensors, hardware and the worker launcher (Windows types or the fixture fakes). Default: unsupported.</summary>
     public OptimizationTool.Engine.Bench.BenchOptions Bench { get; init; } = new();
+
+    /// <summary>Design v59: Windows' display language (WindowsDisplayLanguage); settingsPath is sent only on English. Null sends none.</summary>
+    public IDisplayLanguage? DisplayLanguage { get; init; }
 
     public Action<string>? Log { get; init; }
 }
@@ -106,11 +118,15 @@ public sealed class HostServer : IAsyncDisposable
         {
             DataDir = options.DataDir, Modules = options.Modules, CollectorOptions = options.CollectorOptions,
             FixtureSpeed = options.FixtureSpeed, ScanDeadline = options.ScanDeadline, Time = options.Time, Log = options.Log,
-            Agent = options.Agent, Bench = options.Bench,
+            Agent = options.Agent, Bench = options.Bench, DisplayLanguage = options.DisplayLanguage,
             Actions = new ActionOptions
             {
-                Handlers = options.ActionModules.SelectMany(m => m.Handlers(new ActionContext(options.Elevation ?? new NoElevation(), options.EnableFirewallHandler))).ToList(),
+                Handlers = options.ActionModules.SelectMany(m => m.Handlers(new ActionContext(options.Elevation ?? new NoElevation(), options.EnableFirewallHandler, options.EnableAdminActions))).ToList(),
                 EnableFirewallHandler = options.EnableFirewallHandler,
+                EnableAdminActions = options.EnableAdminActions,
+                Elevation = options.Elevation,
+                Scripts = options.Scripts,
+                SettingTimeout = options.SettingTimeout,
             },
         });
         var server = new HostServer(options, engine);
@@ -126,7 +142,7 @@ public sealed class HostServer : IAsyncDisposable
         engine.Store.EventCommitted += server.Broadcast;
         server._acceptLoop = Task.Run(server.AcceptLoopAsync);
         if (options.IdleExit is { } idle) server._idleLoop = Task.Run(() => server.IdleLoopAsync(idle));
-        server._log($"listening on {options.PipeName}");
+        AppLog.Current.Info($"lifecycle: host listening on {options.PipeName}");
         return server;
     }
 
@@ -175,7 +191,7 @@ public sealed class HostServer : IAsyncDisposable
             catch (OperationCanceledException) { break; }
             catch (IOException ex)
             {
-                _log($"accept failed: {ex.Message}");
+                AppLog.Current.Warn("rpc: pipe accept failed", ErrorSites.HostPipeAccept, ex);
                 await pipe.DisposeAsync().ConfigureAwait(false);
                 pipe = CreatePipe(first: false);
                 _listening = pipe;
@@ -190,7 +206,7 @@ public sealed class HostServer : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                _log($"could not create the next pipe instance: {ex.Message}");
+                AppLog.Current.Error("rpc: could not create the next pipe instance; no new clients", ErrorSites.HostPipeAccept, ex);
                 await accepted.DisposeAsync().ConfigureAwait(false);
                 break;
             }
@@ -208,19 +224,19 @@ public sealed class HostServer : IAsyncDisposable
         }
         catch (Exception ex)
         {
-            _log($"client rejected: identity unavailable ({ex.Message})");
+            AppLog.Current.Warn($"rpc: client refused reason=identity_unavailable {ex.GetType().Name}", ErrorSites.HostClientRefused);
             await pipe.DisposeAsync().ConfigureAwait(false);
             return;
         }
         if (!ClientIdentity.IsAllowed(client.User, client.SessionId, _self.User, _self.Session))
         {
-            _log($"client rejected: pid {client.ProcessId} user {client.User} session {client.SessionId}");
+            AppLog.Current.Warn($"rpc: client refused pid={client.ProcessId} reason=other_user_or_session", ErrorSites.HostClientRefused);
             await pipe.DisposeAsync().ConfigureAwait(false);
             return;
         }
 
         var connection = new Connection(pipe, this, "c-" + Ids.RandomHex(6)) { Client = client };
-        _log($"client {connection.Id} connected: pid {client.ProcessId} {client.ImagePath}");
+        AppLog.Current.Debug($"rpc: client {connection.Id} connected pid={client.ProcessId}");
         _connections[connection] = 0;
         try
         {
@@ -232,7 +248,7 @@ public sealed class HostServer : IAsyncDisposable
             if (connection.ClientKind == "agent")
                 try { _engine.Agent.ConnectionClosed(Context(connection)); }
                 catch (Exception ex) { _log($"client {connection.Id}: close handling failed ({ex.GetType().Name})"); }
-            _log($"client {connection.Id} disconnected");
+            AppLog.Current.Debug($"rpc: client {connection.Id} disconnected kind={connection.ClientKind ?? "none"}");
         }
     }
 
@@ -259,7 +275,7 @@ public sealed class HostServer : IAsyncDisposable
                 idleSince ??= DateTime.UtcNow;
                 if (DateTime.UtcNow - idleSince >= idle)
                 {
-                    _log("idle: no clients and no active work; exiting");
+                    AppLog.Current.Info("lifecycle: idle exit (no clients, no active work)");
                     _ = DisposeAsync().AsTask();
                     return;
                 }
@@ -285,30 +301,50 @@ public sealed class HostServer : IAsyncDisposable
         if (request["method"] is not JsonValue mv || !mv.TryGetValue<string>(out var method))
             return Error(id, ErrorCodes.InvalidRequest, "method must be a string.");
 
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        // Only protocol method names are logged: an unknown name is client text. Never parameters.
+        var known = method == "session.hello" || AuditEngine.DesktopMethods.Contains(method) || AuditEngine.AgentMethods.Contains(method);
+        var logName = known ? method : "<unknown>";
         try
         {
-            if (method == "session.hello") return Result(id, Hello(connection, request["params"]));
-            if (connection.ClientKind is null)
-                return Error(id, ErrorCodes.HandshakeRequired, "Send session.hello first.");
-            if (!AuditEngine.DesktopMethods.Contains(method) && !AuditEngine.AgentMethods.Contains(method))
-                return Error(id, ErrorCodes.MethodNotFound, $"Unknown method {method}.");
-            if (!Allowlists[connection.ClientKind].Contains(method))
-                return Error(id, ErrorCodes.MethodNotAllowed, $"{method} is not allowed for {connection.ClientKind} clients.",
+            JsonObject response;
+            if (method == "session.hello") response = Result(id, Hello(connection, request["params"]));
+            else if (connection.ClientKind is null)
+                response = Error(id, ErrorCodes.HandshakeRequired, "Send session.hello first.");
+            else if (!known)
+                response = Error(id, ErrorCodes.MethodNotFound, $"Unknown method {method}.");
+            else if (!Allowlists[connection.ClientKind].Contains(method))
+                response = Error(id, ErrorCodes.MethodNotAllowed, $"{method} is not allowed for {connection.ClientKind} clients.",
                     new JsonObject { ["method"] = method, ["clientKind"] = connection.ClientKind });
-
-            return Result(id, await _engine.InvokeAsync(method, request["params"], Context(connection)).ConfigureAwait(false));
+            else
+                response = Result(id, await _engine.InvokeAsync(method, request["params"], Context(connection)).ConfigureAwait(false));
+            if (AppLog.Current.DevEnabled)
+                AppLog.Current.Debug(response["error"] is JsonObject err
+                    ? $"rpc: {logName} err {err["code"]} {Elapsed(started)}ms"
+                    : $"rpc: {logName} ok {Elapsed(started)}ms");
+            return response;
         }
         catch (RpcError e)
         {
+            // A sited error is a place worth naming: Warn, so it reaches host.log and the public report.
+            if (e.Site is not null)
+                AppLog.Current.Warn($"rpc: {logName} err {e.Code} {Elapsed(started)}ms (raised @{e.RaisedAt})", e.Site);
+            else if (AppLog.Current.DevEnabled)
+                AppLog.Current.Debug($"rpc: {logName} err {e.Code} {Elapsed(started)}ms (raised @{e.RaisedAt})");
             return Error(id, e.Code, e.Message, e.ErrorData?.DeepClone());
         }
         catch (Exception ex)
         {
             // provider.setKey: never log anything that could carry the key (only the exception type).
-            _log(method == "provider.setKey" ? $"{method} failed: {ex.GetType().Name}" : $"{method} failed: {ex}");
+            if (method == "provider.setKey")
+                AppLog.Current.Error($"rpc: {logName} err {ErrorCodes.InternalError} {Elapsed(started)}ms: {ex.GetType().Name}", ErrorSites.HostRpcInternal);
+            else
+                AppLog.Current.Error($"rpc: {logName} err {ErrorCodes.InternalError} {Elapsed(started)}ms", ErrorSites.HostRpcInternal, ex);
             return Error(id, ErrorCodes.InternalError, "Internal error.");
         }
     }
+
+    private static long Elapsed(long started) => (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
     private JsonObject Hello(Connection connection, JsonNode? parameters)
     {
@@ -327,22 +363,23 @@ public sealed class HostServer : IAsyncDisposable
         // desktop and test get the desktop allowlist (approvals included), so only the installed shell may claim it (m3-agent §1).
         if (kind == "test" && !_options.DevAllowAnyClient)
         {
-            _log($"client {connection.Id} rejected as test: dev option off");
+            AppLog.Current.Info($"rpc: hello {connection.Id} kind=test refused reason=dev_option_off", ErrorSites.HostClientRefused);
             throw RpcError.State("untrusted_client", "Test clients need a development host.");
         }
         if (kind == "desktop" && !_options.DevAllowAnyClient && !IsTrustedImage(connection.Client?.ImagePath, DesktopExecutable))
         {
-            _log($"client {connection.Id} rejected as desktop: unexpected image");
+            AppLog.Current.Warn($"rpc: hello {connection.Id} kind=desktop refused reason=untrusted_image", ErrorSites.HostClientRefused);
             throw RpcError.State("untrusted_client", "Desktop clients must be OptimizationTool.exe installed with Optimus.");
         }
         if (kind == "agent" && !_options.DevAllowAnyAgent && !IsTrustedAgentImage(connection.Client?.ImagePath))
         {
-            _log($"client {connection.Id} rejected as agent: unexpected image");
+            AppLog.Current.Warn($"rpc: hello {connection.Id} kind=agent refused reason=untrusted_image", ErrorSites.HostClientRefused);
             _engine.Agent.BridgeRejected(); // the app shows "Setup issue" (m3-agent §9); this connection gets no events
             throw RpcError.State("untrusted_agent", "Agent clients must be OptimizationTool.Mcp.exe installed with Optimus.");
         }
 
         connection.ClientKind = kind;
+        AppLog.Current.Debug($"rpc: hello {connection.Id} kind={kind} ok");
         return new JsonObject
         {
             ["protocol"] = new JsonObject { ["major"] = ProtocolMajor, ["minor"] = ProtocolMinor },
@@ -383,19 +420,24 @@ public sealed class HostServer : IAsyncDisposable
             await Completion.ConfigureAwait(false);
             return;
         }
+        AppLog.Current.Info($"lifecycle: host stopping ({_connections.Count} clients)");
         _engine.Store.EventCommitted -= Broadcast;
         await _stop.CancelAsync().ConfigureAwait(false);
         try { await _acceptLoop.ConfigureAwait(false); } catch (Exception ex) { _log($"accept loop: {ex.Message}"); }
         foreach (var connection in _connections.Keys) await connection.DisposeAsync().ConfigureAwait(false);
         try { await _idleLoop.ConfigureAwait(false); } catch (OperationCanceledException) { }
         await _engine.DisposeAsync().ConfigureAwait(false);
+        AppLog.Current.Info("lifecycle: host stopped");
         _completion.TrySetResult();
     }
 }
 
-/// <summary>Used when no broker is wired: machine-scope actions are declined (nothing is written).</summary>
+/// <summary>Used when no broker is wired: administrator steps fail before anything is written.</summary>
 internal sealed class NoElevation : IElevation
 {
-    public Task<ActionOutcome> RunAsync(string actionId, ActionExecution execution, CancellationToken ct) =>
-        Task.FromResult(new ActionOutcome("declined", [], "Administrator approval is not available.", "no_broker", "No elevation route."));
+    public Task<ElevatedResult> RunAsync(ElevatedRequest request, CancellationToken stop, CancellationToken ct) =>
+        Task.FromResult(new ElevatedResult([.. request.Steps.Select(s => (s.N,
+            new ActionOutcome("failed", new System.Text.Json.Nodes.JsonObject(), "Administrator approval is not available.", "no_broker", "No elevation route.")))], null, false));
+
+    public ElevatedJournal? Journal(string planId) => null;
 }

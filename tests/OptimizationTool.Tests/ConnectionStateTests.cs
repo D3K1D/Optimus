@@ -159,8 +159,7 @@ public class ConnectionStateTests
         var bridge = await host.ConnectAsync(hello: false);
         Assert.Equal("untrusted_agent", (await bridge.Fails("session.hello", Rpc.HelloParams(kind: "agent", minor: 2))).ErrorData.Str("reason"));
         await Expect(desktop, "claude_code_mcp", "error/bridge_rejected");
-        await Expect(desktop, "codex_mcp", "error/bridge_rejected");
         Assert.Empty(bridge.Events);
-        Assert.Equal("bridge_rejected", (await Entry(desktop, "codex_mcp")).Str("detail"));
+        Assert.Equal("bridge_rejected", (await Entry(desktop, "claude_code_mcp")).Str("detail"));
     }
 }

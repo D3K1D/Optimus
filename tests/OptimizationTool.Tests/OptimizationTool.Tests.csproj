@@ -18,6 +18,7 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\contracts\schemas\*.schema.json" Link="schemas\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Traces\*.jsonl" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

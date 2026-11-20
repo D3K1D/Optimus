@@ -8,7 +8,7 @@ namespace OptimizationTool.Providers;
 /// The assistant's content blocks are kept verbatim in <see cref="AssistantTurn.ProviderState"/> and replayed unchanged,
 /// which keeps the transcript append-only (thinking blocks are bound to the exact prior conversation).
 /// </summary>
-public sealed class AnthropicAdapter : IProviderAdapter
+public sealed partial class AnthropicAdapter : IProviderAdapter, IWebResearch
 {
     public const string KindId = "anthropic_api";
     public const string ApiVersion = "2026-10-21";
@@ -84,7 +84,7 @@ public sealed class AnthropicAdapter : IProviderAdapter
         if (body.ContainsKey("fallbacks")) http.Headers.Add("anthropic-beta", FallbackBeta);
         http.Content = ProviderHttp.JsonBody(body);
 
-        var raw = await ProviderHttp.SendAsync(_http, http, TurnTimeout, Provider, ct).ConfigureAwait(false);
+        var raw = await ProviderHttp.SendAsync(_http, http, TurnTimeout, Provider, ct, request.Model).ConfigureAwait(false);
         if (!raw.Status.IsSuccess()) throw ProviderHttp.MapError(raw, Provider, credential.ApiKey);
         var root = ProviderHttp.ParseObject(raw.Body, Provider);
         try

@@ -4,6 +4,8 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.14" />
+    <!-- SettingsPages: the one table of Windows pages the shell opens and their English paths. -->
+    <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- The single synthetic M1 dataset, shared with the UI's fixture adapter. -->

@@ -19,7 +19,7 @@ public sealed class PlanApprovalTests
 
     public PlanApprovalTests()
     {
-        _dispatcher = new BridgeDispatcher(new BridgeRouter(), _host, DesktopLog.Disabled,
+        _dispatcher = new BridgeDispatcher(new BridgeRouter(), _host, AppLog.Disabled,
             new SettingsLauncher(_ => { }), approvals: new PlanApproval(_prompt, () => _ticks, () => _utc));
     }
 
@@ -118,11 +118,11 @@ public sealed class PlanApprovalTests
 
         var view = Assert.Single(_prompt.Shown);
         Assert.Equal("Switch power plan", view.Title);
-        Assert.Equal("Claude Code", view.RequestedBy);
+        Assert.Equal("Claude", view.RequestedBy);
         Assert.Equal(("Active power plan", "High performance", "Balanced"), view.Rows[0]);
         Assert.Equal(["Power: On battery · 64%"], view.Context);
         Assert.False(view.NeedsAdmin);
-        Assert.Equal("Undo: yes · Only while Balanced is still active", view.UndoLine);
+        Assert.Equal(("Only while Balanced is still active", false), (view.Steps.Single().Undo, view.Steps.Single().UndoRed)); // the host's sentence, never "Undo: yes ·"
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public sealed class PlanApprovalTests
 
         await Approve();
         var view = Assert.Single(_prompt.Shown);
-        var all = new[] { view.Title, view.UndoLine, view.RequestedBy }
+        var all = new[] { view.Title, view.Steps.Single().Undo, view.RequestedBy! }
             .Concat(view.Context).Concat(view.Tradeoffs)
             .Concat(view.Rows.SelectMany(r => new[] { r.Label, r.Before, r.After }));
         foreach (var s in all)
@@ -294,15 +294,15 @@ public sealed class PlanApprovalTests
         Assert.True(view.Rows[0].Before.Length <= PlanView.MaxCell);
         Assert.EndsWith("…", view.Rows[0].Before);
         Assert.Equal(PlanView.MaxTradeoffs, view.Tradeoffs.Count);
-        Assert.Equal("Unknown", view.RequestedBy); // Only the fixed names; free text never becomes the requester.
+        Assert.Equal("the assistant", view.RequestedBy); // Only the fixed names; free text never becomes the requester.
     }
 
     [Theory]
-    [InlineData("user", "You")]
-    [InlineData("in_app", "the in-app assistant")]
-    [InlineData("claude_code", "Claude Code")]
-    [InlineData("codex", "Codex")]
-    public void Requester_names(string kind, string name) => Assert.Equal(name, PlanView.RequesterName(kind));
+    [InlineData("user", null)] // design v62: started from a card, the line is left out
+    [InlineData("in_app", "the assistant")]
+    [InlineData("claude_code", "Claude")]
+    [InlineData("codex", "the assistant")] // M9: a retired requester has no name of its own
+    public void Requester_names(string kind, string? name) => Assert.Equal(name, PlanView.RequesterName(kind));
 
     [Fact]
     public void Admin_and_no_undo_lines()
@@ -312,7 +312,7 @@ public sealed class PlanApprovalTests
         plan["undo"] = new JsonObject { ["supported"] = false };
         var view = PlanView.From(plan)!;
         Assert.True(view.NeedsAdmin);
-        Assert.Equal("Undo: no", view.UndoLine);
+        Assert.Equal((PlanView.CantUndo, true), (view.Steps.Single().Undo, view.Steps.Single().UndoRed));
     }
 
     [Fact]

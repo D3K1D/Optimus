@@ -91,6 +91,7 @@ public sealed partial class AgentService
         var findingIds = FindingIds(p);
         return _store.Write(db =>
         {
+            if (InAppKinds.Contains(recipient)) RequireChosen(db, recipient); // an in-app review goes only to the chosen AI
             var previewId = "prev-" + Ids.RandomHex();
             var (payload, report, chosen) = BuildSelection(db, previewId, reportId, findingIds);
             var expires = Time.Format(Now() + PreviewLifetime);
@@ -126,6 +127,7 @@ public sealed partial class AgentService
             if (r.ConsumedAt is not null) throw RpcError.State("consumed", "This preview was already sent.");
             if (Now() >= ParseTime(r.ExpiresAt)) throw RpcError.State("expired", "This preview expired. Preview again.");
             if (!InAppKinds.Contains(r.Recipient ?? "")) throw RpcError.State("not_in_app", "Use export for that recipient.");
+            RequireChosen(db, r.Recipient!);
             db.Exec("UPDATE reviews SET consumed_at = $t WHERE review_id = $r", ("$t", db.Now()), ("$r", previewId));
             return r;
         });

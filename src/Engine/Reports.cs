@@ -8,7 +8,7 @@ namespace OptimizationTool.Engine;
 /// reopening returns identical bytes; dispositions (which change later) are overlaid when the report is read.
 /// Arrays are ordered by plan order (evidence, coverage, gaps) and rule catalog order (findings, rules).
 /// </summary>
-internal sealed class ReportBuilder(Fixture fixture, AuditCatalog catalog)
+internal sealed class ReportBuilder(Fixture fixture, AuditCatalog catalog, SettingsPaths? paths = null)
 {
     public static readonly string[] Severities = ["info", "low", "medium", "high", "critical"];
     public static int SeverityRank(string s) => Array.IndexOf(Severities, s);
@@ -61,8 +61,13 @@ internal sealed class ReportBuilder(Fixture fixture, AuditCatalog catalog)
                     ["counterevidence"] = Json.Array((draft.Counterevidence ?? []).Where(evidenceIds.Contains).Distinct()),
                     ["actionEligibility"] = draft.ActionEligibility, ["settingsUri"] = draft.Card.SettingsUri, ["disposition"] = null,
                 };
+                // Design v59: the page's English path beside its settingsUri, on English Windows only (finding and card).
+                var settingsPaths = paths ?? SettingsPaths.None;
+                settingsPaths.Add(finding, draft.Card.SettingsUri);
                 findings.Add(finding);
-                cards.Add(rule is FixtureRule fr ? Followups.CardFromFixture(fr.Def, reportId, finding) : Followups.CardFromDraft(reportId, finding, draft));
+                var card = rule is FixtureRule fr ? Followups.CardFromFixture(fr.Def, reportId, finding) : Followups.CardFromDraft(reportId, finding, draft);
+                settingsPaths.Add(card, card["settingsUri"]?.GetValue<string>());
+                cards.Add(card);
                 produced++;
             }
             var outcome = result.Status == "finding" && produced == 0 ? "insufficient" : result.Status;
@@ -196,7 +201,14 @@ internal sealed class ReportService(Store store)
     /// <summary>report.get stays well under the 1 MiB frame cap (protocol §1), leaving room for the JSON-RPC envelope.</summary>
     internal const int MaxReportBytes = 768 * 1024;
 
-    public JsonNode Get(string reportId) => Bound(store.Read(db => WithDispositions(db, Load(db, reportId))), MaxReportBytes);
+    public JsonNode Get(string reportId) => Bound(Outbound(store.Read(db => Agent.AgentService.WithResearch(db, WithDispositions(db, Load(db, reportId))))), MaxReportBytes);
+
+    /// <summary>A loaded report as it leaves the engine: the inventory's local-only item fields removed (review R4b).</summary>
+    internal static JsonObject Outbound(JsonObject report)
+    {
+        foreach (var e in report["evidence"] as JsonArray ?? []) ScanInventory.WithoutLocalFields(e);
+        return report;
+    }
 
     /// <summary>
     /// Keeps a large report openable: when it serializes past <paramref name="maxBytes"/>, evidence no finding cites is
@@ -312,7 +324,7 @@ internal sealed class ReportService(Store store)
         var reportId = P.Req(p, "reportId", 64);
         var evidenceId = P.Req(p, "evidenceId", 64);
         var report = store.Read(db => Load(db, reportId));
-        return report["evidence"]!.AsArray().FirstOrDefault(e => e?["id"]?.GetValue<string>() == evidenceId)?.DeepClone()
+        return ScanInventory.WithoutLocalFields(report["evidence"]!.AsArray().FirstOrDefault(e => e?["id"]?.GetValue<string>() == evidenceId)?.DeepClone())
             ?? throw RpcError.NotFound("evidence", evidenceId);
     }
 
@@ -323,7 +335,7 @@ internal sealed class ReportService(Store store)
         var findingId = P.Req(p, "findingId", 64);
         return store.Read(db =>
         {
-            var report = WithDispositions(db, Load(db, reportId));
+            var report = Agent.AgentService.WithResearch(db, WithDispositions(db, Load(db, reportId)));
             var finding = report["findings"]!.AsArray().FirstOrDefault(f => f.Text("id") == findingId)?.AsObject()
                 ?? throw RpcError.NotFound("finding", findingId);
             var ids = Json.Strings(finding["evidenceIds"]).Concat(Json.Strings(finding["counterevidence"])).ToHashSet();
@@ -332,7 +344,7 @@ internal sealed class ReportService(Store store)
             return new JsonObject
             {
                 ["finding"] = finding.DeepClone(),
-                ["evidence"] = new JsonArray(report["evidence"]!.AsArray().Where(e => ids.Contains(e.Text("id"))).Select(e => e!.DeepClone()).ToArray()),
+                ["evidence"] = new JsonArray(report["evidence"]!.AsArray().Where(e => ids.Contains(e.Text("id"))).Select(e => ScanInventory.WithoutLocalFields(e!.DeepClone())).ToArray()),
                 ["coverage"] = new JsonArray(report["coverage"]!.AsArray().Where(c => inputs.Contains(c.Text("collectorId"))).Select(c => c!.DeepClone()).ToArray()),
                 ["rule"] = new JsonObject
                 {
@@ -349,8 +361,8 @@ internal sealed class ReportService(Store store)
         var baseId = P.Req(p, "baseReportId", 64);
         return store.Read(db =>
         {
-            var report = WithDispositions(db, Load(db, reportId));
-            var baseReport = WithDispositions(db, Load(db, baseId));
+            var report = Agent.AgentService.WithResearch(db, WithDispositions(db, Load(db, reportId)));
+            var baseReport = Agent.AgentService.WithResearch(db, WithDispositions(db, Load(db, baseId)));
             var (added, resolved, unchanged) = ReportBuilder.Compare(report, baseReport);
             return new JsonObject
             {

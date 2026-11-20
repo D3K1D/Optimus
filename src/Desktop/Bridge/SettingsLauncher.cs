@@ -12,21 +12,11 @@ public sealed class SettingsLauncher
 {
     public const string Method = "shell.openSettings";
 
-    public static readonly FrozenSet<string> Catalog = new[]
-    {
-        "windowsdefender://threat",
-        "windowsdefender://network",
-        "ms-settings:windowsdefender",
-        "ms-settings:startupapps",
-        "ms-settings:powersleep",
-        "ms-settings:storagesense",
-        "ms-settings:appsfeatures",
-        "ms-settings:privacy-feedback",
-        "ms-settings:display-advanced",
-        "ms-settings:personalization-start",
-        "ms-settings:windowsupdate-history",
-        "ms-settings:troubleshoot",
-    }.ToFrozenSet(StringComparer.Ordinal);
+    /// <summary>
+    /// The reviewed pages: exactly the URIs of <see cref="Transport.SettingsPages"/>, the one table the host also sends each
+    /// page's English path from (design v59), so the shell's allowlist and the paths can't drift apart.
+    /// </summary>
+    public static readonly FrozenSet<string> Catalog = Transport.SettingsPages.All.Select(p => p.Uri).ToFrozenSet(StringComparer.Ordinal);
 
     public const string UrlMethod = "shell.openUrl";
 
@@ -34,10 +24,8 @@ public sealed class SettingsLauncher
     public static readonly FrozenSet<string> WebLinks = new[]
     {
         "https://claude.com/claude-code",
-        "https://developers.openai.com/codex",
         "https://chatgpt.com/",
         "https://claude.com/download",
-        "https://chatgpt.com/codex",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     public static readonly TimeSpan MinInterval = TimeSpan.FromSeconds(1);
@@ -69,7 +57,7 @@ public sealed class SettingsLauncher
     }
 
     /// <summary>Returns the bridge reply for this call.</summary>
-    public string Handle(JsonNode id, JsonObject? parameters, DesktopLog log)
+    public string Handle(JsonNode id, JsonObject? parameters, AppLog log)
     {
         // Exactly {<param>:"<allowed entry>"}: no extra fields, no normalization.
         if (parameters is null || parameters.Count != 1
@@ -103,7 +91,8 @@ public sealed class SettingsLauncher
         return BridgeMessages.Result(id, new JsonObject { ["opened"] = true });
     }
 
-    // Only ever called with an allowlisted entry (fixed ms-settings:/windowsdefender: URIs or the five https links).
-    private static void OpenWithSystem(string uri) =>
+    // Only ever called with an allowlisted entry (fixed ms-settings:/windowsdefender: URIs or the five https links), or by
+    // SourceOpener with a research source URL it has just re-validated (https, public host).
+    internal static void OpenWithSystem(string uri) =>
         Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true })?.Dispose();
 }

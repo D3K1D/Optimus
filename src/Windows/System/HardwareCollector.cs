@@ -46,7 +46,7 @@ internal sealed class HardwareCollector(CollectorOptions options) : SystemCollec
         catch (Exception) { failures.Add(what); return null; }
     }
 
-    private static unsafe CpuRaw ReadCpu()
+    internal static unsafe CpuRaw ReadCpu()
     {
         using var key = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
         var name = Sys.RegString(key, "ProcessorNameString");
@@ -103,7 +103,7 @@ internal sealed class HardwareCollector(CollectorOptions options) : SystemCollec
         return new MemoryRaw(installed, usable);
     }
 
-    private static unsafe List<GpuRaw> ReadGpus(CancellationToken ct)
+    internal static unsafe List<GpuRaw> ReadGpus(CancellationToken ct)
     {
         var drivers = ReadDisplayDrivers();
         var gpus = new List<GpuRaw>();

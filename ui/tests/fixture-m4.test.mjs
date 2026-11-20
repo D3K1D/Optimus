@@ -1,6 +1,7 @@
 // node --test ui/tests/   — the fixture adapter's M4 simulation (contracts/m4-actions.md §4).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { choose } from './choose-ai.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -31,19 +32,25 @@ test('catalog, power preview → simulated approval → verified receipt → und
   assert.equal(plan.status, 'awaiting_user');
   assert.deepEqual(plan.rows, [{ label: 'Active power plan', before: 'High performance', after: 'Balanced' }]);
   assert.equal(plan.undo.supported, true);
-  assert.match(plan.planHash, /^[0-9a-f]{16}$/);
+  // m9 §3.1 metadata, mirrored from the host: catalog group/what/flags; plan group/what/flags/resources.
+  for (const a of cat) { assert.equal(typeof a.group, 'string'); assert.equal(typeof a.what, 'string'); assert.ok(Array.isArray(a.flags)); }
+  assert.deepEqual(cat.find((a) => a.actionId === 'defender.full_scan').flags, ['long']);
+  assert.equal(plan.group, 'power');
+  assert.deepEqual(plan.flags, []);
+  assert.deepEqual(plan.resources, ['power:BALANCED']);
+  assert.match(plan.planHash, /^[0-9a-f]{64}$/);   // SHA-256, as the host
   const states = [];
   be.onEvent((e) => { if (e.type === 'operation.state') states.push(e.payload.state); });
   const verified = until(be, (e) => e.type === 'operation.state' && e.payload.state === 'verified');
   const r = await be.call('shell.approvePlan', { planId: plan.planId });
   assert.equal(r.status, 'approved');
   const v = (await verified).payload;
-  assert.deepEqual(states, ['prepared', 'attempted', 'verified']);
+  assert.deepEqual(states, ['prepared', 'verified']);   // as the host: a setting's attempted is journalled, not an event
   assert.equal(v.receipt.text, 'Balanced is active, read back from Windows.');
   const op = await be.call('operation.get', { operationId: v.operationId });
   assert.equal(op.undo.available, true);
   assert.equal(r.operationId, v.operationId);
-  assert.deepEqual(await be.call('shell.approvePlan', { planId: plan.planId }), { status: 'stale' });   // one approval = one plan
+  assert.deepEqual(await be.call('shell.approvePlan', { planId: plan.planId }), { status: 'unavailable', error: 'verified' });   // one approval = one plan (PlanApproval)
   // Undo is a new plan with its own approval.
   const u = await be.call('action.undo', { idempotencyKey: key(), operationId: v.operationId });
   assert.deepEqual(u.rows, [{ label: 'Active power plan', before: 'Balanced', after: 'High performance' }]);
@@ -64,14 +71,16 @@ test('ineligible plans carry a reason and a manual route; Defender ops show prog
   assert.equal(fw.status, 'ineligible');
   assert.equal(fw.ineligible.manualUri, 'windowsdefender://network');
   const diag = await be.call('action.preview', { idempotencyKey: key(), actionId: 'manual.open', findingId: finding('privacy.optional_diag').id });
-  assert.equal(diag.ineligible.manualUri, 'ms-settings:privacy-feedback');
+  // The host's CreateManual: a manual plan naming the finding's page (and its English path, design v59).
+  assert.deepEqual([diag.kind, diag.status, diag.ineligible, diag.target.type, diag.target.id, diag.target.settingsPath],
+    ['manual', 'awaiting_user', null, 'settings', 'ms-settings:privacy-feedback', 'Settings › Privacy & security › Diagnostics & feedback']);
   const scan = await be.call('action.preview', { idempotencyKey: key(), actionId: 'defender.quick_scan', findingId: finding('av.signatures_stale').id });
   const progress = [];
   be.onEvent((e) => { if (e.type === 'operation.state' && e.payload.progress) progress.push(e.payload.progress); });
   const done = until(be, (e) => e.type === 'operation.state' && e.payload.state === 'verified');
   await be.call('shell.approvePlan', { planId: scan.planId });
   const v = (await done).payload;
-  assert.ok(progress.includes('Scanning · quick'));
+  assert.ok(progress.includes('Quick scan · just started') && progress.includes('Quick scan · running for 1 min'));   // the host's words (design v57)
   assert.match(v.receipt.text, /no threats found/);
   assert.equal((await be.call('operation.get', { operationId: v.operationId })).undo.available, false);
   const fid = finding('storage.system_low').id;
@@ -84,6 +93,7 @@ test('ineligible plans carry a reason and a manual route; Defender ops show prog
 test('agent-requested plan: only with canRequestChanges, requestedBy the assistant, user approves', async () => {
   const { be, report } = await setup();
   await be.call('shell.requestApiKey', { kind: 'anthropic_api' });
+  await choose(be, 'anthropic_api');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'loud', recipientKind: 'anthropic_api', scope: { reportId: report.reportId },
     grant: { diagnostics: ['process.sample'], canRequestChanges: true } });
   assert.equal(t.grant.canRequestChanges, true);

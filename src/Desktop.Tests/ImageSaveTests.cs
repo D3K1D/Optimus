@@ -86,7 +86,7 @@ public class ImageSaveTests
     }
 
     private static JsonObject Call(ImageSave save, JsonObject? parameters) =>
-        JsonNode.Parse(save.HandleAsync(JsonValue.Create(1), parameters, DesktopLog.Disabled, CancellationToken.None).GetAwaiter().GetResult())!.AsObject();
+        JsonNode.Parse(save.HandleAsync(JsonValue.Create(1), parameters, AppLog.Disabled, CancellationToken.None).GetAwaiter().GetResult())!.AsObject();
 
     [Fact]
     public void Saves_a_valid_png_and_returns_only_saved_true()
@@ -362,7 +362,7 @@ public class ImageSaveTests
     {
         var backend = new NoBackend();
         var prompt = new FakePrompt(path: null);
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, DesktopLog.Disabled, images: new ImageSave(prompt, (_, _, _) => { }));
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, AppLog.Disabled, images: new ImageSave(prompt, (_, _, _) => { }));
         var b64 = Convert.ToBase64String(Png());
         var reply = await dispatcher.HandleAsync($$$"""{"type":"rpc","id":9,"method":"shell.saveImage","params":{"pngBase64":"{{{b64}}}"}}""", Doc, true, CancellationToken.None);
         var json = JsonNode.Parse(reply!)!;
@@ -375,7 +375,7 @@ public class ImageSaveTests
     [Fact]
     public async Task Dispatcher_without_handler_reports_unavailable()
     {
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled);
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), AppLog.Disabled);
         var reply = await dispatcher.HandleAsync("""{"type":"rpc","id":2,"method":"shell.saveImage","params":{"pngBase64":"AAAA"}}""", Doc, true, CancellationToken.None);
         Assert.Equal(-32013, JsonNode.Parse(reply!)!["error"]!["code"]!.GetValue<int>());
     }

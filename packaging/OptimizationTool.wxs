@@ -36,7 +36,7 @@
 
     <!-- %ProgramFiles%\Optimus: admin-protected, as the elevation broker requires. Up to 0.8.x it was
          %ProgramFiles%\Optimization Tool: MajorUpgrade (default schedule) uninstalls that product, files included, before
-         this one installs, and the app re-registers a Claude Code/Codex entry left pointing at the removed bridge
+         this one installs, and the app re-registers a Claude Code entry left pointing at the removed bridge
          (src/Desktop/Bridge/ClientConnector.cs). -->
     <StandardDirectory Id="ProgramFiles64Folder">
       <Directory Id="INSTALLFOLDER" Name="Optimus" />

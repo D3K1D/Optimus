@@ -101,7 +101,70 @@ internal static class Migrations
         CREATE TABLE bench_evidence (evidence_id TEXT PRIMARY KEY, run_id TEXT NOT NULL, part TEXT NOT NULL, metric TEXT NOT NULL, body TEXT NOT NULL);
         CREATE INDEX bench_evidence_run ON bench_evidence (run_id);
         """,
+        // v8 (M9, contracts/m9-ai-powers.md §8): per-user settings (key ai.permissions, §1.1). Later M9 phases add their
+        // tables to this step (research_*, script_runs) before v8 ships. operation_step_states (§4): one row per fix step;
+        // operation_steps stays the append-only transition history.
+        """
+        CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE TABLE operation_step_states (operation_id TEXT NOT NULL, n INTEGER NOT NULL, state TEXT NOT NULL, preimage TEXT, dispatched_at TEXT,
+            observed TEXT, receipt TEXT, undo TEXT, error TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (operation_id, n));
+        """ + ResearchTables + ScriptTables,
+        // v9 (M9 §17.3 "Fix for me"): a plan's card (one pending AI plan per card, across tasks) and the fix attempts (one
+        // current attempt per card; card.fix is derived on read, never stored). §17.2 administrator checks: the requests (one
+        // per asking turn, 2 per task; revision and frozen membership), each check as an agent operation of its request (n, its
+        // window), and the one continuation per request a turn asked for.
+        """
+        ALTER TABLE action_plans ADD COLUMN card_id TEXT;
+        CREATE INDEX action_plans_card ON action_plans (card_id, status);
+        CREATE TABLE fix_attempts (attempt_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, report_id TEXT NOT NULL, card_id TEXT NOT NULL,
+            state TEXT NOT NULL, turn_id TEXT, outcome TEXT, opinion TEXT, by_label TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+        CREATE INDEX fix_attempts_card ON fix_attempts (card_id, state);
+        CREATE INDEX fix_attempts_turn ON fix_attempts (turn_id);
+        CREATE TABLE check_requests (request_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, turn_id TEXT, attempt_id TEXT, card_id TEXT,
+            revision INTEGER NOT NULL, state TEXT NOT NULL, code TEXT, frozen INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL, ended_at TEXT);
+        CREATE INDEX check_requests_task ON check_requests (task_id, state);
+        CREATE INDEX check_requests_attempt ON check_requests (attempt_id, state);
+        ALTER TABLE agent_operations ADD COLUMN request_id TEXT;
+        ALTER TABLE agent_operations ADD COLUMN check_id TEXT;
+        ALTER TABLE agent_operations ADD COLUMN n INTEGER;
+        ALTER TABLE agent_operations ADD COLUMN check_window INTEGER;
+        CREATE INDEX agent_operations_request ON agent_operations (request_id);
+        CREATE TABLE continuations (request_id TEXT PRIMARY KEY, task_id TEXT NOT NULL, attempt_id TEXT, card_id TEXT, state TEXT NOT NULL,
+            turn_id TEXT, created_at TEXT NOT NULL);
+        CREATE INDEX continuations_task ON continuations (task_id, state);
+        CREATE INDEX continuations_attempt ON continuations (attempt_id, state);
+        """,
     ];
+
+    /// <summary>
+    /// M9 §5 approved scripts (part of v8, created if missing on every open like <see cref="ResearchTables"/>): one row per
+    /// approved script (the durable dispatch record: dispatched_at is committed before launch), and the dialog's options and
+    /// plan hash each script nonce is bound to.
+    /// </summary>
+    internal const string ScriptTables = """
+        CREATE TABLE IF NOT EXISTS script_runs (operation_id TEXT PRIMARY KEY, plan_id TEXT NOT NULL UNIQUE, task_id TEXT, sha256 TEXT NOT NULL, text TEXT NOT NULL,
+            options TEXT NOT NULL, approved_at TEXT NOT NULL, state TEXT NOT NULL, exit_code INTEGER, guard_version TEXT NOT NULL, warnings TEXT NOT NULL,
+            restore_point TEXT, transcript_path TEXT, dispatched_at TEXT, ended_at TEXT);
+        CREATE TABLE IF NOT EXISTS action_nonce_bindings (nonce TEXT PRIMARY KEY, plan_hash TEXT NOT NULL, options TEXT NOT NULL);
+        """;
+
+    /// <summary>
+    /// M9 §6 research stores (part of v8). Idempotent: <see cref="Store"/> also runs it on open, so a development database
+    /// migrated to v8 before these tables were appended gets them too.
+    /// </summary>
+    internal const string ResearchTables = """
+        CREATE TABLE IF NOT EXISTS research_runs (run_id TEXT PRIMARY KEY, report_id TEXT NOT NULL, status TEXT NOT NULL, done INTEGER NOT NULL, total INTEGER NOT NULL,
+            trial INTEGER NOT NULL, provider_kind TEXT NOT NULL, account TEXT NOT NULL, model TEXT, permissions_revision INTEGER NOT NULL, usage TEXT NOT NULL,
+            started_at TEXT NOT NULL, finished_at TEXT);
+        CREATE INDEX IF NOT EXISTS research_runs_report ON research_runs (report_id);
+        CREATE TABLE IF NOT EXISTS research_products (product_key TEXT NOT NULL, policy_version TEXT NOT NULL, body TEXT NOT NULL, researched_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL, PRIMARY KEY (product_key, policy_version));
+        CREATE TABLE IF NOT EXISTS research_labels (report_id TEXT NOT NULL, finding_id TEXT NOT NULL, run_id TEXT NOT NULL, product_key TEXT NOT NULL,
+            severity TEXT NOT NULL, item TEXT NOT NULL, researched_at TEXT NOT NULL, PRIMARY KEY (report_id, finding_id));
+        CREATE TABLE IF NOT EXISTS research_sources (source_id TEXT PRIMARY KEY, url TEXT NOT NULL, title TEXT NOT NULL, domain TEXT NOT NULL, run_id TEXT NOT NULL,
+            product_key TEXT NOT NULL, created_at TEXT NOT NULL);
+        """;
 
     public static int Latest => Steps.Length;
 

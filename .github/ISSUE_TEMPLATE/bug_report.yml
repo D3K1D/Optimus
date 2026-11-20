@@ -1,0 +1,28 @@
+name: Report a problem
+description: Something in Optimus didn't work.
+title: "Problem: "
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What were you doing?
+      description: A sentence or two is enough.
+      placeholder: I started a full scan and it stopped halfway.
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened?
+      description: What you saw, if it helps.
+    validations:
+      required: false
+  - type: textarea
+    id: report
+    attributes:
+      label: Report from Optimus
+      description: Filled in by Optimus. Please don't change it.
+      render: text
+    validations:
+      required: true

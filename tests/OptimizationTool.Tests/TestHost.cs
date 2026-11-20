@@ -38,12 +38,12 @@ public sealed class TestHost : IAsyncDisposable
 
     /// <summary>A module-source host (M2) over the given modules.</summary>
     public static TestHost StartModules(IReadOnlyList<IAuditModule> modules, string? dataDir = null, TimeProvider? time = null,
-        CollectorOptions? collectorOptions = null, TimeSpan? scanDeadline = null) =>
+        CollectorOptions? collectorOptions = null, TimeSpan? scanDeadline = null, IDisplayLanguage? displayLanguage = null) =>
         new(new HostOptions
         {
             DataDir = dataDir ?? NewDataDir(), PipeName = NewPipeName(), Modules = modules, IdleExit = null,
             Time = time ?? TimeProvider.System, CollectorOptions = collectorOptions ?? new CollectorOptions(),
-            ScanDeadline = scanDeadline ?? TimeSpan.FromSeconds(120), DevAllowAnyClient = true,
+            ScanDeadline = scanDeadline ?? TimeSpan.FromSeconds(120), DevAllowAnyClient = true, DisplayLanguage = displayLanguage,
         }, dataDir is null);
 
     /// <summary>An M3 host: modules (or the fixture when null), agent options, any agent image allowed unless told otherwise.</summary>
@@ -58,12 +58,14 @@ public sealed class TestHost : IAsyncDisposable
     /// <summary>An M4 host: fake action handlers (no real writes), optional audit modules, elevation and firewall switch.</summary>
     public static TestHost StartActions(IReadOnlyList<OptimizationTool.Engine.Actions.IActionModule> actions, IReadOnlyList<IAuditModule>? modules = null,
         OptimizationTool.Engine.Actions.IElevation? elevation = null, bool enableFirewall = false, TimeProvider? time = null,
-        OptimizationTool.Engine.Agent.AgentOptions? agent = null) =>
+        OptimizationTool.Engine.Agent.AgentOptions? agent = null, OptimizationTool.Engine.Actions.Scripts.ScriptOptions? scripts = null, Action<string>? log = null,
+        bool enableAdmin = false, TimeSpan? settingTimeout = null, IDisplayLanguage? displayLanguage = null) =>
         new(new HostOptions
         {
             DataDir = NewDataDir(), PipeName = NewPipeName(), Modules = modules ?? [], IdleExit = null, Time = time ?? TimeProvider.System,
             Agent = agent ?? new OptimizationTool.Engine.Agent.AgentOptions(), DevAllowAnyAgent = true, DevAllowAnyClient = true,
-            ActionModules = actions, Elevation = elevation, EnableFirewallHandler = enableFirewall,
+            ActionModules = actions, Elevation = elevation, EnableFirewallHandler = enableFirewall, EnableAdminActions = enableAdmin, Scripts = scripts ?? new(), Log = log,
+            SettingTimeout = settingTimeout ?? TimeSpan.FromSeconds(90), DisplayLanguage = displayLanguage,
         }, true);
 
     /// <summary>An M6a host: benchmark fakes (no workload ever runs), optional agent, audit modules (fixture when null) and actions.</summary>
@@ -89,7 +91,8 @@ public sealed class TestHost : IAsyncDisposable
             Time = _template.Time, CollectorOptions = _template.CollectorOptions, ScanDeadline = _template.ScanDeadline,
             Agent = _template.Agent, DevAllowAnyAgent = _template.DevAllowAnyAgent, DevAllowAnyClient = _template.DevAllowAnyClient, Log = _template.Log,
             ActionModules = _template.ActionModules, Elevation = _template.Elevation, EnableFirewallHandler = _template.EnableFirewallHandler,
-            Bench = _template.Bench,
+            EnableAdminActions = _template.EnableAdminActions,
+            Bench = _template.Bench, Scripts = _template.Scripts, DisplayLanguage = _template.DisplayLanguage,
         });
     }
 

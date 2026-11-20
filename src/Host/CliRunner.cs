@@ -2,16 +2,18 @@ using System.Diagnostics;
 using System.Text;
 using OptimizationTool.Engine.Agent;
 using OptimizationTool.Transport;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Host;
 
 /// <summary>
-/// Production <see cref="ICliRunner"/> for headless Claude Code / Codex runs (contracts/m5-chat.md §3). The command
+/// Production <see cref="ICliRunner"/> for headless Claude Code runs (contracts/m5-chat.md §3). The command
 /// comes from the shared safe builder (<see cref="ProcessCommand.ForCli"/>: .exe → argument list, npm shim → its exe or
-/// node.exe + entry with an argument list, other .cmd → validated cmd.exe line), with no window, the environment unchanged except PATH refreshed from the registry, stdin written
+/// node.exe + entry with an argument list, other .cmd → validated cmd.exe line), with no window, the environment unchanged except PATH refreshed from the registry
+/// (a launch with an explicit environment, m9 §6.3 research, gets that environment only, PATH refreshed), stdin written
 /// (UTF-8, no BOM) and closed, stdout read line by line as UTF-8. Cancelling, or any other abnormal end of the read
 /// loop, kills the whole process tree; after exit, stdout and stderr are drained for a bounded time only.
-/// Output is parsed by the engine and never logged.
+/// Output, prompts and arguments are never logged: only which CLI, its exit code and the duration.
 /// </summary>
 public sealed class CliRunner(string? systemRoot = null, Func<string?>? childPath = null, TimeSpan? pipeDrain = null, NpmShimEnvironment? npm = null) : ICliRunner
 {
@@ -41,11 +43,53 @@ public sealed class CliRunner(string? systemRoot = null, Func<string?>? childPat
         };
         if (command.CmdArguments is not null) psi.Arguments = command.CmdArguments;
         else foreach (var a in command.ArgumentList) psi.ArgumentList.Add(a);
+        if (launch.Environment is { } explicitEnvironment)
+        {
+            // m9 §6.3 research runs: the child gets exactly this environment (an allowlist built by the engine), nothing inherited.
+            psi.Environment.Clear();
+            foreach (var (name, value) in explicitEnvironment)
+                if (name.Length > 0 && !name.Contains('=') && !name.Contains('\0') && !value.Contains('\0')) psi.Environment[name] = value;
+        }
         if (_childPath() is { Length: > 0 } path) psi.Environment["PATH"] = path;
         return psi;
     }
 
     public async Task<CliExit> RunAsync(CliLaunch launch, Action<string> onLine, CancellationToken ct)
+    {
+        // Only the CLI's file name, never its folder or arguments (they can hold the prompt).
+        var cli = SafeName(launch.CliPath);
+        var started = Stopwatch.GetTimestamp();
+        try
+        {
+            var exit = await RunCoreAsync(launch, onLine, ct).ConfigureAwait(false);
+            var ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (!exit.Started)
+                AppLog.Current.Warn($"provider: cli {cli} not started reason={exit.LaunchError}", ErrorSites.CliLaunchFailed);
+            else if (exit.ExitCode != 0)
+                AppLog.Current.Warn($"provider: cli {cli} exit={exit.ExitCode} ms={ms} stderr={exit.StandardError.Length}ch", ErrorSites.CliExitNonZero);
+            else
+                AppLog.Current.Debug($"provider: cli {cli} exit=0 ms={ms}");
+            return exit;
+        }
+        catch (OperationCanceledException)
+        {
+            AppLog.Current.Debug($"provider: cli {cli} cancelled ms={(long)Stopwatch.GetElapsedTime(started).TotalMilliseconds}");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AppLog.Current.Warn($"provider: cli {cli} failed {ex.GetType().Name} ms={(long)Stopwatch.GetElapsedTime(started).TotalMilliseconds}", ErrorSites.CliRunFailed);
+            throw;
+        }
+    }
+
+    private static string SafeName(string? path)
+    {
+        try { return Path.GetFileNameWithoutExtension(path) is { Length: > 0 and <= 40 } n ? n : "cli"; }
+        catch (ArgumentException) { return "cli"; }
+    }
+
+    private async Task<CliExit> RunCoreAsync(CliLaunch launch, Action<string> onLine, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         if (StartInfo(launch) is not { } psi) return new CliExit(-1, "", Started: false, LaunchError: "unsupported_path");
@@ -58,6 +102,7 @@ public sealed class CliRunner(string? systemRoot = null, Func<string?>? childPat
         {
             return new CliExit(-1, "", Started: false, LaunchError: LaunchFailure.Classify(ex));
         }
+        AppLog.Current.Debug($"provider: cli {SafeName(launch.CliPath)} started pid={process.Id}");
 
         var stderr = new StringBuilder();
         var errTask = Task.Run(async () =>

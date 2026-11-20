@@ -71,7 +71,6 @@ public sealed partial class ClientConnector
     public static readonly FrozenDictionary<string, string> InstallScripts = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["claude_code"] = "irm https://claude.ai/install.ps1 | iex",
-        ["codex"] = "irm https://chatgpt.com/codex/install.ps1 | iex",
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     /// <summary>
@@ -87,9 +86,6 @@ public sealed partial class ClientConnector
         ["claude_code"] = new("claude_code", "Claude Code", "claude", ["--scope", "user"], ClaudeIdentity(), ["auth", "status"], "auth login", "claude_code_mcp",
             ["--help"], ["--output-format", "--strict-mcp-config", "--mcp-config", "--allowedTools", "--append-system-prompt", "--session-id", "--resume", "--tools"],
             ClaudeAuthCommand()),
-        ["codex"] = new("codex", "Codex", "codex", [], CodexIdentity(), ["login", "status"], "login", "codex_mcp",
-            ["exec", "--help"], ["--json", "--skip-git-repo-check", "--ignore-user-config", "--sandbox", "--disable", "--cd", "--config"],
-            CodexResumeCommand()),
     }.ToFrozenDictionary(StringComparer.Ordinal);
 
     private readonly IProcessRunner _runner;
@@ -158,7 +154,7 @@ public sealed partial class ClientConnector
 
     public static string DefaultBridgePath => Path.Combine(AppContext.BaseDirectory, "OptimizationTool.Mcp.exe");
 
-    public async Task<string> HandleAsync(string method, JsonNode id, JsonObject? parameters, DesktopLog log, CancellationToken ct, IBackend? backend = null)
+    public async Task<string> HandleAsync(string method, JsonNode id, JsonObject? parameters, AppLog log, CancellationToken ct, IBackend? backend = null)
     {
         if (parameters is null || parameters.Count != 1
             || parameters["client"] is not JsonValue v || !v.TryGetValue<string>(out var clientId) || !Clients.TryGetValue(clientId, out var client))
@@ -206,10 +202,14 @@ public sealed partial class ClientConnector
     /// needs; never cached). <see cref="Blocked"/>: no CLI could be used, but a candidate exists that could not be started
     /// (a fixed reason code).
     /// </summary>
-    private sealed record Resolution(CliCandidate? Cli, string? Version, bool Outdated = false, string? Blocked = null, IReadOnlyList<string>? CodexFeatures = null);
+    private sealed record Resolution(CliCandidate? Cli, string? Version, bool Outdated = false, string? Blocked = null,
+        IReadOnlyList<string>? ClaudeFlags = null);
 
-    /// <summary>A capability probe: Capable, and (Codex, capable only) the §0 features this Codex has, to disable.</summary>
-    private sealed record Probe(bool Capable, IReadOnlyList<string>? CodexFeatures = null);
+    /// <summary>
+    /// A capability probe: Capable, and (capable only, m9 §6.3) which of --safe-mode and --setting-sources the printed
+    /// help lists (none when the help was not read).
+    /// </summary>
+    private sealed record Probe(bool Capable, IReadOnlyList<string>? ClaudeFlags = null);
 
     /// <summary>
     /// The cached CLI when its file still exists (re-identified and re-probed only when <paramref name="identify"/>),
@@ -217,7 +217,7 @@ public sealed partial class ClientConnector
     /// capability the app needs. An outdated CLI is used only when no candidate qualifies; it is never cached, so a later
     /// status finds a newer install.
     /// </summary>
-    private async Task<Resolution> ResolveAsync(Client c, bool identify, DesktopLog log, CancellationToken ct)
+    private async Task<Resolution> ResolveAsync(Client c, bool identify, AppLog log, CancellationToken ct)
     {
         if (_resolved.TryGetValue(c.Id, out var cached))
         {
@@ -225,7 +225,7 @@ public sealed partial class ClientConnector
             {
                 if (!identify) return new(cached, null);
                 if ((await IdentifyAsync(c, cached.Path, log, ct)).Version is { } v && await CapableAsync(c, cached.Path, v, log, ct) is { Capable: true } p)
-                    return new(cached, v, CodexFeatures: p.CodexFeatures);
+                    return new(cached, v, ClaudeFlags: p.ClaudeFlags);
             }
             _resolved.TryRemove(c.Id, out _);
             log.Info($"shell: {c.Id} cached CLI dropped, resolving again");
@@ -251,7 +251,7 @@ public sealed partial class ClientConnector
             }
             _resolved[c.Id] = candidate;
             log.Info($"shell: {c.Id} resolved ({candidate.Source})");
-            return new(candidate, version, CodexFeatures: probe.CodexFeatures);
+            return new(candidate, version, ClaudeFlags: probe.ClaudeFlags);
         }
         if (outdated is { } o) return new(o.Cli, o.Version, Outdated: true);
         return new(null, null, Blocked: blocked);
@@ -261,7 +261,7 @@ public sealed partial class ClientConnector
     /// Version: the version text ("" if none) when <c>--version</c> identifies the client's CLI, else null. Blocked: why
     /// it could not run at all (policy | access_denied | node_missing | unsupported_path | launch_failed), else null.
     /// </summary>
-    private async Task<(string? Version, string? Blocked)> IdentifyAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
+    private async Task<(string? Version, string? Blocked)> IdentifyAsync(Client c, string cli, AppLog log, CancellationToken ct)
     {
         var r = await RunAsync(c, cli, ["--version"], QueryTimeout, "version", log, ct);
         if (r is null) return (null, NodeMissing(cli) ? "node_missing" : "unsupported_path");
@@ -285,43 +285,18 @@ public sealed partial class ClientConnector
     /// <summary>
     /// The capability probe (cached per path and version when conclusive). Help: not capable only when the help text was
     /// printed (exit 0) and misses a flag or subcommand the app passes; a help probe that fails or times out does not
-    /// block the CLI. Codex also needs (m6 §0, fail closed) a version of at least <see cref="CodexLockdown.CodexMinVersion"/>
-    /// and a <c>features list</c> that names the required features; a features probe that fails or times out makes the
-    /// CLI outdated (not cached, so the next status tries again).
+    /// block the CLI.
     /// </summary>
-    private async Task<Probe> CapableAsync(Client c, string cli, string version, DesktopLog log, CancellationToken ct)
+    private async Task<Probe> CapableAsync(Client c, string cli, string version, AppLog log, CancellationToken ct)
     {
         if (_capable.TryGetValue((cli, version), out var known)) return known;
-        var codex = c.Id == "codex";
-        if (codex && !CodexLockdown.VersionSupported(version))
-        {
-            log.Info($"shell: {c.Id} version too old or unreadable");
-            return _capable[(cli, version)] = new(false);
-        }
         var r = await RunAsync(c, cli, c.HelpArgs, QueryTimeout, "help", log, ct);
         var helpConclusive = r is { TimedOut: false, ExitCode: 0, LaunchError: null } && r.Stdout.Length > 0;
         if (helpConclusive && !HasCapabilities(c.Id, r!.Stdout)) return _capable[(cli, version)] = new(false);
-        if (!codex)
-        {
-            Probe probe = new(true);
-            if (helpConclusive) _capable[(cli, version)] = probe;
-            return probe;
-        }
-
-        var f = await RunAsync(c, cli, CodexFeaturesArgs, QueryTimeout, "features", log, ct);
-        if (f is not { TimedOut: false, ExitCode: 0, LaunchError: null }) return new(false);
-        if (CodexLockdown.ParseFeatures(f.Stdout) is not { } features)
-        {
-            log.Info($"shell: {c.Id} features list lacks a required feature");
-            return _capable[(cli, version)] = new(false);
-        }
-        Probe found = new(true, features);
-        if (helpConclusive) _capable[(cli, version)] = found;
-        return found;
+        Probe probe = new(true, ClaudeFlags: helpConclusive ? ProbedClaudeFlags(r!.Stdout) : []);
+        if (helpConclusive) _capable[(cli, version)] = probe;
+        return probe;
     }
-
-    /// <summary><c>codex features list</c> (m6 §0 probe).</summary>
-    private static readonly string[] CodexFeaturesArgs = ["features", "list"];
 
     /// <summary>True when <paramref name="help"/> lists every flag and the subcommand the app passes to that client.</summary>
     public static bool HasCapabilities(string clientId, string help)
@@ -329,6 +304,19 @@ public sealed partial class ClientConnector
         var c = Clients[clientId];
         return c.HelpTokens.All(t => help.Contains(t, StringComparison.Ordinal)) && c.HelpCommand.IsMatch(help);
     }
+
+    /// <summary>
+    /// The probed flags a Claude Code help text lists, in this order: the research flags (m9 §6.3) and --max-turns, which
+    /// chat passes only when listed (m9 §17.6).
+    /// </summary>
+    public static readonly string[] ClaudeResearchFlags = ["--safe-mode", "--setting-sources", "--max-turns"];
+
+    /// <summary>
+    /// Which of <see cref="ClaudeResearchFlags"/> <paramref name="help"/> lists as an option (the flag followed by a space,
+    /// a comma or the end of a line, so "--safe-mode-x" is not "--safe-mode"). Sent as provider.setClient claudeFlags.
+    /// </summary>
+    public static IReadOnlyList<string> ProbedClaudeFlags(string help) =>
+        [.. ClaudeResearchFlags.Where(f => Regex.IsMatch(help, @"(?m)(?:^|[\s,])" + Regex.Escape(f) + @"(?=[\s,=]|$)"))];
 
     // ---- argv (fixed; the only variable token is this install's bridge path) ----
 
@@ -345,7 +333,7 @@ public sealed partial class ClientConnector
 
     // ---- methods ----
 
-    private async Task<JsonObject> StatusAsync(Client c, DesktopLog log, CancellationToken ct, IBackend? backend)
+    private async Task<JsonObject> StatusAsync(Client c, AppLog log, CancellationToken ct, IBackend? backend)
     {
         var result = new JsonObject { ["installed"] = false, ["registered"] = "no", ["command"] = ManualCommand(c.Id) };
         var resolution = await ResolveAsync(c, identify: true, log, ct);
@@ -377,16 +365,17 @@ public sealed partial class ClientConnector
         if (!string.IsNullOrEmpty(version)) report["version"] = version;
         if (auth is not null) report["auth"] = auth;
         if (resolution.Outdated) report["compatible"] = false;
-        else if (resolution.CodexFeatures is { } features) report["codexFeatures"] = new JsonArray([.. features.Select(f => (JsonNode?)JsonValue.Create(f))]);
+        if (!resolution.Outdated && resolution.ClaudeFlags is { Count: > 0 } flags)
+            report["claudeFlags"] = new JsonArray([.. flags.Select(f => (JsonNode?)JsonValue.Create(f))]);
         await ReportClientAsync(c, report, backend, log, ct);
         return result;
     }
 
     /// <summary>
-    /// m5 §2: Claude <c>auth status</c> JSON loggedIn; Codex <c>login status</c> (see <see cref="ParseSignedIn"/>). Null:
+    /// m5 §2: Claude <c>auth status</c> JSON loggedIn (see <see cref="ParseSignedIn"/>). Null:
     /// the check failed for another reason. Auth (signed in only): subscription | api_key | other.
     /// </summary>
-    private async Task<(bool? SignedIn, string? Auth)> SignedInAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
+    private async Task<(bool? SignedIn, string? Auth)> SignedInAsync(Client c, string cli, AppLog log, CancellationToken ct)
     {
         var r = await RunAsync(c, cli, c.AuthArgs, QueryTimeout, "auth", log, ct);
         if (r is null) return (null, null);
@@ -398,37 +387,22 @@ public sealed partial class ClientConnector
     }
 
     /// <summary>
-    /// Claude: <c>auth status</c> JSON <c>loggedIn</c> (null when there is no JSON). Codex (it prints to stderr): exit 0
-    /// and a success line — "Logged in using ChatGPT", "Logged in using an API key - …", "Logged in using workload
-    /// identity", or (newer) "API key configured - …" → true; "Not logged in" → false; anything else (an error, a crash,
-    /// a launch failure) → null, so a broken check never reads as signed out.
+    /// Claude: <c>auth status</c> JSON <c>loggedIn</c>; null when there is no JSON, it timed out or could not start, so a
+    /// broken check never reads as signed out.
     /// </summary>
     public static bool? ParseSignedIn(string clientId, ProcessResult r)
     {
         if (r.TimedOut || r.LaunchError is not null) return null;
-        if (clientId == "codex")
-        {
-            var text = r.Stdout + "\n" + r.Stderr;
-            if (r.ExitCode == 0 && CodexSignedInPattern().IsMatch(text)) return true;
-            return NotLoggedInPattern().IsMatch(text) ? false : null;
-        }
         return ClaudeStatus(r)?["loggedIn"] is JsonValue v && v.TryGetValue<bool>(out var b) ? b : null;
     }
 
     /// <summary>
     /// How a signed-in CLI bills, from its status output: <c>subscription</c> (Claude <c>authMethod</c> claude.ai or an
-    /// OAuth token; Codex "using ChatGPT"), <c>api_key</c> (an API key), <c>other</c> (anything else, e.g. a cloud
-    /// provider or workload identity). Null when unknown. The key itself is never read out.
+    /// OAuth token), <c>api_key</c> (an API key), <c>other</c> (anything else, e.g. a cloud provider). Null when unknown.
+    /// The key itself is never read out.
     /// </summary>
     public static string? ParseAuth(string clientId, ProcessResult r)
     {
-        if (clientId == "codex")
-        {
-            var text = r.Stdout + "\n" + r.Stderr;
-            if (!CodexSignedInPattern().IsMatch(text)) return null;
-            if (text.Contains("ChatGPT", StringComparison.Ordinal)) return "subscription";
-            return text.Contains("API key", StringComparison.OrdinalIgnoreCase) ? "api_key" : "other";
-        }
         if (ClaudeStatus(r) is not { } status) return null;
         if (status["apiProvider"] is JsonValue p && p.TryGetValue<string>(out var provider) && provider != "firstParty") return "other";
         if (status["authMethod"] is not JsonValue m || !m.TryGetValue<string>(out var method)) return null;
@@ -450,7 +424,7 @@ public sealed partial class ClientConnector
     /// After every status the shell tells the host about the CLI (provider.setClient, shell-only) and keeps that report,
     /// so it can be sent again when the host restarts (<see cref="ResendReportsAsync"/>). Failures are logged and ignored.
     /// </summary>
-    private async Task ReportClientAsync(Client c, JsonObject fields, IBackend? backend, DesktopLog log, CancellationToken ct)
+    private async Task ReportClientAsync(Client c, JsonObject fields, IBackend? backend, AppLog log, CancellationToken ct)
     {
         var p = new JsonObject { ["kind"] = c.Kind };
         foreach (var (key, value) in fields)
@@ -459,7 +433,7 @@ public sealed partial class ClientConnector
         if (backend is not null) await SendReportAsync(c.Id, p, backend, log, ct);
     }
 
-    private static async Task SendReportAsync(string clientId, JsonObject p, IBackend backend, DesktopLog log, CancellationToken ct)
+    private static async Task SendReportAsync(string clientId, JsonObject p, IBackend backend, AppLog log, CancellationToken ct)
     {
         try
         {
@@ -476,7 +450,7 @@ public sealed partial class ClientConnector
     /// The host keeps setClient reports in memory only: after it restarts (the connection is ready again) the shell sends
     /// its last report for each client again. Waits for any status in progress so an older report never wins.
     /// </summary>
-    public async Task ResendReportsAsync(IBackend backend, DesktopLog log, CancellationToken ct)
+    public async Task ResendReportsAsync(IBackend backend, AppLog log, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
@@ -494,7 +468,7 @@ public sealed partial class ClientConnector
     }
 
     /// <summary>
-    /// <c>powershell.exe -NoProfile -NoExit -Command "&amp; '&lt;cli&gt;' auth login"</c> (Codex: <c>login</c>): the fixed sign-in
+    /// <c>powershell.exe -NoProfile -NoExit -Command "&amp; '&lt;cli&gt;' auth login"</c>: the fixed sign-in
     /// command in a visible window. Null when the path cannot be quoted safely.
     /// </summary>
     public InstallCommand? SignInCommandFor(string clientId, string cliPath)
@@ -505,7 +479,7 @@ public sealed partial class ClientConnector
     }
 
     /// <summary>shell.signInClient: opens the client's sign-in in a console (no confirm: nothing on the PC changes).</summary>
-    private async Task<JsonObject> SignInAsync(Client c, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> SignInAsync(Client c, AppLog log, CancellationToken ct)
     {
         if (_opener is null) return Status("failed", "unavailable");
         var cli = (await ResolveAsync(c, identify: false, log, ct)).Cli?.Path;
@@ -520,7 +494,7 @@ public sealed partial class ClientConnector
     }
 
 
-    private async Task<JsonObject> InstallAsync(Client c, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> InstallAsync(Client c, AppLog log, CancellationToken ct)
     {
         if (_installer is null) return Status("failed", "unavailable");
         if (_installer.IsRunning) return Status("failed", "already_running");
@@ -544,7 +518,7 @@ public sealed partial class ClientConnector
     }
 
     /// <summary>Opens the client in a terminal with the starter question (no confirm: nothing on the PC changes).</summary>
-    private async Task<JsonObject> OpenAsync(Client c, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> OpenAsync(Client c, AppLog log, CancellationToken ct)
     {
         if (_opener is null) return Status("failed", "unavailable");
         var cli = (await ResolveAsync(c, identify: false, log, ct)).Cli?.Path;
@@ -558,7 +532,7 @@ public sealed partial class ClientConnector
         return Status("opened");
     }
 
-    private async Task<JsonObject> RegisterAsync(Client c, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> RegisterAsync(Client c, AppLog log, CancellationToken ct)
     {
         if (!_fileExists(_bridgePath)) return Status("failed", "bridge_missing");
         var cli = (await ResolveAsync(c, identify: false, log, ct)).Cli?.Path;
@@ -592,7 +566,7 @@ public sealed partial class ClientConnector
             : Status("failed", "verify_failed");
     }
 
-    private async Task<JsonObject> UnregisterAsync(Client c, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> UnregisterAsync(Client c, AppLog log, CancellationToken ct)
     {
         var cli = (await ResolveAsync(c, identify: false, log, ct)).Cli?.Path;
         if (cli is null) return Status("not_installed");
@@ -614,7 +588,7 @@ public sealed partial class ClientConnector
 
     private ProcessCommand? Build(string cli, IReadOnlyList<string> args) => ProcessCommand.ForCli(cli, args, _systemRoot, _npm);
 
-    private async Task<ProcessResult?> RunAsync(Client c, string cli, IReadOnlyList<string> args, TimeSpan timeout, string what, DesktopLog log, CancellationToken ct)
+    private async Task<ProcessResult?> RunAsync(Client c, string cli, IReadOnlyList<string> args, TimeSpan timeout, string what, AppLog log, CancellationToken ct)
     {
         var command = Build(cli, args);
         if (command is null)
@@ -627,10 +601,10 @@ public sealed partial class ClientConnector
         return r;
     }
 
-    private async Task<Registration> GetRegistrationAsync(Client c, string cli, DesktopLog log, CancellationToken ct) =>
+    private async Task<Registration> GetRegistrationAsync(Client c, string cli, AppLog log, CancellationToken ct) =>
         (await GetRegistrationWithCommandAsync(c, cli, log, ct)).State;
 
-    private async Task<(Registration State, string? Command)> GetRegistrationWithCommandAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
+    private async Task<(Registration State, string? Command)> GetRegistrationWithCommandAsync(Client c, string cli, AppLog log, CancellationToken ct)
     {
         var r = await RunAsync(c, cli, GetArgs(), QueryTimeout, "get", log, ct);
         return r is null ? (Registration.Unknown, null) : (ParseGet(r, _bridgePath), RegisteredCommand(r));
@@ -642,7 +616,7 @@ public sealed partial class ClientConnector
     /// folder an upgrade removed) is the user's earlier approved registration of this app, so it is replaced with this
     /// install's bridge without asking again. Any other entry elsewhere stays Outdated (the user reconnects).
     /// </summary>
-    private async Task<Registration> RegistrationRepairedAsync(Client c, string cli, DesktopLog log, CancellationToken ct)
+    private async Task<Registration> RegistrationRepairedAsync(Client c, string cli, AppLog log, CancellationToken ct)
     {
         var (state, command) = await GetRegistrationWithCommandAsync(c, cli, log, ct);
         if (state != Registration.Outdated || !IsMovedBridge(command) || !_fileExists(_bridgePath)) return state;
@@ -677,7 +651,7 @@ public sealed partial class ClientConnector
     }
 
     /// <summary>
-    /// Reads the registered command from <c>claude mcp get</c> / <c>codex mcp get</c> output ("Command: …" or
+    /// Reads the registered command from <c>claude mcp get</c> output ("Command: …" or
     /// "command: …" line). Not found → No; same path as this install's bridge → Yes; another path → Outdated;
     /// anything unrecognised → Unknown.
     /// </summary>
@@ -734,13 +708,6 @@ public sealed partial class ClientConnector
     [GeneratedRegex(@"\(Claude Code\)")]
     private static partial Regex ClaudeIdentity();
 
-    /// <summary>Every success form of <c>codex login status</c> (case-sensitive, so "Not logged in" never matches).</summary>
-    [GeneratedRegex(@"\bLogged in\b|\bAPI key configured\b")]
-    private static partial Regex CodexSignedInPattern();
-
-    [GeneratedRegex(@"\bnot logged in\b|\blogged out\b", RegexOptions.IgnoreCase)]
-    private static partial Regex NotLoggedInPattern();
-
     [GeneratedRegex(@"blocked by (your )?(group policy|(system )?administrator)|disabled by your administrator|application control policy", RegexOptions.IgnoreCase)]
     private static partial Regex PolicyPattern();
 
@@ -750,11 +717,4 @@ public sealed partial class ClientConnector
     /// <summary>The <c>auth</c> subcommand line in <c>claude --help</c>.</summary>
     [GeneratedRegex(@"^[ \t]+auth\b", RegexOptions.Multiline)]
     private static partial Regex ClaudeAuthCommand();
-
-    /// <summary>The <c>resume</c> subcommand line in <c>codex exec --help</c>.</summary>
-    [GeneratedRegex(@"^[ \t]+resume\b", RegexOptions.Multiline)]
-    private static partial Regex CodexResumeCommand();
-
-    [GeneratedRegex(@"\bcodex-cli\b")]
-    private static partial Regex CodexIdentity();
 }

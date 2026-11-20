@@ -22,6 +22,8 @@ public sealed record BackendOptions
     /// <summary>Retry budget before the state detail reports "unavailable"; retries continue after it with a slower cadence.</summary>
     public TimeSpan ConnectBudget { get; init; } = TimeSpan.FromSeconds(10);
     public TimeSpan HelloTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>The data folder (crash markers); null writes none (tests).</summary>
+    public string? DataDir { get; init; }
     /// <summary>Wait before relaunching after the Nth failed launch in a row (last entry repeats). Default <see cref="BackendConnection.DefaultLaunchBackoff"/>; tests shorten it.</summary>
     public IReadOnlyList<TimeSpan>? LaunchBackoff { get; init; }
 }
@@ -30,13 +32,15 @@ public sealed record BackendOptions
 /// Owns the pipe connection to the per-user host: connect (launching the host if needed), verify the server image,
 /// session.hello, and reconnect after a drop. contracts/protocol-v1.md §1, §2, §7.
 /// </summary>
-public sealed class BackendConnection(BackendOptions options, DesktopLog log) : IBackend, IAsyncDisposable
+public sealed class BackendConnection(BackendOptions options, AppLog log) : IBackend, IAsyncDisposable
 {
     private readonly CancellationTokenSource _cts = new();
     private readonly Lock _stateLock = new();
     private volatile JsonRpcClient? _client;
     private Task? _loop;
     private Process? _hostProcess;
+    private bool _hostExitNoted;          // this launch's exit was logged
+    private DateTime _hostLaunchedAt;
     private BackendState _state = BackendState.Connecting;
     private JsonNode? _detail;
 
@@ -91,7 +95,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             var dropped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             client.Disconnected += cause =>
             {
-                log.Warn($"backend: disconnected{(cause is null ? "" : " (" + cause.GetType().Name + ")")}");
+                log.Warn($"backend: connection lost{(cause is null ? "" : " (" + cause.GetType().Name + ")")}", ErrorSites.BackendLost);
                 dropped.TrySetResult();
             };
             client.Notification += OnNotification;
@@ -146,26 +150,26 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            log.Warn("backend: session.hello timed out");
+            log.Warn("backend: session.hello timed out", ErrorSites.BackendHelloFailed);
             return (HelloOutcome.Failed, null);
         }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException or InvalidOperationException)
         {
-            log.Warn($"backend: session.hello failed ({ex.GetType().Name})");
+            log.Warn($"backend: session.hello failed ({ex.GetType().Name})", ErrorSites.BackendHelloFailed);
             return (HelloOutcome.Failed, null);
         }
 
         if (response["error"] is JsonObject error)
         {
             var code = error["code"] is JsonValue c && c.TryGetValue<int>(out var ci) ? ci : 0;
-            log.Warn($"backend: session.hello error {code}");
+            log.Warn($"backend: session.hello error {code}", ErrorSites.BackendHelloFailed);
             return code == -32010 ? (HelloOutcome.Incompatible, error["data"]?.DeepClone()) : (HelloOutcome.Failed, null);
         }
 
         var major = response["result"]?["protocol"]?["major"] is JsonValue m && m.TryGetValue<int>(out var mi) ? mi : -1;
         if (major != 1)
         {
-            log.Warn($"backend: server protocol major {major}, expected 1");
+            log.Warn($"backend: server protocol major {major}, expected 1", ErrorSites.BackendHelloFailed);
             return (HelloOutcome.Incompatible, new JsonObject
             {
                 ["supported"] = new JsonObject { ["major"] = 1, ["minor"] = 0 },
@@ -236,7 +240,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             var (client, failure) = await TryConnectOnceAsync(ct).ConfigureAwait(false);
             if (client is not null)
             {
-                log.Info($"backend: connected after {started.ElapsedMilliseconds} ms");
+                log.Info($"backend: connected after {started.ElapsedMilliseconds} ms{(_failedLaunches > 0 ? $" ({_failedLaunches} failed launches before)" : "")}");
                 _launchPending = false;
                 _failedLaunches = 0;
                 _nextLaunchAt = 0;
@@ -246,6 +250,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             if (failure == ConnectFailure.NotListening && options.LaunchHost
                 && (_hostProcess is null || HasExited(_hostProcess)) && !PipeExists(options.PipeName))
             {
+                if (_hostProcess is { } gone && HasExited(gone)) NoteHostExit(gone);
                 if (_launchPending && _hostProcess is { } exited)
                 {
                     _launchPending = false;
@@ -261,7 +266,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             if (overBudget && !reportedUnavailable)
             {
                 reportedUnavailable = true;
-                log.Warn($"backend: not available after {options.ConnectBudget.TotalSeconds:0} s ({failure}), still retrying");
+                log.Warn($"backend: not available after {options.ConnectBudget.TotalSeconds:0} s ({failure}), still retrying", ErrorSites.BackendUnavailable);
                 var current = Current.State;
                 SetState(current == BackendState.Ready ? BackendState.Reconnecting : current,
                     JsonValue.Create(startup ?? (failure == ConnectFailure.Untrusted ? "untrusted_host" : "unavailable")));
@@ -284,7 +289,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         if (exitCode == HostExitCodes.AlreadyServing) return previous; // another host has the pipe: just connect to it
         if (exitCode == HostExitCodes.NeedsUpdate)
         {
-            if (!_needsUpdate) log.Warn("backend: the host needs a newer Optimus (its data was written by a newer version); not relaunching");
+            if (!_needsUpdate) log.Warn("backend: the host needs a newer Optimus (its data was written by a newer version); not relaunching", ErrorSites.BackendNeedsUpdate);
             _needsUpdate = true;
             SetDetail(JsonValue.Create("needs_update"));
             return "needs_update";
@@ -304,7 +309,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         }
 
         log.Warn($"backend: host exited with code {exitCode?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "?"} before connecting "
-            + $"({_failedLaunches} in a row), next launch in {wait.TotalSeconds:0} s");
+            + $"({_failedLaunches} in a row), next launch in {wait.TotalSeconds:0} s", ErrorSites.BackendHostExitedEarly);
         if (_failedLaunches < CantStartAfter)
         {
             if (previous != "other_session") return previous;
@@ -335,13 +340,13 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         {
             // CurrentUserOnly: the pipe exists but is owned by someone else.
             await pipe.DisposeAsync().ConfigureAwait(false);
-            log.Error("backend: pipe owner is not the current user; refusing");
+            log.Error("backend: pipe owner is not the current user; refusing", ErrorSites.BackendUntrustedHost);
             return (null, ConnectFailure.Untrusted);
         }
         catch (IOException ex)
         {
             await pipe.DisposeAsync().ConfigureAwait(false);
-            log.Warn($"backend: connect failed ({ex.GetType().Name})");
+            log.Warn($"backend: connect failed ({ex.GetType().Name})", ErrorSites.BackendUnavailable);
             return (null, ConnectFailure.Error);
         }
         catch
@@ -369,7 +374,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         }
         catch (IOException ex)
         {
-            log.Error($"backend: cannot identify pipe server ({ex.Message})");
+            log.Error($"backend: cannot identify pipe server ({ex.GetType().Name})", ErrorSites.BackendUntrustedHost);
             return options.AllowAnyHost;
         }
 
@@ -381,7 +386,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             log.Warn($"backend: pipe server pid {pid} image {image ?? "<unknown>"} is not the expected host; allowed by --dev-allow-any-host");
             return true;
         }
-        log.Error($"backend: pipe server pid {pid} image {image ?? "<unknown>"} is not {expected}; refusing");
+        log.Error($"backend: pipe server pid {pid} is not the installed host; refusing", ErrorSites.BackendUntrustedHost);
         return false;
     }
 
@@ -390,7 +395,7 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
         var path = Path.GetFullPath(options.HostPath);
         if (!File.Exists(path))
         {
-            log.Error($"backend: host not found at {path}");
+            log.Error("backend: host executable not found", ErrorSites.BackendLaunchFailed);
             SetDetail(JsonValue.Create("host_missing"));
             return false;
         }
@@ -405,12 +410,14 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
             foreach (var a in options.HostArguments) psi.ArgumentList.Add(a);
             _hostProcess?.Dispose();
             _hostProcess = Process.Start(psi);
-            log.Info($"backend: launched host pid {_hostProcess?.Id}");
+            _hostExitNoted = false;
+            _hostLaunchedAt = DateTime.UtcNow;
+            log.Info($"backend: launched host pid {_hostProcess?.Id} dev-log={log.DevEnabled}");
             return _hostProcess is not null;
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
         {
-            log.Error($"backend: host launch failed ({ex.Message})");
+            log.Error($"backend: host launch failed ({ex.GetType().Name})", ErrorSites.BackendLaunchFailed);
             SetDetail(JsonValue.Create("host_launch_failed"));
             return false;
         }
@@ -431,6 +438,30 @@ public sealed class BackendConnection(BackendOptions options, DesktopLog log) : 
     private static bool HasExited(Process p)
     {
         try { return p.HasExited; } catch (InvalidOperationException) { return true; }
+    }
+
+    /// <summary>
+    /// The host we launched has ended: log its exit code once. An exit that is none of the host's own codes is a crash; when
+    /// the host did not leave its own crash marker for this run, write one for it (no exception here: only the exit code).
+    /// </summary>
+    private void NoteHostExit(Process p)
+    {
+        if (_hostExitNoted) return;
+        _hostExitNoted = true;
+        var code = ExitCode(p);
+        var text = code is null ? "?"
+            : code < 0 ? "0x" + code.Value.ToString("X8", System.Globalization.CultureInfo.InvariantCulture)
+            : code.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (code is 0 or HostExitCodes.AlreadyServing or HostExitCodes.OtherSession or HostExitCodes.NeedsUpdate or HostExitCodes.Usage)
+        {
+            log.Info($"lifecycle: host exited with code {text}");
+            return;
+        }
+        log.Warn($"lifecycle: host exited unexpectedly with code {text}", ErrorSites.HostExitedUnexpectedly);
+        if (options.DataDir is not { } dataDir) return;
+        var since = _hostLaunchedAt.AddSeconds(-1);
+        if (CrashMarker.ReadAll(dataDir).Any(c => c.Process == "host" && c.At.UtcDateTime >= since)) return;
+        CrashMarker.Write(dataDir, "host", "exit " + text, ErrorSites.HostExitedUnexpectedly);
     }
 
     private void SetDetail(JsonNode? detail)

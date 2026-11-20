@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using OptimizationTool.Engine.Actions;
+using OptimizationTool.Windows.Actions.Broker;
 using OptimizationTool.Windows.Actions.Firewall;
 
 namespace OptimizationTool.Windows.Tests.Actions.Firewall;
@@ -15,12 +16,13 @@ public sealed class FirewallHandlerTests
 
     private sealed class FakeElevation : IElevation
     {
-        public List<(string ActionId, ActionExecution Execution)> Calls { get; } = [];
-        public Task<ActionOutcome> RunAsync(string actionId, ActionExecution execution, CancellationToken ct)
+        public List<ElevatedRequest> Calls { get; } = [];
+        public Task<ElevatedResult> RunAsync(ElevatedRequest request, CancellationToken stop, CancellationToken ct)
         {
-            Calls.Add((actionId, execution));
-            return Task.FromResult(new ActionOutcome("verified", (JsonObject)execution.After.DeepClone(), "ok"));
+            Calls.Add(request);
+            return Task.FromResult(new ElevatedResult([.. request.Steps.Select(s => (s.N, new ActionOutcome("verified", (JsonObject)s.After.DeepClone(), "ok")))], "rcpt-0000000000000001", true));
         }
+        public ElevatedJournal? Journal(string planId) => null;
     }
 
     private static PublicFirewallSnapshot Off => new(false, false, true, false, false, false, true, false, false, null, [], []);
@@ -123,8 +125,8 @@ public sealed class FirewallHandlerTests
         var outcome = await h.ExecuteAsync(new ActionExecution("plan-1", "hash", plan.Target, plan.Before, plan.After, null), null, CancellationToken.None);
         Assert.Equal("verified", outcome.State);
         var call = Assert.Single(elevation.Calls);
-        Assert.Equal(FirewallPlan.ActionId, call.ActionId);
-        Assert.Equal("hash", call.Execution.PlanHash);
+        Assert.Equal(FirewallPlan.ActionId, Assert.Single(call.Steps).ActionId);
+        Assert.Equal("hash", call.PlanHash);
     }
 
     [Fact]
@@ -148,12 +150,12 @@ public sealed class FirewallHandlerTests
     [Fact]
     public void Content_hash_ignores_key_order_and_labels_but_not_values()
     {
-        var a = FirewallPlan.ContentHash(FirewallPlan.ActionId, "enable", FirewallPlan.Target(), FirewallPlan.State(false, false), FirewallPlan.State(true, true));
+        var a = BrokerContent.Hash(FirewallPlan.ActionId, "1.0.0", FirewallPlan.Target(), FirewallPlan.State(false, false), FirewallPlan.State(true, true), null);
         var reordered = JsonNode.Parse("""{"publicProfile":{"effectiveEnabled":false,"localEnabled":false}}""")!.AsObject();
-        var b = FirewallPlan.ContentHash(FirewallPlan.ActionId, "enable", new JsonObject { ["id"] = "public" }, reordered, FirewallPlan.State(true, true));
+        var b = BrokerContent.Hash(FirewallPlan.ActionId, "1.0.0", new JsonObject { ["id"] = "public" }, reordered, FirewallPlan.State(true, true), null);
         Assert.Equal(a, b);
-        Assert.NotEqual(a, FirewallPlan.ContentHash(FirewallPlan.ActionId, "disable", FirewallPlan.Target(), FirewallPlan.State(false, false), FirewallPlan.State(true, true)));
-        Assert.NotEqual(a, FirewallPlan.ContentHash(FirewallPlan.ActionId, "enable", FirewallPlan.Target(), FirewallPlan.State(false, true), FirewallPlan.State(true, true)));
+        Assert.NotEqual(a, BrokerContent.Hash(FirewallPlan.ActionId, "1.0.0", FirewallPlan.Target(), FirewallPlan.State(false, false), FirewallPlan.State(true, true), new JsonObject { ["mode"] = "disable" }));
+        Assert.NotEqual(a, BrokerContent.Hash(FirewallPlan.ActionId, "1.0.0", FirewallPlan.Target(), FirewallPlan.State(false, true), FirewallPlan.State(true, true), null));
     }
 
     // ---------------- inbound dependence (all values invented)
@@ -259,8 +261,9 @@ public sealed class FirewallHandlerLiveTests(Xunit.Abstractions.ITestOutputHelpe
 {
     private sealed class NoElevation : IElevation
     {
-        public Task<ActionOutcome> RunAsync(string actionId, ActionExecution execution, CancellationToken ct) =>
+        public Task<ElevatedResult> RunAsync(ElevatedRequest request, CancellationToken stop, CancellationToken ct) =>
             throw new InvalidOperationException("Live tests must never execute.");
+        public ElevatedJournal? Journal(string planId) => null;
     }
 
     [Fact]

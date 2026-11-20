@@ -4,12 +4,23 @@ using System.Text.RegularExpressions;
 
 namespace OptimizationTool.Desktop.Bridge;
 
-public enum PlanDecision { Decline, Approve, Expired }
+/// <summary>NotTicked: a plan flagged irreversible or data_loss was closed without the required tick (m9 §4.1), a decline.</summary>
+public enum PlanDecision { Decline, Approve, Expired, NotTicked }
+
+/// <summary>A script's approval (m9 §5.2): the decision and the dialog's two choices, which travel to action.challenge and action.approve.</summary>
+public sealed record ScriptDecision(PlanDecision Decision, bool RestorePoint, bool ShareOutput);
 
 /// <summary>The trusted approval surface (native dialog in production). Anything but an explicit Approve is a decline.</summary>
 public interface IPlanApprovalPrompt
 {
     Task<PlanDecision> ConfirmAsync(PlanView view, CancellationToken ct);
+
+    /// <summary>
+    /// A script plan: the dialog's decision with its choices. A prompt that knows no script view shares nothing and makes no
+    /// restore point (the conservative choices); the native dialog overrides this with the user's ticks.
+    /// </summary>
+    async Task<ScriptDecision> ConfirmScriptAsync(PlanView view, CancellationToken ct) =>
+        new(await ConfirmAsync(view, ct).ConfigureAwait(false), RestorePoint: false, ShareOutput: false);
 }
 
 /// <summary>
@@ -36,7 +47,7 @@ public sealed partial class PlanApproval
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
     }
 
-    public async Task<string> HandleAsync(JsonNode id, JsonObject? parameters, IBackend backend, DesktopLog log, CancellationToken ct)
+    public async Task<string> HandleAsync(JsonNode id, JsonObject? parameters, IBackend backend, AppLog log, CancellationToken ct)
     {
         if (parameters is null || parameters.Count != 1
             || parameters["planId"] is not JsonValue v || !v.TryGetValue<string>(out var planId) || !PlanIdPattern().IsMatch(planId))
@@ -76,7 +87,7 @@ public sealed partial class PlanApproval
         }
     }
 
-    private async Task<JsonObject> RunAsync(string planId, IBackend backend, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> RunAsync(string planId, IBackend backend, AppLog log, CancellationToken ct)
     {
         // 1. The plan as the host has it.
         var got = await backend.CallAsync("action.get", new JsonObject { ["planId"] = planId }, ct);
@@ -93,14 +104,24 @@ public sealed partial class PlanApproval
         if (view is null) return Status("error", "bad_plan");
         if (view.ExpiresAt <= _utcNow()) return Status("expired");
 
-        // 2. The user decides on exactly this plan.
-        var decision = await _prompt.ConfirmAsync(view, ct);
+        // 2. The user decides on exactly this plan. A script's dialog also gives its two choices (m9 §5.2), which only the
+        // shell sends: the renderer's shell.approvePlan carries the planId alone.
+        JsonObject? options = null;
+        PlanDecision decision;
+        if (view.IsScript)
+        {
+            var chosen = await _prompt.ConfirmScriptAsync(view, ct);
+            decision = chosen.Decision;
+            options = new JsonObject { ["restorePoint"] = chosen.RestorePoint && view.Script!.RestorePointAvailable, ["shareOutput"] = chosen.ShareOutput };
+        }
+        else decision = await _prompt.ConfirmAsync(view, ct);
         if (decision == PlanDecision.Expired || (decision == PlanDecision.Approve && view.ExpiresAt <= _utcNow()))
             return Status("expired");
         if (decision != PlanDecision.Approve)
         {
             var declined = await backend.CallAsync("action.decline", new JsonObject { ["planId"] = planId }, ct);
-            return declined["error"] is JsonObject declineError ? FromError(declineError) : Status("declined");
+            if (declined["error"] is JsonObject declineError) return FromError(declineError);
+            return decision == PlanDecision.NotTicked && view.NeedsTick ? Status("declined", "not_ticked") : Status("declined");
         }
 
         // 3. Re-read: the plan must still be the one the user saw.
@@ -115,12 +136,15 @@ public sealed partial class PlanApproval
             return s2 == "expired" ? Status("expired") : Status("unavailable", CodeOrNull(s2));
 
         // 4. One-time nonce, then approve the exact hash that was shown.
-        var challenge = await backend.CallAsync("action.challenge", new JsonObject { ["planId"] = planId }, ct);
+        var challengeParams = new JsonObject { ["planId"] = planId };
+        if (options is not null) challengeParams["options"] = options.DeepClone(); // bound into the nonce by the host
+        var challenge = await backend.CallAsync("action.challenge", challengeParams, ct);
         if (challenge["error"] is JsonObject challengeError) return FromError(challengeError);
         if (Str(challenge["result"]?["nonce"]) is not { Length: > 0 and <= 256 } nonce) return Status("error", "bad_challenge");
 
-        var approved = await backend.CallAsync("action.approve",
-            new JsonObject { ["planId"] = planId, ["planHash"] = planHash, ["nonce"] = nonce }, ct);
+        var approveParams = new JsonObject { ["planId"] = planId, ["planHash"] = planHash, ["nonce"] = nonce };
+        if (options is not null) approveParams["options"] = options.DeepClone();
+        var approved = await backend.CallAsync("action.approve", approveParams, ct);
         if (approved["error"] is JsonObject approveError) return FromError(approveError);
 
         var result = Status("approved");
@@ -136,6 +160,7 @@ public sealed partial class PlanApproval
         return code switch
         {
             -32002 => Status("stale"),
+            -32004 => Status("unavailable", "scan_active"), // m9 §5.7: a scan holds the lease; the plan keeps waiting
             -32013 when reason is "expired" or null => Status("expired"),
             -32013 => Status("unavailable", CodeOrNull(reason)),
             -32001 => Status("error", "not_found"),

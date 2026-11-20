@@ -64,7 +64,7 @@ internal sealed class OsCollector(CollectorOptions options) : SystemCollector<Os
             : Sys.Result(facts, "partial", "version key unreadable");
     }
 
-    private static string? EditionName(string? id) => id switch
+    internal static string? EditionName(string? id) => id switch
     {
         null => null,
         "Core" => "Home",

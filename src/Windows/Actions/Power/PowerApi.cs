@@ -24,6 +24,15 @@ internal interface IPowerApi
     bool PolicyForcesActiveScheme();
     /// <summary>An MDM power policy sets the active scheme (PolicyManager current device Power).</summary>
     bool ManagedActiveScheme();
+
+    // power.set_value (m9 §3.2): one value index of one listed setting in one scheme, AC or DC.
+
+    /// <summary>Win32 error code from PowerReadACValueIndex / PowerReadDCValueIndex (0 = success).</summary>
+    uint ReadValue(Guid scheme, Guid subgroup, Guid setting, bool ac, out uint value);
+    /// <summary>Win32 error code from PowerWriteACValueIndex / PowerWriteDCValueIndex (0 = success). The value applies once the scheme is re-activated.</summary>
+    uint WriteValue(Guid scheme, Guid subgroup, Guid setting, bool ac, uint value);
+    /// <summary>A group policy or MDM policy sets this power setting (or the active scheme), so a write would not stick.</summary>
+    bool SettingManaged(Guid setting);
 }
 
 internal static partial class PowerWriteNative
@@ -31,6 +40,19 @@ internal static partial class PowerWriteNative
     // The single write in this handler: current user, no elevation.
     [LibraryImport("powrprof.dll")]
     public static partial uint PowerSetActiveScheme(nint userRootPowerKey, in Guid schemeGuid);
+
+    // power.set_value's writes: one listed setting's AC or DC value index in the current user's scheme.
+    [LibraryImport("powrprof.dll")]
+    public static partial uint PowerWriteACValueIndex(nint rootPowerKey, in Guid schemeGuid, in Guid subGroupGuid, in Guid settingGuid, uint valueIndex);
+
+    [LibraryImport("powrprof.dll")]
+    public static partial uint PowerWriteDCValueIndex(nint rootPowerKey, in Guid schemeGuid, in Guid subGroupGuid, in Guid settingGuid, uint valueIndex);
+
+    [LibraryImport("powrprof.dll")]
+    public static partial uint PowerReadACValueIndex(nint rootPowerKey, in Guid schemeGuid, in Guid subGroupGuid, in Guid settingGuid, out uint valueIndex);
+
+    [LibraryImport("powrprof.dll")]
+    public static partial uint PowerReadDCValueIndex(nint rootPowerKey, in Guid schemeGuid, in Guid subGroupGuid, in Guid settingGuid, out uint valueIndex);
 }
 
 /// <summary>Real Windows implementation (reads reuse the M2 power collector's readers).</summary>
@@ -73,5 +95,26 @@ internal sealed class WindowsPowerApi : IPowerApi
         using var key = Registry.LocalMachine.OpenSubKey(MdmPowerKey);
         return key is not null && key.GetValueNames().Any(n => n.Contains("ActivePowerScheme", StringComparison.OrdinalIgnoreCase)
                                                              || n.Contains("SelectPowerScheme", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public uint ReadValue(Guid scheme, Guid subgroup, Guid setting, bool ac, out uint value) => ac
+        ? PowerWriteNative.PowerReadACValueIndex(0, scheme, subgroup, setting, out value)
+        : PowerWriteNative.PowerReadDCValueIndex(0, scheme, subgroup, setting, out value);
+
+    public uint WriteValue(Guid scheme, Guid subgroup, Guid setting, bool ac, uint value) => ac
+        ? PowerWriteNative.PowerWriteACValueIndex(0, scheme, subgroup, setting, value)
+        : PowerWriteNative.PowerWriteDCValueIndex(0, scheme, subgroup, setting, value);
+
+    /// <summary>
+    /// Group policy stores a power setting under PowerSettings\&lt;setting GUID&gt;; MDM power policies live under the
+    /// PolicyManager Power key (any value there counts: Optimus does not map each CSP name to a GUID, so it stays out).
+    /// </summary>
+    public bool SettingManaged(Guid setting)
+    {
+        if (PolicyForcesActiveScheme()) return true;
+        using (var gp = Registry.LocalMachine.OpenSubKey(PolicyKey + "\\" + setting.ToString("D")))
+            if (gp is not null) return true;
+        using var mdm = Registry.LocalMachine.OpenSubKey(MdmPowerKey);
+        return mdm is not null && mdm.GetValueNames().Length > 0;
     }
 }

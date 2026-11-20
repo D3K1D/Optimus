@@ -27,7 +27,7 @@ public class AgentSchemaTests
         await AgentSetup.SetKey(c);
 
         SchemaTests.AssertValid("provider-list", await c.Call("provider.list"));
-        SchemaTests.AssertValidRef("provider-list.schema.json#/$defs/provider", await c.Call("provider.connect", new JsonObject { ["kind"] = "codex_mcp" }));
+        SchemaTests.AssertValidRef("provider-list.schema.json#/$defs/provider", await c.Call("provider.connect", new JsonObject { ["kind"] = "claude_code_mcp" }));
         SchemaTests.AssertValidRef("provider-list.schema.json#/$defs/provider", await c.Call("provider.connect", new JsonObject { ["kind"] = "anthropic_api" }));
 
         var task = await AgentSetup.StartTask(c, reportId);
@@ -74,7 +74,7 @@ public class AgentSchemaTests
 
         // Pairing events on the user stream.
         var agent = await host.ConnectAsync(kind: "agent", minor: 2);
-        var pair = await agent.Call("agent.pair", new JsonObject { ["client"] = "codex" });
+        var pair = await agent.Call("agent.pair", new JsonObject { ["client"] = "claude_code" });
         await c.Call("agent.approvePairing", new JsonObject { ["pairingId"] = pair.Str("pairingId"), ["approve"] = true });
         await c.WaitForEvent(e => e.Str("type") == "agent.pairing" && e["payload"].Str("status") == "approved");
 

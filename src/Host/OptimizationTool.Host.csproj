@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OptimizationTool.Tests" />
+    <InternalsVisibleTo Include="OptimizationTool.Broker.Tests" />
   </ItemGroup>
 </Project>

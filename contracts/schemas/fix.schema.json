@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/fix.schema.json",
+  "title": "Fix for me",
+  "description": "m9 §17.3 / §17.6 \"Fix for me\": card.fix (derived on read from the card's current fix attempt, its plans and their operations, never stored), the card.fix event payload, and the params and results of agent.ask with intent fix, action.narrow and fix.dismiss. The root is card.fix or null (no fix on the card: it is in its normal state).",
+  "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cardFix" }],
+  "$defs": {
+    "state": {
+      "enum": ["working", "waiting_checks", "checking", "plan_ready", "running", "fixed", "done_reduced", "partly_fixed", "finished", "failed", "stopped", "unclear", "blocked", "needs_you", "nothing_to_fix", "no_fix"],
+      "description": "In this order of precedence: working (the attempt's turn runs) · waiting_checks / checking (administrator checks, §17.2; not produced before that phase) · plan_ready · running · fixed (verified, plan not reduced) · done_reduced (verified, steps left out or switched off) · partly_fixed (partial) · finished (a report-only tool or a script ended completed: never fixed) · failed (failed, not_run) · stopped (the run was stopped or ran out of time: stopped, timed_out) · unclear (indeterminate) · blocked (the attempt's last plan is ineligible; code says why) · needs_you / nothing_to_fix (the AI's opinion, below every host state) · no_fix (the turn ended with neither a plan nor an outcome, or failed). A declined, expired or cancelled last plan returns the card to normal (fix null)."
+    },
+    "opinion": {
+      "type": "object", "required": ["outcome", "by", "taskId", "at"], "additionalProperties": false,
+      "description": "note_card's outcome: the AI's attributed opinion on the attempt. Never the card's status; cleared when a new attempt starts.",
+      "properties": {
+        "outcome": { "enum": ["needs_user", "nothing_to_fix"] },
+        "by": { "type": "string", "maxLength": 40 },
+        "taskId": { "type": "string", "pattern": "^task-" },
+        "at": { "$ref": "scan.schema.json#/$defs/timestamp" }
+      }
+    },
+    "cardFix": {
+      "type": "object",
+      "required": ["state", "by", "attemptId", "taskId", "planId", "operationId", "requestId", "opinion", "code", "updatedAt"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "$ref": "#/$defs/state" },
+        "by": { "type": "string", "maxLength": 40, "description": "The AI working on it (Claude, ChatGPT)." },
+        "attemptId": { "type": "string", "pattern": "^fix-[0-9a-f]{16}$" },
+        "taskId": { "type": "string", "pattern": "^task-", "description": "The attempt's task: the conversation that works on it (a card's Stop stops this task, also after a reload)." },
+        "planId": { "type": ["string", "null"], "pattern": "^plan-" },
+        "operationId": { "type": ["string", "null"], "pattern": "^op-" },
+        "requestId": { "type": ["string", "null"], "description": "waiting_checks / checking: the administrator check request (§17.2)." },
+        "opinion": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/opinion" }] },
+        "code": { "type": ["string", "null"], "description": "blocked: the ineligible plan's code (e.g. admin_not_allowed, not_supported, too_large); null otherwise." },
+        "updatedAt": { "$ref": "scan.schema.json#/$defs/timestamp" }
+      }
+    },
+    "event": {
+      "type": "object", "required": ["cardId", "reportId", "fix"], "additionalProperties": false,
+      "description": "card.fix on stream user, whenever a card's fix changes (attempt started, ended, replaced or dismissed; opinion; a bound plan's status).",
+      "properties": {
+        "cardId": { "type": "string", "pattern": "^card-" },
+        "reportId": { "type": "string" },
+        "fix": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/cardFix" }] }
+      }
+    },
+    "askParams": {
+      "type": "object", "required": ["idempotencyKey", "taskId"], "additionalProperties": false,
+      "description": "agent.ask. intent fix needs cardId; text is optional with it (required otherwise); revise (with intent fix only) names the awaiting plan of this card's current attempt in this task (else -32602): after the ask's admission it is cancelled (revised) and a new attempt starts. Refusals: busy (-32013), cardId outside the task's report or scope (-32602), card_not_open (-32013), fix_active (-32013: something is waiting or running on the card).",
+      "properties": {
+        "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "taskId": { "type": "string", "pattern": "^task-" },
+        "text": { "type": "string", "maxLength": 2000 },
+        "cardId": { "type": "string", "pattern": "^card-" },
+        "intent": { "const": "fix" },
+        "revise": { "type": "string", "pattern": "^plan-" },
+        "context": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "required": ["intent"] }, "then": { "required": ["cardId"], "not": { "required": ["context"] } }, "else": { "required": ["text"], "properties": { "text": { "minLength": 1 } }, "not": { "required": ["revise"] } } }
+      ]
+    },
+    "narrowParams": {
+      "type": "object", "required": ["idempotencyKey", "planId", "keep"], "additionalProperties": false,
+      "description": "action.narrow (desktop only) → the new ActionPlan (narrowedFrom, removed, the parent's expiresAt). keep: strictly ascending step numbers of the parent, at least one, not all (-32602). The parent must be an awaiting fix plan, not an undo plan (-32013 not_narrowable, or its status); a kept step that no longer resolves the same → -32002 stale_plan (parent unchanged).",
+      "properties": {
+        "idempotencyKey": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "planId": { "type": "string", "pattern": "^plan-" },
+        "keep": { "type": "array", "minItems": 1, "maxItems": 6, "items": { "type": "integer", "minimum": 1, "maximum": 6 } }
+      }
+    },
+    "dismissParams": {
+      "type": "object", "required": ["cardId"], "additionalProperties": false,
+      "description": "fix.dismiss (desktop only): ends an attempt at an end state; something waiting, running or checking → -32013 {reason: fix_active}.",
+      "properties": { "cardId": { "type": "string", "pattern": "^card-" } }
+    },
+    "dismissResult": {
+      "type": "object", "required": ["cardId", "fix"], "additionalProperties": false,
+      "properties": { "cardId": { "type": "string", "pattern": "^card-" }, "fix": { "type": "null" } }
+    }
+  }
+}

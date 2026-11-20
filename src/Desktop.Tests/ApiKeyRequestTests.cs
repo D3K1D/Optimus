@@ -9,8 +9,9 @@ public sealed class ApiKeyRequestTests : IDisposable
     private const string Doc = "https://app.optimizationtool.invalid/index.html";
     private const string Key = "sk-test-SECRET-7f3a9c1e5b2d4086";
 
-    private readonly string _logPath = Path.Combine(Path.GetTempPath(), "ot-desktop-test-" + Guid.NewGuid().ToString("N") + ".log");
-    private readonly DesktopLog _log;
+    private readonly string _logDir = Path.Combine(Path.GetTempPath(), "ot-desktop-test-" + Guid.NewGuid().ToString("N"));
+    private string LogPath => AppLog.PathFor(_logDir, "desktop");
+    private readonly AppLog _log;
     private readonly FakePrompt _prompt = new();
     private readonly RecordingBackend _backend = new();
     private long _now = 1_000_000;
@@ -19,14 +20,14 @@ public sealed class ApiKeyRequestTests : IDisposable
 
     public ApiKeyRequestTests()
     {
-        _log = new DesktopLog(_logPath);
+        _log = AppLog.Open("desktop", _logDir, devLog: false, makeCurrent: false);
         _dispatcher = new BridgeDispatcher(new BridgeRouter(), _backend, _log,
             new SettingsLauncher(_ => { }), new ApiKeyRequest(_prompt, () => _now));
     }
 
     public void Dispose()
     {
-        try { File.Delete(_logPath); } catch (IOException) { }
+        try { Directory.Delete(_logDir, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
     private sealed class FakePrompt : IApiKeyPrompt
@@ -72,7 +73,7 @@ public sealed class ApiKeyRequestTests : IDisposable
     private void AssertKeyNotLeaked()
     {
         Assert.All(_posted, p => Assert.DoesNotContain(Key, p, StringComparison.Ordinal));
-        var log = File.Exists(_logPath) ? File.ReadAllText(_logPath) : "";
+        var log = File.Exists(LogPath) ? File.ReadAllText(LogPath) : "";
         Assert.DoesNotContain(Key, log, StringComparison.Ordinal);
         Assert.DoesNotContain("SECRET", log, StringComparison.Ordinal);
     }
@@ -96,7 +97,7 @@ public sealed class ApiKeyRequestTests : IDisposable
         Assert.Equal(Key, sent["apiKey"]!.GetValue<string>());
         Assert.True(sent["remember"]!.GetValue<bool>());
 
-        Assert.Contains("provider.setKey", File.ReadAllText(_logPath));
+        Assert.Contains("provider.setKey", File.ReadAllText(LogPath));
         AssertKeyNotLeaked();
     }
 
@@ -220,7 +221,7 @@ public sealed class ApiKeyRequestTests : IDisposable
             $$$"""{"type":"rpc","id":3,"method":"provider.setKey","params":{"kind":"anthropic_api","apiKey":"{{{Key}}}","remember":true}}""", Doc, true, default))!)!;
         Assert.Equal(-32012, reply["error"]!["code"]!.GetValue<int>());
         Assert.Empty(_backend.Calls);
-        Assert.DoesNotContain(Key, File.Exists(_logPath) ? File.ReadAllText(_logPath) : "");
+        Assert.DoesNotContain(Key, File.Exists(LogPath) ? File.ReadAllText(LogPath) : "");
     }
 
     [Fact]

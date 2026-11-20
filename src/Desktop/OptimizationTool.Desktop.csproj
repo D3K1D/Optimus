@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OptimizationTool.Desktop.Tests" />
+    <Using Include="OptimizationTool.Transport.Logging" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -30,6 +31,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4314.35" PrivateAssets="all" />
     <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
+    <!-- "Report a problem": ProblemReport and the identity/never-store filters (docs/error-logging.md §2). -->
+    <ProjectReference Include="..\Engine\OptimizationTool.Engine.csproj" />
     <!-- Build-order only: the companion exes are copied next to OptimizationTool.exe by _OtCopyCompanions below.
          Conditional so this project builds before they exist. -p:OtSkipHost / OtSkipMcp / OtSkipBroker / OtSkipBench=true opt out.
          The broker (requireAdministrator manifest) is only copied, never run by the build. -->

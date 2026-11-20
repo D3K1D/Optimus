@@ -28,7 +28,7 @@ test('followup.get carries up to two upcoming cards; any of the three can be act
   fu = await be.call('followup.respond', { idempotencyKey: key(), reportId, expectedRevision: fu.revision, scope: 'card', cardId: third.id, option: 'ignore' });
   assert.ok(![fu.card.id, ...fu.upcoming.map((c) => c.id)].includes(third.id));
   assert.equal(fu.upcoming.length, 2);          // the next queued card moved up
-  assert.equal(fu.pendingCount, 8);
+  assert.equal(fu.pendingCount, 15);
   const second = fu.upcoming[0];
   fu = await be.call('followup.respond', { idempotencyKey: key(), reportId, expectedRevision: fu.revision, scope: 'card', cardId: second.id, option: 'later' });
   assert.ok(!fu.upcoming.slice(0, 1).some((c) => c.id === second.id));
@@ -62,5 +62,5 @@ test('welcome back data: report.list newest first, pending count from followup.g
   const list = await be2.call('report.list', { limit: 1 });
   assert.equal(list.reports[0].reportId, reportId);
   assert.ok(list.reports[0].generatedAt);
-  assert.equal((await be2.call('followup.get', { reportId })).pendingCount, 9);
+  assert.equal((await be2.call('followup.get', { reportId })).pendingCount, 16);
 });

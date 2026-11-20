@@ -225,10 +225,6 @@ public class BenchUnitTests
         Assert.Equal("action_active", action.ErrorData!["reason"]!.GetValue<string>());
         Assert.Equal("op-1", action.ErrorData!["operationId"]!.GetValue<string>());
         lease.Release(WorkLease.Action, "op-1");
-
-        Assert.True(WorkLease.AffectsPerformance("power.select_scheme"));
-        Assert.True(WorkLease.AffectsPerformance("defender.quick_scan"));
-        Assert.False(WorkLease.AffectsPerformance("firewall.enable_public"));
     }
 
     [Fact]

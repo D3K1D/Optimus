@@ -1,5 +1,5 @@
 # Builds the desktop app and copies it to a stable per-user folder, so the app you run and the MCP bridge
-# Claude Code / Codex launch never lock the repo's build output. Re-run after pulling changes.
+# Claude Code launches never lock the repo's build output. Re-run after pulling changes.
 #   powershell -ExecutionPolicy Bypass -File tools\install-dev.ps1 [-Configuration Release] [-Target <dir>]
 param(
     [string]$Configuration = "Release",
@@ -22,7 +22,7 @@ $running = Get-Process OptimizationTool, OptimizationTool.Host, OptimizationTool
     Where-Object { $_.Path -and $_.Path.StartsWith($Target, [StringComparison]::OrdinalIgnoreCase) }
 if ($running) {
     $list = ($running | ForEach-Object { "$($_.Name) ($($_.Id))" }) -join ", "
-    throw "Close these first (Claude Code / Codex sessions run the bridge): $list"
+    throw "Close these first (Claude Code sessions run the bridge): $list"
 }
 
 New-Item -ItemType Directory -Force $Target | Out-Null
@@ -33,4 +33,3 @@ $mcp = Join-Path $Target "OptimizationTool.Mcp.exe"
 Write-Host "Installed to $Target"
 Write-Host "Run the app:    `"$(Join-Path $Target 'OptimizationTool.exe')`""
 Write-Host "Claude Code:    claude mcp remove optimization-tool --scope user; claude mcp add --scope user optimization-tool -- `"$mcp`""
-Write-Host "Codex:          codex mcp add optimization-tool -- `"$mcp`""

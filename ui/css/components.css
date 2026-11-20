@@ -67,7 +67,7 @@
 
 /* Provider option: selection is a ring and a filled check, not a press */
 .ot-provider {
-  display: grid; grid-template-columns: 44px 1fr 22px; align-items: center; gap: 14px; width: 100%; min-height: 76px;
+  display: grid; grid-template-columns: 44px 1fr 22px; align-items: start; gap: 14px; width: 100%;
   padding: var(--space-4); text-align: left; cursor: pointer;
   background: var(--surface); border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-neu-sm);
   transition: box-shadow .2s cubic-bezier(.2,.8,.2,1);
@@ -174,17 +174,6 @@
 @keyframes ot-gear-ccw { to { transform: rotate(-720deg); } }
 
 /* Permission grant */
-.ot-grant { padding: var(--space-6); display: flex; flex-direction: column; gap: var(--space-5); }
-.ot-grant.is-compact { padding: var(--space-5); gap: var(--space-4); }
-.ot-grant-head { display: flex; flex-direction: column; gap: 4px; }
-.ot-grant-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-6); }
-.ot-grant.is-compact .ot-grant-cols { grid-template-columns: 1fr; gap: var(--space-4); }
-.ot-grant-cols section { display: flex; flex-direction: column; gap: var(--space-2); }
-.ot-grant-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding: 10px 0; border-top: 1px solid var(--grid-major); }
-.ot-grant-text { display: flex; flex-direction: column; gap: 2px; }
-.ot-grant-lock { display: inline-flex; align-items: center; gap: 6px; }
-.ot-grant-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
-.ot-grant-foot > span { max-width: 420px; }
 .ot-grant-actions { display: flex; gap: var(--space-3); }
 
 /* Agent activity */
@@ -218,7 +207,7 @@
 
 /* Approval */
 .ot-approval { display: flex; flex-direction: column; gap: var(--space-3); box-shadow: var(--shadow-neu), 0 0 0 2px var(--exposure); }
-.ot-approval-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.ot-approval-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; row-gap: 6px; }
 .ot-diff { display: flex; flex-direction: column; gap: var(--space-2); margin: var(--space-2) 0; padding: var(--space-4); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); }
 .ot-diff-row { display: grid; grid-template-columns: 96px 1fr 16px 1fr; align-items: center; gap: var(--space-3); }
 .ot-diff-before { color: var(--ink-muted); text-decoration: line-through; text-decoration-color: var(--ink-faint); }
@@ -282,23 +271,13 @@
 .ot-login-panel > .ot-brand { margin-bottom: var(--space-2); }
 .ot-login-back { margin-right: auto; }
 .ot-provider-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-4); margin-top: var(--space-2); }
-/* An odd tile out (five tiles with ChatGPT) spans the row instead of leaving a hole. */
+/* An odd tile out (three tiles without ChatGPT) spans the row instead of leaving a hole. */
 .ot-provider-grid > .ot-provider:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .ot-detail { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-lg); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
 .ot-detail-row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap; }
-.ot-install-row { justify-content: flex-start; gap: var(--space-2); }
 .ot-connect-steps { list-style: none; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .ot-connect-steps li { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: var(--space-3); }
 .ot-connect-num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--ink); }
-/* Claude Code / Codex setup: one row per step; only the current step is bright and shows its extras. */
-.ot-connect-steps li.ot-cstep { grid-template-columns: 28px minmax(0, 1fr); align-items: start; }
-.ot-cstep:not(.is-now):not(.is-done) { opacity: .5; }
-.ot-cs-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding-top: 4px; }
-.ot-cs-title { font-weight: 600; font-size: 14px; color: var(--ink); }
-.ot-cs-sub { font-weight: 400; }
-.ot-frost .ot-cstep.is-done .ot-connect-num, .ot-cstep.is-done .ot-connect-num { background: var(--accent); color: var(--on-accent); box-shadow: none; }
-.ot-frost .ot-cstep.is-now .ot-connect-num, .ot-cstep.is-now .ot-connect-num { box-shadow: 0 0 0 2px var(--accent); }
-.ot-cs-body > .ot-copy, .ot-cs-body > .ot-pair { margin-top: var(--space-1); }
 .ot-connected-line { display: flex; align-items: center; gap: var(--space-2); font-weight: 600; }
 .ot-connected-line .ot-icon { color: var(--accent); }
 .ot-shares { display: flex; gap: var(--space-3); align-items: flex-start; padding-top: var(--space-2); color: var(--ink); }
@@ -498,7 +477,6 @@
 .ot-why:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .ot-why-body { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
 .ot-why-row { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-.ot-guide { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; }
 .ot-insight-preview { display: flex; flex-direction: column; gap: var(--space-3); }
 .ot-receipt { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--glass-fill); border: 1px solid var(--glass-stroke); }
 .ot-receipt .ot-btn { margin-left: auto; }
@@ -520,3 +498,388 @@
 /* Completion rows */
 .ot-change-end { display: inline-flex; align-items: center; gap: var(--space-2); }
 .ot-change-row.is-ignored .text-callout, .ot-change-row.is-declined .text-callout { color: var(--ink-muted); }
+
+/* ---------- AI permissions (M9) ---------- */
+.ot-perm-panel { max-width: 780px; }
+.ot-perm-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-5); }
+.ot-perm-group { display: flex; flex-direction: column; min-width: 0; }
+.ot-perm-group > h2 { margin: 0 0 var(--space-2); }
+.ot-perm-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 56px; padding: 8px 0; border-top: 1px solid var(--frost-stroke); }
+.ot-perm-icon { display: grid; place-items: center; color: var(--ink-muted); }
+.ot-perm-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ot-perm-title { font-weight: 600; }
+.ot-perm-row.is-off .ot-perm-title { color: var(--ink-muted); }
+.ot-perm-row .ot-toggle input:focus-visible + .ot-toggle-track { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-perm-fixed { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: var(--ink-muted); }
+.ot-perm-fixed.is-always { color: var(--ink); }
+.ot-perm-note { display: flex; align-items: center; gap: 8px; margin: 0 0 var(--space-2); padding: 8px 12px; border-radius: var(--radius-sm); background: var(--frost-tile, var(--surface)); color: var(--ink); }
+.ot-perm-panel.is-compact { width: 100%; max-width: 760px; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.ot-perm-panel.is-compact .ot-perm-row { min-height: 48px; padding: 6px 0; border-top-color: var(--grid-major); }
+.ot-perm-chead { display: flex; align-items: center; gap: 10px; }
+.ot-perm-chead .ot-icon { flex: none; color: var(--ink-muted); }
+@media (max-width: 720px) { .ot-perm-cols { grid-template-columns: 1fr; gap: var(--space-4); } }
+/* Chat: one summary line under the ask box. */
+.ot-perm-sum { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--ink-muted); }
+.ot-perm-sum .ot-icon { flex: none; }
+.ot-perm-change { min-height: 32px; padding: 0 6px; margin: -6px 0; border: 0; border-radius: var(--radius-sm); background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.ot-perm-change:hover { background: var(--tint-hover); }
+.ot-perm-change:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---------- AI research label ---------- */
+.ot-finding-tags, .ot-insight-tags { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.ot-research-tag { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: var(--radius-pill); border: 1px solid currentColor; background: transparent; font-weight: 500; line-height: 1.3; text-align: left; }
+.ot-research-tag.is-safe { color: var(--verified); }
+.ot-research-tag.is-look { color: var(--exposure); background: color-mix(in srgb, var(--exposure) 10%, transparent); }
+.ot-research-tag.is-running { color: var(--ink-muted); border-style: dashed; }
+.ot-research-tag > span { color: var(--ink); }
+.ot-research-tag.is-running > span { color: var(--ink-muted); }
+.ot-research-tag.is-button { min-height: 32px; font: inherit; font-size: 12px; cursor: pointer; }
+.ot-research-tag.is-button:hover { background: var(--tint-hover); }
+.ot-research-tag.is-button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-research-chev { transform: rotate(90deg); transition: transform .16s ease; color: var(--ink-muted); }
+.ot-research-tag.is-open .ot-research-chev { transform: rotate(-90deg); }
+.ot-research { display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); border-left: 3px solid var(--verified); }
+.ot-research.is-look { border-left-color: var(--exposure); }
+.ot-research p { margin: 0; }
+.ot-research-unsigned { display: flex; align-items: flex-start; gap: 8px; }
+.ot-research-unsigned .ot-icon { flex: none; margin-top: 2px; color: var(--exposure); }
+.ot-research-closing { font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .ot-research-chev { transition: none; } }
+/* Toolbar status while research runs. */
+.ot-tb-status { display: inline-flex; align-items: center; gap: 8px; margin-top: var(--space-2); padding: 4px 12px; border-radius: var(--radius-pill); color: var(--ink-muted); background: var(--surface); box-shadow: var(--shadow-neu-xs); }
+
+/* ---------- Multi-step approval (M9) ---------- */
+.ot-approval.is-applying { box-shadow: var(--shadow-neu), 0 0 0 2px var(--accent); }
+.ot-approval.is-verified { box-shadow: var(--shadow-neu), 0 0 0 2px var(--verified); }
+.ot-approval.is-partial { box-shadow: var(--shadow-neu), 0 0 0 2px var(--exposure); }
+.ot-approval.is-failed { box-shadow: var(--shadow-neu), 0 0 0 2px var(--threat); }
+.ot-approval h3 { margin: 0; }
+.ot-badge-run { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ot-plan-quote { margin: 0; padding: 2px 0 2px var(--space-3); border-left: 3px solid var(--control-stroke); color: var(--ink); font-style: italic; }
+.ot-plan-from { font-style: normal; font-weight: 600; }
+.ot-plan { list-style: none; margin: 0; padding: var(--space-1) var(--space-4); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); }
+.ot-plan-step { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding: 12px 0; }
+.ot-plan-step + .ot-plan-step { border-top: 1px solid var(--grid-major); }
+.ot-plan-num { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); color: var(--ink-muted); box-shadow: var(--shadow-neu-xs); }
+.ot-plan-step.is-done .ot-plan-num { background: var(--verified); color: var(--ground); box-shadow: none; }
+.ot-plan-step.is-running .ot-plan-num { color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.ot-plan-step.is-failed .ot-plan-num { background: var(--threat); color: var(--ground); box-shadow: none; }
+.ot-plan-step.is-queued .ot-plan-title, .ot-plan-step.is-skipped .ot-plan-title, .ot-plan-step.is-undone .ot-plan-title { color: var(--ink-muted); }
+.ot-plan-step.is-undone .ot-plan-title { text-decoration: line-through; text-decoration-color: var(--ink-faint); }
+.ot-plan-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ot-plan-top { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px var(--space-3); }
+.ot-plan-title { font-weight: 600; }
+.ot-plan-state { color: var(--ink-muted); }
+.ot-plan-state.is-done { color: var(--verified); }
+.ot-plan-state.is-running { color: var(--accent); }
+.ot-plan-state.is-failed { color: var(--threat); }
+.ot-plan-does, .ot-plan-why { margin: 0; }
+.ot-plan-rows { display: flex; flex-direction: column; gap: 2px; }
+.ot-plan-row { display: grid; grid-template-columns: minmax(0, 7rem) minmax(0, max-content) 14px minmax(0, 1fr); align-items: center; gap: 8px; }
+.ot-plan-row > span { overflow-wrap: anywhere; }
+.ot-plan-badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.ot-plan-tradeoff { margin: 0; }
+.ot-plan-tradeoff ul { margin: 2px 0 0; padding-left: 1.2em; }
+.ot-plan-tradeoff li { margin: 0; }
+
+/* ---------- 0.9.0 round (design v70) ---------- */
+.ot-connect-steps.is-one { margin: 0; }
+.ot-perm-note-layer { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: var(--space-4); background: color-mix(in srgb, var(--ground) 35%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.ot-login .ot-perm-note-layer { position: absolute; }
+.ot-perm-notecard { width: min(100%, 400px); padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.ot-perm-notecard p { margin: 0; }
+.ot-activity.is-finished { gap: var(--space-4); }
+.ot-activity-answer { display: flex; flex-direction: column; gap: var(--space-2); }
+.ot-activity-answer p { margin: 0; }
+.ot-answer-from { display: inline-flex; align-items: center; gap: 6px; }
+.ot-steps-toggle { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 12px; border: 1px solid var(--control-stroke); border-radius: var(--radius-md); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.ot-steps-toggle > span:first-of-type { margin-right: auto; font-weight: 600; }
+.ot-steps-toggle:hover { background: var(--tint-hover); }
+.ot-steps-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-steps-chev { transform: rotate(90deg); transition: transform .16s ease; color: var(--ink-muted); }
+.ot-steps-toggle[aria-expanded="true"] .ot-steps-chev { transform: rotate(-90deg); }
+.ot-activity.is-embedded { background: none; box-shadow: none; border: 0; padding: 0; -webkit-backdrop-filter: none; backdrop-filter: none; }
+@media (prefers-reduced-motion: reduce) { .ot-steps-chev { transition: none; } }
+.ot-step-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 22px; padding: 1px 8px; border-radius: var(--radius-pill); border: 1px solid var(--control-stroke); color: var(--ink-muted); white-space: nowrap; }
+.ot-step-badge.is-risk { border-color: currentColor; color: var(--threat); font-weight: 600; }
+.ot-plan-end { display: flex; align-items: center; justify-content: flex-end; }
+.ot-plan-fail { color: var(--threat); margin: 0; }
+.ot-plan-warn { display: flex; align-items: flex-start; gap: var(--space-3); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--threat-tint); color: var(--threat); }
+.ot-plan-warn.is-result { background: var(--exposure-tint); color: var(--exposure); }
+.ot-plan-warn .ot-icon { flex: none; margin-top: 2px; }
+.ot-plan-warn .text-callout { color: var(--ink); }
+.ot-plan-warn strong { color: var(--threat); }
+.ot-plan-warn.is-result strong { color: var(--exposure); }
+.ot-plan-warn-body { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.ot-plan-tick { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; font-weight: 600; }
+.ot-plan-tick input { width: 20px; height: 20px; margin: 0; flex: none; accent-color: var(--threat); cursor: pointer; }
+.ot-plan-tick input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-plan-line { display: flex; align-items: center; gap: 8px; color: var(--ink-muted); }
+.ot-plan-count { margin-right: auto; align-self: center; }
+.ot-approval-actions { flex-wrap: wrap; align-items: center; }
+.ot-grant-actions { flex-wrap: wrap; justify-content: flex-end; max-width: 100%; }
+@media (max-width: 480px) {
+  .ot-plan { padding: var(--space-1) var(--space-3); }
+  .ot-plan-step { grid-template-columns: 26px minmax(0, 1fr); }
+  .ot-plan-end { grid-column: 2; justify-content: flex-start; }
+  .ot-plan-row { grid-template-columns: minmax(0, 1fr) 14px minmax(0, 1fr); row-gap: 0; }
+  .ot-plan-row > :first-child { grid-column: 1 / -1; }
+  .ot-diff-row { grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr); row-gap: 2px; }
+  .ot-diff-row > :first-child { grid-column: 1 / -1; }
+  .ot-diff-row > .text-mono { overflow-wrap: anywhere; }
+}
+.ot-step-badge { white-space: normal; max-width: 100%; }
+.ot-research .ot-source .text-mono-sm { overflow-wrap: anywhere; min-width: 0; }
+.ot-plan-body { overflow-wrap: anywhere; }
+.ot-perm-hint { display: flex; align-items: center; gap: 8px; margin: 0; }
+.ot-approval.is-stopped { box-shadow: var(--shadow-neu), 0 0 0 1.5px var(--control-stroke); }
+button.ot-source { width: 100%; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
+.ot-connect-steps li.is-warn .ot-connect-num, .ot-frost .ot-connect-steps li.is-warn .ot-connect-num { color: var(--ink); box-shadow: 0 0 0 2px var(--exposure); }
+.ot-connect-steps li.is-done .ot-connect-num, .ot-frost .ot-connect-steps li.is-done .ot-connect-num { background: var(--action); color: var(--on-action); box-shadow: none; }
+
+/* ---------- AI check-up card ---------- */
+.ot-research-tag.is-checkup { color: var(--accent); }
+.ot-checkup-title { display: flex; flex-direction: column; gap: 4px; }
+.ot-checkup-kind { align-self: flex-start; padding: 1px 8px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--ink); font-weight: 600; letter-spacing: .02em; }
+.ot-checkup-fixed { margin: 0; }
+.ot-rrow-title { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.ot-rrow-tag { min-height: 20px; padding: 0 8px; font-size: 11px; }
+
+/* ---------- M9 audit additions ---------- */
+.ot-plan-receipt { margin: 0; color: var(--ink); }
+.ot-plan-row.is-name { grid-template-columns: minmax(0, 7rem) minmax(0, 1fr); }
+.ot-plan-step.is-unclear .ot-plan-num { color: var(--exposure); box-shadow: 0 0 0 2px var(--exposure); font-weight: 700; }
+.ot-plan-step.is-blocked .ot-plan-num { color: var(--ink-muted); box-shadow: 0 0 0 1.5px var(--control-stroke); }
+.ot-plan-state.is-unclear { color: var(--exposure); }
+.ot-plan-state.is-blocked { color: var(--ink-muted); }
+.ot-plan-warn.is-neutral { background: var(--surface); color: var(--ink-muted); box-shadow: inset 0 0 0 1px var(--control-stroke); }
+.ot-plan-warn.is-neutral strong { color: var(--ink); }
+.ot-approval.is-cantrun, .ot-approval.is-expired, .ot-approval.is-stopped { box-shadow: var(--shadow-neu), 0 0 0 1.5px var(--control-stroke); }
+.ot-approval.is-expired h3 { color: var(--ink-muted); }
+.ot-approval.is-notstarted { box-shadow: var(--shadow-neu), 0 0 0 1.5px var(--control-stroke); }
+.ot-perm-titlerow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.ot-perm-titlerow h1 { margin: 0; }
+.ot-perm-updated { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: var(--radius-pill); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); font-weight: 600; }
+.ot-perm-sum { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+.ot-perm-sum .ot-icon { margin-top: 2px; }
+.ot-perm-sum .ot-perm-change { margin: -7px 0; }
+.ot-connect-note { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin-top: var(--space-2); }
+.ot-connect-cmd { flex-basis: 100%; display: block; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--frost-btn, var(--surface)); color: var(--ink); overflow-wrap: anywhere; user-select: all; }
+.ot-wrap-btn { white-space: normal; height: auto; min-height: 36px; text-align: left; }
+.ot-login-actions { flex-wrap: wrap; }
+@media (max-width: 480px) {
+  .ot-connect-steps li { grid-template-columns: 28px minmax(0, 1fr); row-gap: 6px; }
+  .ot-connect-steps li > :nth-child(3) { grid-column: 2; justify-self: start; }
+  .ot-connect-steps li > span:empty { display: none; }
+}
+.ot-pick { display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-pick-q { font-weight: 600; }
+.ot-pick-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ot-pick-chips .ot-check { width: auto; }
+.ot-step-action { align-self: flex-start; margin-top: 4px; }
+.ot-tb-status.is-quiet { box-shadow: none; background: transparent; border: 1px dashed var(--control-stroke); }
+.ot-guide-answer { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); max-width: 680px; width: 100%; }
+.ot-guide-answer p { margin: 0; }
+.ot-guide-head { display: inline-flex; align-items: center; gap: 6px; }
+.ot-guide-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2) var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--grid-major); }
+.ot-guide-btns { display: inline-flex; gap: var(--space-2); flex-wrap: wrap; }
+.ot-setup-demo { max-width: 520px; gap: var(--space-2); }
+/* Stack by the box's own width, not the window's. */
+.ot-perm-panel { container: perm / inline-size; }
+@container perm (max-width: 600px) { .ot-perm-cols { grid-template-columns: 1fr; gap: var(--space-4); } }
+.ot-perm-title { overflow-wrap: anywhere; }
+.ot-detail { container: setup / inline-size; }
+.ot-connect-steps .ot-btn { max-width: 100%; white-space: normal; height: auto; min-height: 32px; }
+@container setup (max-width: 400px) {
+  .ot-connect-steps li { grid-template-columns: 28px minmax(0, 1fr); row-gap: 6px; }
+  .ot-connect-steps li > :nth-child(3) { grid-column: 2; justify-self: start; }
+  .ot-connect-steps li > span:empty { display: none; }
+}
+
+/* ---------- M9 audit addendum ---------- */
+.ot-focus-title:focus { outline: none; }
+.ot-ask input::placeholder { color: var(--ink-muted); text-overflow: ellipsis; }
+.ot-ask input { text-overflow: ellipsis; }
+.ot-connect-title { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.ot-connect-state { color: var(--ink-muted); }
+.ot-connect-state.is-done { color: var(--ink); }
+.ot-connect-state.is-warn { color: var(--ink); font-weight: 600; }
+.ot-pair { width: 100%; max-width: 420px; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-pair p { margin: 0; }
+.ot-pair-code { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: var(--space-4); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); }
+.ot-pair-digits { display: flex; gap: 10px; }
+.ot-pair-digit { width: 44px; height: 52px; display: grid; place-items: center; border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow-neu-xs); font-family: var(--font-mono, ui-monospace, monospace); font-size: 26px; font-weight: 600; color: var(--ink); }
+
+/* ---------- AI check-up: status, new cards, report group ---------- */
+.ot-tb-status.is-new { color: var(--ink); }
+.ot-tb-status-btn { margin-left: 4px; min-height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.ot-tb-status-btn:hover { background: var(--tint-hover); }
+.ot-tb-status-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-tb-status { max-width: 100%; flex-wrap: wrap; justify-content: center; text-align: center; }
+.ot-rgroup.is-checkup { --cat: var(--accent); }
+.ot-rgroup-note { margin: 0 0 6px; }
+.ot-rrow-clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ot-rrow-srcbtn { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.ot-rrow-srcbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---------- Script approval ---------- */
+.ot-approval.is-finished { box-shadow: var(--shadow-neu), 0 0 0 2px var(--verified); }
+.ot-approval.is-running { box-shadow: var(--shadow-neu), 0 0 0 2px var(--accent); }
+.ot-approval.is-timeout { box-shadow: var(--shadow-neu), 0 0 0 2px var(--threat); }
+.ot-approval.is-notrun { box-shadow: var(--shadow-neu), 0 0 0 1.5px var(--control-stroke); }
+.ot-script-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; }
+.ot-script-fixed { display: inline-flex; align-items: flex-start; gap: 8px; flex-basis: 100%; }
+.ot-script-fixed .ot-icon { flex: none; margin-top: 2px; }
+.ot-script-warn { list-style: none; margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--exposure-tint); display: flex; flex-direction: column; gap: 6px; }
+.ot-script-warn li { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); }
+.ot-script-warn .ot-icon { flex: none; margin-top: 2px; color: var(--exposure); }
+.ot-script-code { max-height: 300px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: var(--space-2) 0; border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); font-family: var(--font-mono, ui-monospace, monospace); line-height: 1.6; scrollbar-width: thin; }
+.ot-script-code:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-script-line { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px; padding: 0 var(--space-3) 0 calc(var(--space-3) - 2px); border-left: 2px solid transparent; }
+.ot-script-line.is-part { border-left-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.ot-script-n { color: var(--ink-muted); user-select: none; white-space: pre; text-align: right; }
+.ot-script-src { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); min-width: 0; }
+.ot-script-explain { box-sizing: border-box; max-width: 560px; margin: 4px var(--space-3) 10px; padding: 6px 10px; border-left: 3px solid var(--accent); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: color-mix(in srgb, var(--accent) 8%, transparent); display: flex; flex-direction: column; gap: 2px; font-family: var(--font-sans); font-style: italic; white-space: normal; }
+.ot-script-explain .text-mono-sm { font-style: normal; }
+.ot-script-rp { display: flex; flex-direction: column; gap: 0; }
+.ot-script-rp.is-off .ot-plan-tick:not(.ot-script-share) { color: var(--ink-muted); cursor: default; }
+.ot-script-rp .ot-plan-tick input { accent-color: var(--accent); }
+.ot-script-rp .text-mono-sm { padding-left: 30px; }
+.ot-script-out { display: flex; flex-direction: column; gap: 6px; }
+.ot-script-tr { margin: 0; max-height: 240px; overflow: auto; padding: var(--space-3); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ot-script-tr:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-script-share { margin-top: 6px; }
+.ot-approval.is-interrupted { box-shadow: var(--shadow-neu), 0 0 0 2px var(--exposure); }
+
+/* ---------- App additions (layouts the app has that the design cards do not: kept as they were) ---------- */
+.ot-insight-fix { margin-top: var(--space-2); }
+/* Sources: the design keeps these in its benchmark section, which this file leaves out. */
+.ot-sources { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ot-sources-cap { text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.ot-sources-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ot-source { display: flex; align-items: center; flex-wrap: wrap; gap: 4px var(--space-2); width: 100%; min-height: 40px; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.ot-source:hover { background: var(--tint-hover); }
+.ot-source:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-source-n { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--tint-hover); color: var(--ink-muted); }
+.ot-source-t { min-width: 0; flex: 1 1 160px; overflow-wrap: anywhere; font-size: 14px; }
+.ot-source-x { color: var(--ink-muted); }
+/* Two classes: beats the shared .ot-tag (additions.css loads later). */
+.ot-tag.ot-research-tag { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; margin-left: 0; padding: 2px 10px; border-radius: var(--radius-pill); border: 1px solid currentColor; background: transparent; font-size: 12px; font-weight: 500; line-height: 1.3; text-align: left; vertical-align: middle; }
+.ot-research-tag .ot-icon { flex: none; }
+.ot-research p { overflow-wrap: anywhere; }
+.ot-rrow-research { margin-left: 8px; }
+/* With a research label the head's left side can wrap; the "10 / 11" counter and Collapse keep their size. */
+.ot-insight-head > .ot-insight-tags { flex: 1 1 auto; }
+.ot-insight-head > .ot-insight-meta { flex: none; white-space: nowrap; }
+
+/* ---------- ui/ rebuild cases (design v53) ---------- */
+.ot-provider-status { color: var(--ink-muted); }
+.ot-detail-row { flex-wrap: wrap; }
+.ot-new-tag { padding: 1px 8px; border-radius: var(--radius-pill); background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.ot-plan.is-single .ot-plan-step { grid-template-columns: minmax(0, 1fr) auto; }
+.ot-plan.is-single .ot-plan-num { display: none; }
+/* The top row (logo + AI pill) scrolls with the page, inside the stage. */
+.ot-flow-stage.has-top { padding-top: 20px; }
+.ot-flow-stage.has-top > .ot-flow-top { position: relative; top: auto; left: auto; right: auto; width: 100%; flex: none; margin-bottom: max(40px, 8vh); }
+.ot-flow-stage.has-top > .ot-flow-top::before { display: none; }
+
+/* ---------- One-step cards and tiles (design v54) ---------- */
+.ot-plan-progress { display: flex; flex-direction: column; gap: 4px; }
+.ot-track-thin { height: 6px; }
+.ot-plan-undo { display: flex; align-items: center; gap: 6px; margin: 0; }
+.ot-plan-back { margin-right: auto; }
+.ot-plan-warn.is-guide { background: color-mix(in srgb, var(--accent) 10%, var(--surface)); color: var(--accent); }
+.ot-plan-warn.is-guide strong { color: var(--ink); }
+.ot-approval.is-guided { box-shadow: var(--shadow-neu), 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+/* C10: on the frosted tile, status words use the tile's own ink (the dark-mode muted grey is unreadable there). */
+.ot-provider-status { display: inline-flex; align-items: center; gap: 4px; }
+.ot-frost .ot-provider-status { color: var(--frost-btn-ink); opacity: .8; }
+.ot-frost .ot-provider-status.is-warn { opacity: 1; font-weight: 600; }
+.ot-plan-end { flex-wrap: wrap; gap: 4px; }
+@media (max-width: 480px) {
+  .ot-plan.is-single .ot-plan-step { grid-template-columns: minmax(0, 1fr); }
+  .ot-plan.is-single .ot-plan-end { grid-column: 1; justify-content: flex-start; }
+}
+.ot-plan { container: card / inline-size; }
+@container card (max-width: 400px) {
+  .ot-plan-step { grid-template-columns: 26px minmax(0, 1fr); }
+  .ot-plan-end { grid-column: 2; justify-content: flex-start; }
+  .ot-plan.is-single .ot-plan-step { grid-template-columns: minmax(0, 1fr); }
+  .ot-plan.is-single .ot-plan-end { grid-column: 1; }
+}
+
+/* ---------- Guided re-check, report results, tile wrap (design v56) ---------- */
+.ot-plan-recheck { display: block; margin-top: 6px; color: var(--ink); }
+.ot-plan-recheck:empty { display: none; }
+.ot-plan-warn.is-ok { background: var(--verified-tint); color: var(--verified); }
+.ot-approval.is-reported { box-shadow: var(--shadow-neu), 0 0 0 1.5px var(--control-stroke); }
+.ot-provider-text { min-width: 0; }
+.ot-provider-status { white-space: normal; overflow-wrap: anywhere; }
+.ot-provider { min-width: 0; }
+.ot-provider { grid-template-columns: 44px minmax(0, 1fr) 22px; }
+@media (min-width: 641px) { .ot-provider-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.ot-provider-text .text-headline, .ot-provider-text .text-callout { overflow-wrap: anywhere; }
+
+/* ---------- Defender progress (design v57) ---------- */
+/* No percent known (e.g. a Defender scan): a short segment slides along the track. */
+.ot-track.is-indeterminate { position: relative; overflow: hidden; }
+.ot-track.is-indeterminate > span { position: absolute; top: 0; bottom: 0; left: 0; width: 30% !important; animation: ot-indet 1.6s ease-in-out infinite; }
+@keyframes ot-indet { 0% { transform: translateX(-100%); } 100% { transform: translateX(340%); } }
+@media (prefers-reduced-motion: reduce) { .ot-track.is-indeterminate > span { animation: none; width: 100% !important; opacity: .35; } }
+
+/* The card is a size container, so it must have a width of its own (otherwise a shrink-to-fit parent collapses it). Design v60:
+   the container is the step list (.ot-plan); the card fills its column. */
+.ot-approval { width: 100%; box-sizing: border-box; }
+
+/* ---------- design v72 (PillAndStates): the AI pill's panel and the finished run's × ---------- */
+.ot-pillpanel { width: min(100%, 360px); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); box-sizing: border-box; }
+.ot-pillpanel-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ot-pillpanel-head .ot-pill-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--verified); }
+.ot-pillpanel-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.ot-pillpanel-confirm { display: flex; flex-direction: column; gap: var(--space-3); }
+.ot-pillpanel-confirm p { margin: 0; }
+.ot-answer-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.ot-rp-x { width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink-muted); cursor: pointer; }
+.ot-rp-x:hover { background: var(--tint-hover); color: var(--ink); }
+.ot-rp-x:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---------- design v73 (PillPanelStates): the AI pill panel per state ---------- */
+.ot-pillpanel-head .ot-pill-dot.is-ok { background: var(--verified); }
+.ot-pillpanel-head .ot-pill-dot.is-live { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
+.ot-pillpanel-head .ot-pill-dot.is-warn { background: var(--exposure); }
+.ot-pillpanel-head .ot-pill-dot.is-muted { background: var(--ink-faint); }
+.ot-pillpanel-hint { margin: 0; }
+.ot-pillpanel-primary { margin-left: auto; }
+.ot-pillpanel-off { align-self: flex-start; min-height: 32px; padding: 0 6px; margin: -4px 0 0 -6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink-muted); font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.ot-pillpanel-off:hover { color: var(--ink); background: var(--tint-hover); }
+.ot-pillpanel-off:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-pillpanel-cmd { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 10px; border-radius: var(--radius-sm); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); }
+.ot-pillpanel-cmd code { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); user-select: all; }
+.ot-pair-code.is-small { padding: var(--space-3); }
+.ot-pair-code.is-small .ot-pair-digit { width: 36px; height: 42px; font-size: 20px; }
+
+/* ---------- Fix for me (design v75–v80: FixButton, FixPanel, AdminChecks, ApprovalCard in a card) ---------- */
+.ot-fix-note { flex-basis: 100%; }
+.ot-fix-why { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--ink-muted); }
+.ot-fixpanel { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-1); }
+.ot-fix-line { display: flex; align-items: flex-start; gap: 8px; color: var(--ink); }
+.ot-fix-line .ot-icon, .ot-fix-line .ot-logo { flex: none; margin-top: 3px; color: var(--ink-muted); }
+.ot-fix-line.is-ok .ot-icon { color: var(--verified); }
+.ot-fix-note-ai { margin: 0; padding: 8px 12px; border-left: 3px solid var(--control-stroke); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.ot-approval.is-incard { box-shadow: none; background: transparent; padding: 0; border-radius: 0; }
+.ot-approval.is-incard.is-awaiting > .ot-approval-head { display: none; }
+.ot-plan-step.is-left-out .ot-plan-title, .ot-plan-step.is-left-out .ot-plan-does, .ot-plan-step.is-left-out .ot-plan-rows, .ot-plan-step.is-left-out .ot-plan-badges { opacity: .5; }
+.ot-plan-step.is-left-out .ot-plan-title { text-decoration: line-through; text-decoration-color: var(--ink-faint); }
+.ot-plan-leftout { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ot-plan-leftout li { display: flex; align-items: flex-start; gap: 4px 8px; color: var(--ink-muted); }
+.ot-plan-leftout li > span { flex: 1; min-width: 0; }
+.ot-plan-leftout li strong { color: var(--ink); font-weight: 600; }
+.ot-plan-leftout .ot-icon { flex: none; margin-top: 3px; }
+.ot-plan-change { margin: 0; }
+.ot-adminchecks { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.ot-adminchecks p { margin: 0; }
+.ot-adminchecks-head { display: flex; align-items: flex-start; gap: 8px; font-weight: 600; color: var(--ink); }
+.ot-adminchecks-head .ot-icon { flex: none; margin-top: 3px; color: var(--accent); }
+.ot-adminchecks-list { list-style: none; margin: 0; padding: 0 0 0 24px; display: flex; flex-direction: column; gap: 4px; }
+.ot-adminchecks-list li { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+.ot-adminchecks-list .ot-icon { color: var(--ink-muted); }

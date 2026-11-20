@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using OptimizationTool.Engine.Agent;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Providers;
 
@@ -22,7 +23,7 @@ public enum PlanToolDelivery
 /// additional_tools. Access tokens come from <see cref="ChatGptSignIn"/>; a 401 refreshes once and retries.
 /// Extra error code: <c>not_eligible</c> (403: account, workspace, region or route not allowed).
 /// </summary>
-public sealed class ChatGptPlanAdapter : IProviderAdapter, IToolCapability
+public sealed partial class ChatGptPlanAdapter : IProviderAdapter, IToolCapability, IWebResearch
 {
     public const string KindId = "chatgpt_plan";
     const string Provider = "ChatGPT";
@@ -138,6 +139,7 @@ public sealed class ChatGptPlanAdapter : IProviderAdapter, IToolCapability
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TurnTimeout);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
             var response = await WithTokenAsync(credential, async token =>
@@ -163,25 +165,43 @@ public sealed class ChatGptPlanAdapter : IProviderAdapter, IToolCapability
                 if (!response.IsSuccessStatusCode)
                 {
                     var errBody = await response.Content.ReadAsStringAsync(timeout.Token).ConfigureAwait(false);
+                    LogStream(request.Model, started, $"status={(int)response.StatusCode}", ErrorSites.ProviderHttpStatus);
                     throw MapError(response.StatusCode, errBody, response.Headers);
                 }
                 await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-                var turn = await DrainAsync(stream, outputCharBudget, timeout.Token).ConfigureAwait(false);
+                ProviderTurn turn;
+                try { turn = await DrainAsync(stream, outputCharBudget, timeout.Token).ConfigureAwait(false); }
+                catch (ProviderException e)
+                {
+                    LogStream(request.Model, started, $"status={(int)response.StatusCode} failed code={e.Code}", ErrorSites.ProviderStreamError);
+                    throw;
+                }
+                LogStream(request.Model, started, $"status={(int)response.StatusCode}");
                 return StripNamespace(turn);
             }
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            LogStream(request.Model, started, "failed reason=timeout", ErrorSites.ProviderTimeout);
             throw new ProviderException("timeout", $"{Provider} did not finish within {TurnTimeout.TotalSeconds:0} s.", retryable: false);
         }
         catch (HttpRequestException)
         {
+            LogStream(request.Model, started, "failed reason=network", ErrorSites.ProviderNetwork);
             throw new ProviderException("network", $"Could not reach {Provider}. Check the internet connection.", retryable: false);
         }
         catch (IOException)
         {
+            LogStream(request.Model, started, "failed reason=incomplete", ErrorSites.ProviderIncomplete);
             throw new ProviderException("incomplete", $"The answer from {Provider} was cut off.", retryable: false);
         }
+    }
+
+    /// <summary>One line per streamed call (the plan route does not go through ProviderHttp.SendAsync): model, status, time.</summary>
+    void LogStream(string model, long started, string outcome, string? site = null)
+    {
+        var line = $"provider: {Provider} POST {new Uri(_base, "v1/responses").AbsolutePath} model={model} {outcome} ms={ProviderHttp.Ms(started)}";
+        if (site is null) AppLog.Current.Debug(line); else AppLog.Current.Warn(line, site);
     }
 
     /// <summary>Gets a token (from sign-in when present), sends, and on 401 refreshes once and resends.</summary>
@@ -392,7 +412,7 @@ public sealed class ChatGptPlanAdapter : IProviderAdapter, IToolCapability
         return ex;
     }
 
-    static ProviderException MapFailure(JsonObject? error)
+    internal static ProviderException MapFailure(JsonObject? error)
     {
         var code = error?["code"].AsString();
         return code switch

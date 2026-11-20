@@ -5,19 +5,17 @@ using OptimizationTool.Transport;
 
 namespace OptimizationTool.Tests;
 
-/// <summary>Cross-PC CLI setup on the host side: Codex credential store pass-through, outdated / blocked / auth reports, npm shims in the runner.</summary>
+/// <summary>Cross-PC CLI setup on the host side: outdated / blocked / auth reports, npm shims in the runner.</summary>
 public sealed class CliSetupTests : IDisposable
 {
     private readonly string _bin = Path.Combine(Path.GetTempPath(), "ot-tests", "setup-" + Guid.NewGuid().ToString("N"));
-    private readonly string _claude, _codex;
+    private readonly string _claude;
 
     public CliSetupTests()
     {
         Directory.CreateDirectory(_bin);
         _claude = Path.Combine(_bin, "claude.exe");
-        _codex = Path.Combine(_bin, "codex.exe");
         File.WriteAllText(_claude, "");
-        File.WriteAllText(_codex, "");
     }
 
     public void Dispose()
@@ -39,59 +37,6 @@ public sealed class CliSetupTests : IDisposable
     {
         var entry = (await c.Call("provider.list"))["providers"]!.AsArray().Single(p => p.Str("kind") == kind)!;
         return entry.Str("status") + (entry["detail"] is null ? "" : "/" + entry.Str("detail"));
-    }
-
-    // ---------- 6. cli_auth_credentials_store ----------
-
-    [Theory]
-    [InlineData("cli_auth_credentials_store = \"keyring\"\n", "keyring")]
-    [InlineData("model = \"gpt-5\"\r\ncli_auth_credentials_store='auto'   # use the OS store\r\n", "auto")]
-    [InlineData("cli_auth_credentials_store = \"file\"", "file")]
-    [InlineData("cli_auth_credentials_store = \"ephemeral\"", "ephemeral")]
-    [InlineData("[profiles.work]\ncli_auth_credentials_store = \"keyring\"\n", null)]  // not top level
-    [InlineData("cli_auth_credentials_store = \"keyring' -c evil='1\"", null)]
-    [InlineData("cli_auth_credentials_store = \"KEYRING\"", null)]
-    [InlineData("cli_auth_credentials_store = keyring", null)]
-    [InlineData("# cli_auth_credentials_store = \"keyring\"", null)]
-    [InlineData("", null)]
-    [InlineData(null, null)]
-    public void CodexConfig_ReadsOnlyTheValidatedTopLevelKey(string? toml, string? expected) =>
-        Assert.Equal(expected, CodexConfig.CredentialsStore(toml));
-
-    [Fact]
-    public void CodexConfig_PathPrefersCodexHome()
-    {
-        Assert.Equal(@"D:\codex\config.toml", CodexConfig.ConfigPath(@"D:\codex", @"C:\Users\u"));
-        Assert.Equal(@"C:\Users\u\.codex\config.toml", CodexConfig.ConfigPath(null, @"C:\Users\u"));
-        Assert.Equal(@"C:\Users\u\.codex\config.toml", CodexConfig.ConfigPath("relative", @"C:\Users\u"));
-        Assert.Null(CodexConfig.ConfigPath(null, null));
-    }
-
-    [Fact]
-    public void CodexArgv_PassesTheCredentialStore_AndRefusesAnUnknownOne()
-    {
-        var args = HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures, "keyring")!;
-        Assert.Equal(["-c", "cli_auth_credentials_store='keyring'", "-"], args.TakeLast(3));
-        Assert.Null(HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures, "evil"));
-        Assert.DoesNotContain(HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures)!, a => a.Contains("cli_auth", StringComparison.Ordinal));
-        var resume = HeadlessCommand.Codex(@"C:\run", @"C:\b.exe", new string('a', 32), "01a1acef-e7fe-7660-8a5e-dbabb0764106", HeadlessCommand.CodexLockdownFeatures, "auto")!;
-        Assert.Equal(["-c", "cli_auth_credentials_store='auto'", "-"], resume.TakeLast(3));
-    }
-
-    [Fact]
-    public async Task CodexRun_CarriesTheUsersCredentialStore()
-    {
-        var cli = new FakeCli();
-        await using var host = TestHost.StartAgent(Options(cli));
-        host.Server.Engine.Agent.CodexCredentialsStore = () => "keyring";
-        var c = await host.ConnectAsync(minor: 4);
-        var reportId = await AgentSetup.Report(c);
-        await c.Call("provider.setClient", new JsonObject { ["kind"] = "codex_mcp", ["path"] = _codex, ["signedIn"] = true, ["codexFeatures"] = new JsonArray("shell_tool") });
-        var taskId = (await AgentSetup.StartTask(c, reportId, "codex_mcp")).Str("taskId");
-        await AgentSetup.Ask(c, taskId, "Hi?");
-        await AgentSetup.TaskEvent(c, taskId, "agent.turn", p => p.Str("status") is "finished" or "failed");
-        var launch = Assert.Single(cli.Launches);
-        Assert.Equal(["-c", "cli_auth_credentials_store='keyring'", "-"], launch.Arguments.TakeLast(3));
     }
 
     // ---------- 3, 7, 10. outdated / blocked / auth reports ----------
@@ -136,7 +81,7 @@ public sealed class CliSetupTests : IDisposable
     {
         await using var host = TestHost.StartAgent(Options(new FakeCli()));
         var c = await host.ConnectAsync(minor: 4);
-        Assert.Equal(-32602, (await c.Fails("provider.setClient", new JsonObject { ["kind"] = "codex_mcp", ["path"] = _codex, ["signedIn"] = true, ["blocked"] = true })).Code);
+        Assert.Equal(-32602, (await c.Fails("provider.setClient", new JsonObject { ["kind"] = "claude_code_mcp", ["path"] = _claude, ["signedIn"] = true, ["blocked"] = true })).Code);
     }
 
     // ---------- 2. the runner starts a resolved npm shim directly ----------

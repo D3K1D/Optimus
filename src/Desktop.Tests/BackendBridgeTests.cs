@@ -19,7 +19,7 @@ public class BackendBridgeTests
             LaunchHost = false,
             AllowAnyHost = allowAnyHost,
             ConnectBudget = TimeSpan.FromSeconds(1),
-        }, DesktopLog.Disabled);
+        }, AppLog.Disabled);
 
     private static async Task WaitForState(BackendConnection b, BackendState state)
     {
@@ -40,7 +40,7 @@ public class BackendBridgeTests
         await WaitForState(backend, BackendState.Ready);
         Assert.Equal(1, stub.Hellos);
 
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, DesktopLog.Disabled);
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, AppLog.Disabled);
         var reply = await dispatcher.HandleAsync("""{"type":"rpc","id":17,"method":"scan.get","params":{"scanId":"scan-1"}}""", Doc, true, default);
         var msg = JsonNode.Parse(reply!)!;
         Assert.Equal("rpc.result", msg["type"]!.GetValue<string>());
@@ -56,7 +56,7 @@ public class BackendBridgeTests
         await using var backend = Connect(stub);
         backend.Start();
         await WaitForState(backend, BackendState.Ready);
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, DesktopLog.Disabled);
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, AppLog.Disabled);
         var reply = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":3,"method":"session.hello","params":{}}""", Doc, true, default))!)!;
         Assert.Equal(-32012, reply["error"]!["code"]!.GetValue<int>());
         Assert.Equal(1, stub.Hellos);
@@ -91,7 +91,7 @@ public class BackendBridgeTests
         backend.Start();
         await WaitForState(backend, BackendState.Ready);
 
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, DesktopLog.Disabled);
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, AppLog.Disabled);
         var pending = dispatcher.HandleAsync("""{"type":"rpc","id":21,"method":"scan.start","params":{"idempotencyKey":"k1"}}""", Doc, true, default);
         await stub.HeldCallArrived.Task.WaitAsync(Wait);
         stub.Drop();
@@ -124,7 +124,7 @@ public class BackendBridgeTests
         await using var stub = new StubPipeServer(start: false);
         await using var backend = Connect(stub);
         backend.Start();
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, DesktopLog.Disabled);
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), backend, AppLog.Disabled);
         var reply = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":1,"method":"report.list","params":{}}""", Doc, true, default))!)!;
         Assert.Equal(-32000, reply["error"]!["code"]!.GetValue<int>());
         Assert.True(reply["error"]!["data"]!["retryable"]!.GetValue<bool>());
@@ -150,7 +150,7 @@ public class BackendBridgeTests
             PipeName = "OptimizationTool.test." + Guid.NewGuid().ToString("N"), HostPath = cmd, LaunchHost = true, AllowAnyHost = true,
             HostArguments = ["/c", "exit " + OptimizationTool.Transport.HostExitCodes.OtherSession],
             ConnectBudget = TimeSpan.FromMinutes(5), // far away: the detail must not wait for the "unavailable" budget
-        }, DesktopLog.Disabled);
+        }, AppLog.Disabled);
         backend.Start();
         var sw = Stopwatch.StartNew();
         while (!(backend.Current.Detail is JsonValue v && v.GetValue<string>() == "other_session"))
@@ -171,7 +171,7 @@ public class BackendBridgeTests
             HostArguments = ["/d", "/c", $"echo x>>{launches}& exit {exitCode}"], // the temp path has no spaces
             ConnectBudget = TimeSpan.FromMinutes(5),
             LaunchBackoff = backoff,
-        }, DesktopLog.Disabled);
+        }, AppLog.Disabled);
 
     private static int Launches(string file)
     {
@@ -249,7 +249,7 @@ public class BackendBridgeTests
     public async Task Retry_backend_is_shell_handled_and_wakes_the_connection()
     {
         var retries = 0;
-        var dispatcher = new BridgeDispatcher(new BridgeRouter(), new ThrowingBackend(), DesktopLog.Disabled, retryBackend: () => retries++);
+        var dispatcher = new BridgeDispatcher(new BridgeRouter(), new ThrowingBackend(), AppLog.Disabled, retryBackend: () => retries++);
         var ok = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":1,"method":"shell.retryBackend","params":{}}""", Doc, true, default))!)!;
         Assert.Equal("""{"retrying":true}""", ok["result"]!.ToJsonString());
         var noParams = JsonNode.Parse((await dispatcher.HandleAsync("""{"type":"rpc","id":2,"method":"shell.retryBackend"}""", Doc, true, default))!)!;
@@ -261,6 +261,13 @@ public class BackendBridgeTests
         Assert.Equal(2, retries);
         Assert.Contains(BackendConnection.RetryMethod, (IReadOnlySet<string>)BridgeRouter.ShellMethods);
         Assert.DoesNotContain(BackendConnection.RetryMethod, (IReadOnlySet<string>)BridgeRouter.DesktopMethods);
+    }
+
+    [Fact]
+    public void AdministratorChecks_DesktopMethods_AreForwardedToTheBackend()
+    {
+        foreach (var method in new[] { "checks.approve", "checks.decline", "checks.list" }) // m9 §17.2
+            Assert.Contains(method, (IReadOnlySet<string>)BridgeRouter.DesktopMethods);
     }
 
     private sealed class ThrowingBackend : IBackend

@@ -11,6 +11,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Mcp\OptimizationTool.Mcp.csproj" />
+    <!-- m9 §2: the MCP catalog is compared with the engine's tool specs (CatalogParityTests). -->
+    <ProjectReference Include="..\..\src\Engine\OptimizationTool.Engine.csproj" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

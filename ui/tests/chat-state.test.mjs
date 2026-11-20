@@ -2,6 +2,7 @@
 // from a task's history (a run still going included), answers kept per task; and the fixture's host parity for AI cards.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { choose } from './choose-ai.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -188,6 +189,7 @@ test('fixture: an ask on an expired task is refused like the host (-32013, reaso
   const be = adapter();
   const reportId = await withReport(be);
   await be.call('shell.clientStatus', { client: 'claude_code' });
+  await choose(be, 'claude_code_mcp');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Look', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: [] } });
   await be.call('fixture.expireTask', { taskId: t.taskId });
   const err = await be.call('agent.ask', { idempotencyKey: key(), taskId: t.taskId, text: 'Why?' }).then(() => null, (e) => e);
@@ -199,11 +201,14 @@ test('fixture: an ask on an expired task is refused like the host (-32013, reaso
 test('fixture: agent.active lists active tasks newest first; agent.get history shows a run still going', async () => {
   const be = adapter();
   const reportId = await withReport(be);
-  await be.call('shell.clientStatus', { client: 'claude_code' });
-  await be.call('provider.connect', { kind: 'chatgpt_plan' });
-  await waitFor(be, (e) => e.type === 'provider.status' && e.payload.kind === 'chatgpt_plan' && e.payload.status === 'connected');
-  const a = await be.call('agent.start', { idempotencyKey: key(), goal: 'A', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: ['process.sample'] } });
-  const b = await be.call('agent.start', { idempotencyKey: key(), goal: 'B', recipientKind: 'chatgpt_plan', scope: { reportId }, grant: { diagnostics: [] } });
+  // Two tasks at once: only the chosen AI gets in-app tasks, and an older "api" profile (no kind) with both keys
+  // allows either API kind.
+  await be.call('shell.requestApiKey', { kind: 'anthropic_api' });
+  await be.call('shell.requestApiKey', { kind: 'openai_api' });
+  const o = await be.call('onboarding.get');
+  await be.call('onboarding.save', { expectedRevision: o.revision, patch: { provider: { value: 'api', label: 'API key' } } });
+  const a = await be.call('agent.start', { idempotencyKey: key(), goal: 'A', recipientKind: 'anthropic_api', scope: { reportId }, grant: { diagnostics: ['process.sample'] } });
+  const b = await be.call('agent.start', { idempotencyKey: key(), goal: 'B', recipientKind: 'openai_api', scope: { reportId }, grant: { diagnostics: [] } });
   assert.deepEqual((await be.call('agent.active')).tasks.map((t) => t.taskId), [b.taskId, a.taskId]);
   const started = waitFor(be, (e) => e.type === 'agent.turn' && e.payload.status === 'started');
   const r = await be.call('agent.ask', { idempotencyKey: key(), taskId: a.taskId, text: 'Why is it slow?' });
@@ -220,6 +225,7 @@ test('fixture: a run cancelled mid-way calls no more tools and adds no card', as
   const be = adapter();
   const reportId = await withReport(be);
   await be.call('shell.clientStatus', { client: 'claude_code' });
+  await choose(be, 'claude_code_mcp');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Look', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: [] } });
   const tools = [];
   be.onEvent((e) => { if (e.type === 'agent.tool' && e.stream === 'task:' + t.taskId) tools.push(e.payload.tool); });
@@ -238,6 +244,7 @@ test('fixture AI cards have the host shape (followup.schema.json card), cite onl
   const be = adapter();
   const reportId = await withReport(be);
   await be.call('shell.clientStatus', { client: 'claude_code' });
+  await choose(be, 'claude_code_mcp');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Look', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: [] } });
   const msg = waitFor(be, (e) => e.type === 'agent.message');
   await be.call('agent.ask', { idempotencyKey: key(), taskId: t.taskId, text: 'Look over my latest report, PC specs and past reports. Tell me the 3 things that matter most, and improve the suggestion cards where you can.' });
@@ -266,10 +273,10 @@ test('fixture AI cards have the host shape (followup.schema.json card), cite onl
   assert.equal(c.text, c.why);                        // as the host: text = why
   assert.equal(typeof c.title, 'string');
   assert.equal(c.settingsUri, null);
-  assert.equal(c.addedBy, 'Claude Code');
+  assert.equal(c.addedBy, 'Claude');
   assert.deepEqual(c.options, ['Ask about this', 'Ignore']);
   assert.ok(c.evidenceIds.length >= 1 && c.evidenceIds.every((id) => report.evidence.some((e) => e.id === id)));
   const noted = seen.filter((x) => x.note);
-  assert.ok(noted.length >= 1 && noted.every((x) => x.noteBy === 'Claude Code'));
+  assert.ok(noted.length >= 1 && noted.every((x) => x.noteBy === 'Claude'));
   await be.call('agent.stop', { taskId: t.taskId });
 });

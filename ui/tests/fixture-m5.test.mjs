@@ -1,6 +1,7 @@
 // node --test ui/tests/   — the fixture's M5 stand-ins (contracts/m5-chat.md): signed-in clients, headless asks, new tools.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { choose } from './choose-ai.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -34,16 +35,18 @@ test('clientStatus reports signedIn and moves the kind: connected, signed_out, n
   await new Promise((r) => setTimeout(r, 60));
   await be.call('shell.clientStatus', { client: 'claude_code' });                    // the UI re-checks
   assert.equal((await entry(be, 'claude_code_mcp')).status, 'connected');
-  const cx = await be.call('shell.clientStatus', { client: 'codex' });
+  // Not installed: not set up, and sign-in can't start.
+  const cx = await be.call('fixture.setClient', { client: 'claude_code', installed: false });
   assert.equal(cx.installed, false);
-  assert.deepEqual([(await entry(be, 'codex_mcp')).status, (await entry(be, 'codex_mcp')).detail], ['waiting', 'never_seen']);
-  assert.equal((await be.call('shell.signInClient', { client: 'codex' })).status, 'failed');
+  assert.deepEqual([(await entry(be, 'claude_code_mcp')).status, (await entry(be, 'claude_code_mcp')).detail], ['waiting', 'never_seen']);
+  assert.equal((await be.call('shell.signInClient', { client: 'claude_code' })).status, 'failed');
 });
 
 test('headless task: no pairing, same events as an in-app turn with the client origin; first look notes and adds cards', async () => {
   const be = adapter();
   const reportId = await withReport(be);
   await be.call('shell.clientStatus', { client: 'claude_code' });
+  await choose(be, 'claude_code_mcp');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Look', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: ['process.sample'] } });
   assert.equal(t.recipient.mode, 'headless');
   const events = [];
@@ -71,6 +74,7 @@ test('agent.cancel ends only the running turn (failed, cancelled); the task stay
   const be = adapter();
   const reportId = await withReport(be);
   await be.call('shell.clientStatus', { client: 'claude_code' });
+  await choose(be, 'claude_code_mcp');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Look', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: ['process.sample'] } });
   assert.deepEqual(await be.call('agent.cancel', { taskId: t.taskId }), { taskId: t.taskId, cancelled: false });
   const events = [];
@@ -93,6 +97,7 @@ test('agent.ask writes agent.question {turnId, text, cardId} before its turn; ag
   const be = adapter();
   const reportId = await withReport(be);
   await be.call('shell.clientStatus', { client: 'claude_code' });
+  await choose(be, 'claude_code_mcp');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Look', recipientKind: 'claude_code_mcp', scope: { reportId }, grant: { diagnostics: ['process.sample'] } });
   const cardId = (await be.call('followup.get', { reportId })).card.id;
   let msg = waitFor(be, (e) => e.type === 'agent.message');

@@ -300,6 +300,68 @@ public sealed class ChatGptSignInTests
     }
 
     [Fact]
+    public async Task Idle_or_garbage_connections_never_delay_the_callback()
+    {
+        // Browsers pre-open sockets they may never use, and an HTTPS upgrade sends a TLS hello and waits. The listener
+        // used to read connections one at a time with a 10 s read timeout each, so these held the real callback back.
+        using var f = new FakeIssuer();
+        var approve = f.Approve();
+        var idle = new List<System.Net.Sockets.TcpClient>();
+        Func<Uri, bool> browser = url =>
+        {
+            var port = new Uri(LoopbackCallback.ParseQuery(url.Query.TrimStart('?'))["redirect_uri"]).Port;
+            for (var i = 0; i < 4; i++)
+            {
+                var s = new System.Net.Sockets.TcpClient();
+                s.Connect(IPAddress.Loopback, port);
+                idle.Add(s);
+            }
+            idle[^1].GetStream().Write([0x16, 0x03, 0x01, 0x00, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05]); // a TLS hello, no HTTP
+            return approve(url);
+        };
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var result = await f.SignIn.SignInAsync(browser, CancellationToken.None);
+            Assert.True(result.Ok, result.Error);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+            Assert.True(watch.Elapsed < LoopbackCallback.ReadTimeout);
+            Assert.True(f.SignIn.IsSignedIn);
+        }
+        finally
+        {
+            foreach (var s in idle) s.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task A_browser_launch_that_is_slow_to_return_does_not_hold_back_the_callback()
+    {
+        using var f = new FakeIssuer();
+        var approve = f.Approve();
+        using var launched = new ManualResetEventSlim();
+        // The shell call opens the browser, the user signs in and the callback arrives, but the call itself hangs.
+        Func<Uri, bool> browser = url => { approve(url); launched.Wait(TimeSpan.FromSeconds(60)); return true; };
+        try
+        {
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var result = await f.SignIn.SignInAsync(browser, CancellationToken.None);
+            Assert.True(result.Ok, result.Error);
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"took {watch.Elapsed}");
+            Assert.False(launched.IsSet);
+        }
+        finally
+        {
+            launched.Set();
+        }
+
+        // A refusal still ends the sign-in at once (the callback never comes).
+        var refused = System.Diagnostics.Stopwatch.StartNew();
+        Assert.Equal("browser", (await f.SignIn.SignInAsync(_ => false, CancellationToken.None)).Error);
+        Assert.True(refused.Elapsed < TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task Tokens_that_cannot_be_saved_are_storage_and_the_default_wait_is_three_minutes()
     {
         Assert.Equal(TimeSpan.FromMinutes(3), new ChatGptSignInOptions().SignInTimeout);

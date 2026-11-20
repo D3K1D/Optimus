@@ -31,9 +31,9 @@ public sealed record NpmShimEnvironment
 }
 
 /// <summary>
-/// The npm global shims <c>claude.cmd</c> / <c>codex.cmd</c> resolved to what they run, so the CLI can be started
+/// The npm global shim <c>claude.cmd</c> resolved to what it runs, so the CLI can be started
 /// directly with an argument list instead of through cmd.exe (whose line cannot carry a profile path with
-/// <c>&amp; ! % ^</c>). Only the two known packages, read from <c>&lt;shim dir&gt;\node_modules\&lt;package&gt;\package.json</c>
+/// <c>&amp; ! % ^</c>). Only the known package, read from <c>&lt;shim dir&gt;\node_modules\&lt;package&gt;\package.json</c>
 /// <c>bin</c>: a <c>.exe</c> entry runs as is; a <c>.js</c>/<c>.cjs</c>/<c>.mjs</c> entry runs as <c>node.exe &lt;entry&gt;</c>, with
 /// node.exe from the shim folder first, then the child PATH (as the shim itself does). The entry must stay inside the
 /// package folder and exist.
@@ -51,7 +51,6 @@ public static class NpmShim
     private static readonly Dictionary<string, (string[] Package, string Bin)> Known = new(StringComparer.OrdinalIgnoreCase)
     {
         ["claude"] = (["@anthropic-ai", "claude-code"], "claude"),
-        ["codex"] = (["@openai", "codex"], "codex"),
     };
 
     public static Resolution Resolve(string cmdPath, NpmShimEnvironment env)

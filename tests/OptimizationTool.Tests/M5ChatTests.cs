@@ -17,11 +17,9 @@ public sealed class FakeCli : ICliRunner
         return Script(launch, onLine, ct);
     }
 
-    /// <summary>The run token a launch handed its bridge: in mcp.json (Claude Code) or a -c value (Codex).</summary>
+    /// <summary>The run token a launch handed its bridge: in mcp.json.</summary>
     public static string Token(CliLaunch launch)
     {
-        var codex = launch.Arguments.FirstOrDefault(a => a.Contains("OT_RUN_TOKEN=", StringComparison.Ordinal));
-        if (codex is not null) return codex.Split('\'')[1];
         var config = JsonNode.Parse(File.ReadAllText(Path.Combine(launch.WorkingDirectory, "mcp.json")))!;
         return config["mcpServers"]!["optimization-tool"]!["env"]!["OT_RUN_TOKEN"]!.GetValue<string>();
     }
@@ -37,16 +35,14 @@ public sealed class FakeCli : ICliRunner
 public sealed class M5ChatTests : IDisposable
 {
     private readonly string _bin = Path.Combine(Path.GetTempPath(), "ot-tests", "cli-" + Guid.NewGuid().ToString("N"));
-    private readonly string _claude, _codex;
+    private readonly string _claude;
     private static readonly CallContext Bridge = new("bridge-1", "agent", 4242);
 
     public M5ChatTests()
     {
         Directory.CreateDirectory(_bin);
         _claude = Path.Combine(_bin, "claude.cmd");
-        _codex = Path.Combine(_bin, "codex.exe");
         File.WriteAllText(_claude, "@echo off");
-        File.WriteAllText(_codex, "");
     }
 
     public void Dispose()
@@ -69,15 +65,8 @@ public sealed class M5ChatTests : IDisposable
 
     private static string State(JsonObject entry) => entry.Str("status") + (entry["detail"] is null ? "" : "/" + entry.Str("detail"));
 
-    /// <summary>The probed Codex features a test shell reports (m6 §0): a subset, in §0 order.</summary>
-    private static readonly string[] ProbedCodexFeatures = ["shell_tool", "unified_exec", "apps"];
-
-    private Task<JsonObject> SetClient(Client c, string kind, string? path, bool? signedIn)
-    {
-        var p = new JsonObject { ["kind"] = kind, ["path"] = path, ["signedIn"] = signedIn, ["version"] = "2.1.318" };
-        if (kind == "codex_mcp" && path is not null) p["codexFeatures"] = new JsonArray([.. ProbedCodexFeatures.Select(f => (JsonNode?)f)]);
-        return c.Call("provider.setClient", p);
-    }
+    private static Task<JsonObject> SetClient(Client c, string kind, string? path, bool? signedIn) =>
+        c.Call("provider.setClient", new JsonObject { ["kind"] = kind, ["path"] = path, ["signedIn"] = signedIn, ["version"] = "2.1.318" });
 
     private static async Task<(JsonObject Message, JsonObject Turn)> Answer(Client c, string taskId, int nth = 1)
     {
@@ -118,7 +107,6 @@ public sealed class M5ChatTests : IDisposable
 
         Assert.Equal("connected", (await SetClient(c, "claude_code_mcp", _claude, true)).Str("status"));
         Assert.Equal("connected", State(await Entry(c, "claude_code_mcp")));
-        Assert.Equal("waiting/never_seen", State(await Entry(c, "codex_mcp"))); // per kind
 
         // signedIn null = the check failed: the previous state stays.
         await SetClient(c, "claude_code_mcp", _claude, null);
@@ -145,7 +133,6 @@ public sealed class M5ChatTests : IDisposable
             .Select(e => e["payload"].Str("status") + (e["payload"]!["detail"] is null ? "" : "/" + e["payload"].Str("detail"))).ToList();
         Assert.Equal(["connected", "error/signed_out", "connected", "pending", "connected", "error/denied"], statuses);
         foreach (var e in c.Events) SchemaTests.AssertValid("event", e);
-        await SetClient(c, "codex_mcp", _codex, false);
         SchemaTests.AssertValid("provider-list", await c.Call("provider.list"));
     }
 
@@ -205,7 +192,7 @@ public sealed class M5ChatTests : IDisposable
             line("not json");
             line(FakeCli.Claude("result", new JsonObject
             {
-                ["subtype"] = "success", ["is_error"] = false, ["result"] = "Three things matter. [ev-0000000000000000]", ["session_id"] = session,
+                ["subtype"] = "success", ["is_error"] = false, ["result"] = "Three things matter. [ev-0000000000000000]", ["session_id"] = session, ["num_turns"] = 1,
                 ["usage"] = new JsonObject { ["input_tokens"] = 10, ["cache_read_input_tokens"] = 90, ["output_tokens"] = 20 },
             }));
             return new CliExit(0, "");
@@ -226,10 +213,11 @@ public sealed class M5ChatTests : IDisposable
         Assert.Equal(runDir, first.WorkingDirectory);
         Assert.Equal(["-p", "--output-format", "stream-json", "--verbose", "--tools=", "--strict-mcp-config", "--mcp-config", Path.Combine(runDir, "mcp.json"),
             "--allowedTools", "mcp__optimization-tool", "--append-system-prompt-file", Path.Combine(runDir, "system.md"), "--session-id"], first.Arguments.Take(13));
+        Assert.DoesNotContain("--max-turns", first.Arguments); // m9 §17.6: the probed help did not list it
         Assert.True(Guid.TryParse(first.Arguments[^1], out _));
         Assert.DoesNotContain(first.Arguments, a => a.Contains("Look over", StringComparison.Ordinal));
         Assert.NotNull(ProcessCommand.ForCli(first.CliPath, first.Arguments, @"C:\Windows")); // the .cmd line builder accepts every token
-        Assert.StartsWith("[prompt-v8]", File.ReadAllText(Path.Combine(runDir, "system.md")));
+        Assert.StartsWith("[prompt-v11]", File.ReadAllText(Path.Combine(runDir, "system.md")));
         Assert.False(File.Exists(Path.Combine(runDir, "mcp.json"))); // the token file goes with the run
         Assert.Contains("The user uses this PC for: Gaming. Goals: Improve PC performance.", first.StandardInput);
         Assert.Contains($"Current report {reportId}:", first.StandardInput);
@@ -264,64 +252,31 @@ public sealed class M5ChatTests : IDisposable
         Assert.Equal("Yes.", (await Answer(c, taskId, 2)).Message.Str("text"));
         var second = cli.Launches[1];
         Assert.Equal(["--resume", first.Arguments[^1]], second.Arguments.TakeLast(2));
-        Assert.Equal("User: And then?", second.StandardInput);
+        Assert.Matches(@"^Permissions now: [^\n]{1,143}\nUser: And then\?$", second.StandardInput); // m9 §2: the one per-ask line
         foreach (var e in c.Events) SchemaTests.AssertValid("event", e);
     }
 
     [Fact]
-    public async Task Codex_ArgvThreadAndResume_AuthFailureSignsOut()
+    public async Task Claude_AuthFailure_FailsTheTurnAsAuth_AndSignsTheKindOut()
     {
         var cli = new FakeCli();
         await using var host = TestHost.StartAgent(Options(cli));
-        host.Server.Engine.Agent.CodexCredentialsStore = () => null; // hermetic: not this PC's ~/.codex/config.toml
         var c = await host.ConnectAsync(minor: 4);
         var reportId = await AgentSetup.Report(c);
-        await SetClient(c, "codex_mcp", _codex, true);
-        var taskId = (await AgentSetup.StartTask(c, reportId, "codex_mcp")).Str("taskId");
+        await SetClient(c, "claude_code_mcp", _claude, true);
+        var taskId = (await AgentSetup.StartTask(c, reportId, "claude_code_mcp")).Str("taskId");
         cli.Script = (launch, line, _) =>
         {
-            line("""{"type":"thread.started","thread_id":"01a1acef-e7fe-7660-8a5e-dbabb0764106"}""");
-            line("""{"type":"turn.started"}""");
-            line("""{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Draft."}}""");
-            line("""{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"Final answer."}}""");
-            line("""{"type":"turn.completed","usage":{"input_tokens":1500,"cached_input_tokens":100,"output_tokens":77}}""");
-            return Task.FromResult(new CliExit(0, "Reading additional input from stdin..."));
-        };
-        await AgentSetup.Ask(c, taskId, "What matters?");
-        var (message, turn) = await Answer(c, taskId);
-        Assert.Equal("Final answer.", message.Str("text"));
-        Assert.Equal(1500, turn["usage"]!["inputTokens"]!.GetValue<long>());
-
-        var first = cli.Launches.Single();
-        var runDir = Path.Combine(host.DataDir, "agent-runs", taskId);
-        var token = FakeCli.Token(first);
-        Assert.Matches("^[0-9a-f]{32}$", token);
-        Assert.Equal(["exec", "--sandbox", "read-only", "-C", runDir, "--json", "--skip-git-repo-check", "--ignore-user-config",
-            "-c", "web_search='disabled'",
-            "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
-            "-c", $"mcp_servers.optimization-tool.command='{AgentSetup.Options().McpExecutablePath}'",
-            "-c", $"mcp_servers.optimization-tool.env.OT_RUN_TOKEN='{token}'", "-"], first.Arguments);
-        Assert.StartsWith("[prompt-v8]", first.StandardInput); // the system text, first ask only
-        Assert.EndsWith("User: What matters?", first.StandardInput);
-        Assert.NotNull(ProcessCommand.ForCli(Path.Combine(_bin, "codex.cmd"), first.Arguments, @"C:\Windows")); // an npm shim could carry it too
-
-        // Later asks resume the thread. A sign-in failure ends the run with auth and the kind shows signed_out.
-        cli.Script = (_, line, _) =>
-        {
-            line("""{"type":"error","message":"401 Unauthorized: please run codex login"}""");
+            line(FakeCli.Claude("system", new JsonObject { ["subtype"] = "init", ["session_id"] = launch.Arguments[^1] }));
+            line("""{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}""");
             return Task.FromResult(new CliExit(1, ""));
         };
-        await Idle(host);
-        await AgentSetup.Ask(c, taskId, "More?");
-        var (_, failed) = await Answer(c, taskId, 2);
+        await AgentSetup.Ask(c, taskId, "What matters?");
+        var (_, failed) = await Answer(c, taskId);
         Assert.Equal("failed", failed.Str("status"));
         Assert.Equal("auth", failed.Str("code"));
-        var second = cli.Launches[1];
-        Assert.Equal(["exec", "--sandbox", "read-only", "-C", runDir, "resume", "01a1acef-e7fe-7660-8a5e-dbabb0764106", "--json"], second.Arguments.Take(8));
-        Assert.Equal(first.Arguments.Skip(5).Take(13), second.Arguments.Skip(7).Take(13)); // a resumed run carries the same lock-down (m6 §0)
-        Assert.Equal("User: More?", second.StandardInput);
-        Assert.Equal("error/signed_out", State(await Entry(c, "codex_mcp")));
-        Assert.Equal(2, (await c.Call("agent.get", new JsonObject { ["taskId"] = taskId }))["used"]!["turns"]!.GetValue<long>());
+        Assert.Equal("error/signed_out", State(await Entry(c, "claude_code_mcp")));
+        Assert.Equal(8, /* m9 §17.6: no num_turns reported: the reserved allowance */ (await c.Call("agent.get", new JsonObject { ["taskId"] = taskId }))["used"]!["turns"]!.GetValue<long>());
     }
 
     [Fact]
@@ -463,7 +418,7 @@ public sealed class M5ChatTests : IDisposable
         // The cancelled run counted as a turn with its tokens, and its session was kept: the next ask resumed it.
         await Idle(host);
         var task = await c.Call("agent.get", new JsonObject { ["taskId"] = taskId });
-        Assert.Equal(2, task["used"]!["turns"]!.GetValue<long>());
+        Assert.Equal(16, /* m9 §17.6: two runs, each its reserved allowance */ task["used"]!["turns"]!.GetValue<long>());
         Assert.Equal(3, task["used"]!["outputTokens"]!.GetValue<long>());
         Assert.Equal(session, task.Str("clientSession"));
         Assert.Equal(["--resume", session], cli.Launches[1].Arguments.TakeLast(2));
@@ -550,18 +505,20 @@ public sealed class M5ChatTests : IDisposable
     }
 
     [Fact]
-    public async Task KilledRun_StillCountsAsATurn_AndKeepsTheThreadItReported()
+    public async Task KilledRun_StillCountsAsATurn_AndKeepsTheSessionItReported()
     {
         var cli = new FakeCli();
         await using var host = TestHost.StartAgent(Options(cli));
         var c = await host.ConnectAsync(minor: 4);
         var reportId = await AgentSetup.Report(c);
-        await SetClient(c, "codex_mcp", _codex, true);
-        var taskId = (await AgentSetup.StartTask(c, reportId, "codex_mcp")).Str("taskId");
+        await SetClient(c, "claude_code_mcp", _claude, true);
+        var taskId = (await AgentSetup.StartTask(c, reportId, "claude_code_mcp")).Str("taskId");
         var started = new TaskCompletionSource();
-        cli.Script = async (_, line, ct) =>
+        string? session = null;
+        cli.Script = async (launch, line, ct) =>
         {
-            line("""{"type":"thread.started","thread_id":"01a1acef-e7fe-7660-8a5e-dbabb0764106"}""");
+            session = launch.Arguments[^1];
+            line(FakeCli.Claude("system", new JsonObject { ["subtype"] = "init", ["session_id"] = session }));
             started.TrySetResult();
             await Task.Delay(Timeout.Infinite, ct); // the runner kills the tree and throws
             return new CliExit(0, "");
@@ -572,25 +529,21 @@ public sealed class M5ChatTests : IDisposable
         Assert.Equal("cancelled", (await Answer(c, taskId)).Turn.Str("code"));
         await Idle(host);
         var task = await c.Call("agent.get", new JsonObject { ["taskId"] = taskId });
-        Assert.Equal(1, task["used"]!["turns"]!.GetValue<long>());
-        Assert.Equal("01a1acef-e7fe-7660-8a5e-dbabb0764106", task.Str("clientSession"));
+        Assert.Equal(8, /* m9 §17.6: the reserved allowance */ task["used"]!["turns"]!.GetValue<long>());
+        Assert.Equal(session, task.Str("clientSession"));
     }
 
     [Theory]
-    [InlineData(false, """{"type":"assistant","message":"just a string"}""")]
-    [InlineData(false, """{"type":"assistant","message":{"content":["text", 3, null]}}""")]
-    [InlineData(false, """{"type":"result","usage":[1,2],"result":"x"}""")]
-    [InlineData(false, """{"type":"result","type":"result","result":"dup"}""")]
-    [InlineData(true, """{"type":"item.completed","item":"agent_message"}""")]
-    [InlineData(true, """{"type":"turn.completed","usage":"lots"}""")]
-    [InlineData(true, """{"type":"thread.started","thread_id":{"id":1}}""")]
-    public void Stream_IgnoresValidJsonOfTheWrongShape(bool codex, string odd)
+    [InlineData("""{"type":"assistant","message":"just a string"}""")]
+    [InlineData("""{"type":"assistant","message":{"content":["text", 3, null]}}""")]
+    [InlineData("""{"type":"result","usage":[1,2],"result":"x"}""")]
+    [InlineData("""{"type":"result","type":"result","result":"dup"}""")]
+    [InlineData("""{"type":"system","subtype":"init","session_id":{"id":1}}""")]
+    public void Stream_IgnoresValidJsonOfTheWrongShape(string odd)
     {
-        var stream = new HeadlessStream(codex);
+        var stream = new HeadlessStream();
         stream.Feed(odd); // never throws
-        stream.Feed(codex
-            ? """{"type":"item.completed","item":{"type":"agent_message","text":"Fine."}}"""
-            : """{"type":"result","is_error":false,"result":"Fine."}""");
+        stream.Feed("""{"type":"result","is_error":false,"result":"Fine."}""");
         Assert.Equal("Fine.", stream.Answer);
     }
 
@@ -629,7 +582,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.StartsWith("The user uses this PC for:", firstAsk);
         Assert.Contains($"Current report {reportId}:", firstAsk);
         Assert.DoesNotContain("fnd-", firstAsk); // no findings list (m5 §4)
-        Assert.StartsWith("[prompt-v8]", provider.Requests.First().System);
+        Assert.StartsWith("[prompt-v11]", provider.Requests.First().System);
         Assert.Contains(provider.Requests.First().Tools, t => t.Name == "add_card");
 
         await Idle(host);
@@ -643,7 +596,7 @@ public sealed class M5ChatTests : IDisposable
         Assert.Equal(5, resumed.Count); // user, assistant (call), tool results, assistant, user
         Assert.Equal(firstAsk, ((UserText)resumed[0]).Text);
         Assert.IsType<ToolResults>(resumed[2]);
-        Assert.Equal("User: And next?", ((UserText)resumed[4]).Text);
+        Assert.Matches(@"^Permissions now: [^\n]{1,143}\nUser: And next\?$", ((UserText)resumed[4]).Text);
 
         await c.Call("agent.stop", new JsonObject { ["taskId"] = taskId });
         Assert.Null(host.Server.Engine.Store.Read(db => db.Scalar("SELECT body FROM agent_transcripts WHERE task_id = $t", ("$t", taskId))));
@@ -951,28 +904,16 @@ public sealed class M5ChatTests : IDisposable
         var run = Path.Combine(@"C:\Users\u\AppData\Local\OptimizationTool", "agent-runs", "task-0123456789abcdef");
         var claude = HeadlessCommand.Claude(run, Guid.NewGuid(), resume: false);
         Assert.NotNull(ProcessCommand.ForCli(shim, claude, root));
-        var codex = HeadlessCommand.Codex(run, @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe", new string('a', 32), "01a1acef-e7fe-7660-8a5e-dbabb0764106", HeadlessCommand.CodexLockdownFeatures)!;
-        Assert.NotNull(ProcessCommand.ForCli(@"C:\Users\u\AppData\Roaming\npm\codex.cmd", codex, root));
-        var exe = ProcessCommand.ForCli(@"C:\Tools\codex.exe", codex, root)!;
-        Assert.Equal(codex, exe.ArgumentList);
-        // An apostrophe cannot be a TOML literal: it becomes a TOML basic string (an .exe takes it; a plain .cmd line refuses it).
-        var quoted = HeadlessCommand.Codex(run, @"C:\It's\OptimizationTool.Mcp.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures)!;
-        Assert.Contains("""mcp_servers.optimization-tool.command="C:\\It's\\OptimizationTool.Mcp.exe" """.TrimEnd(), quoted);
-        Assert.NotNull(ProcessCommand.ForCli(@"C:\Tools\codex.exe", quoted, root));
-        Assert.Null(ProcessCommand.ForCli(@"C:\Tools\other.cmd", quoted, root));
-        Assert.Null(HeadlessCommand.Codex(run, @"C:\a""b.exe", new string('a', 32), null, HeadlessCommand.CodexLockdownFeatures));
-        Assert.Null(HeadlessCommand.Codex(run, @"C:\b.exe", "not-a-token", null, HeadlessCommand.CodexLockdownFeatures));
-        Assert.Null(HeadlessCommand.Codex(run, @"C:\b.exe", new string('a', 32), "x' -c evil='1", HeadlessCommand.CodexLockdownFeatures));
+        var exe = ProcessCommand.ForCli(@"C:\Tools\claude.exe", claude, root)!; // an .exe takes the argument list as is
+        Assert.Equal(claude, exe.ArgumentList);
     }
 
     [Theory]
-    [InlineData(false, """{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}""", true)]
-    [InlineData(false, """{"type":"result","is_error":true,"result":"API Error: 500"}""", false)]
-    [InlineData(true, """{"type":"turn.failed","error":{"message":"unexpected status 401 Unauthorized"}}""", true)]
-    [InlineData(true, """{"type":"turn.failed","error":{"message":"stream disconnected"}}""", false)]
-    public void Stream_DetectsSignInProblems(bool codex, string line, bool auth)
+    [InlineData("""{"type":"result","is_error":true,"result":"Not logged in · Please run /login"}""", true)]
+    [InlineData("""{"type":"result","is_error":true,"result":"API Error: 500"}""", false)]
+    public void Stream_DetectsSignInProblems(string line, bool auth)
     {
-        var stream = new HeadlessStream(codex);
+        var stream = new HeadlessStream();
         stream.Feed(line);
         Assert.Null(stream.Answer);
         Assert.Equal(auth, stream.LooksLikeAuth(""));

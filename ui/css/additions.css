@@ -50,15 +50,8 @@
 .ot-copy code { flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; color: var(--ink); }
 .ot-frost .ot-copy { background: var(--frost-btn-well); box-shadow: none; }
 .ot-frost .ot-copy code { color: var(--frost-btn-ink); }
-.ot-connect-steps li.ot-connect-cmd { grid-template-columns: 1fr; padding-left: 40px; }
 .ot-waiting::after { content: ''; display: inline-block; width: 6px; height: 6px; margin-left: 8px; border-radius: 50%; background: var(--accent); vertical-align: 2px; animation: ot-pulse 1.6s ease-in-out infinite; }
-.ot-pair { gap: var(--space-3); }
-.ot-pair.is-inline { display: flex; flex-direction: column; }
-.ot-pair-code { font-size: 28px; line-height: 34px; font-weight: 500; letter-spacing: 0.2em; }
 .ot-share-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
-.ot-grant-sheet { width: 100%; max-width: 680px; margin-top: var(--space-4); padding: var(--space-5); gap: var(--space-4); }
-.ot-grant-sheet .ot-grant-cols { gap: var(--space-5); }
-.ot-grant-sheet .ot-grant-row { padding: 6px 0; }
 .ot-activity.is-compact { width: 100%; max-width: 680px; margin-top: var(--space-4); padding: var(--space-5); gap: var(--space-4); }
 .ot-activity.is-compact .ot-activity-head { align-items: center; }
 .ot-activity.is-compact .ot-step { padding-bottom: var(--space-3); }
@@ -75,20 +68,14 @@
 .ot-pill-open { display: flex; flex-direction: column; justify-content: center; min-width: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 .ot-pill-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 .ot-conn-wrap { position: absolute; top: 72px; right: 24px; z-index: 4; width: min(420px, calc(100% - 48px)); }
-.ot-conn { padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); }
-.ot-conn-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
-.ot-conn .ot-choice-foot { flex-wrap: wrap; }
+/* The AI pill panel under the pill: right-aligned like the pill. */
+.ot-conn-wrap > .ot-pillpanel { margin-left: auto; }
 .ot-answer-fail { display: flex; align-items: center; gap: var(--space-3); }
 
 /* Activity progress: the latest row flashes once; meters ease (the track's own transition). */
 @keyframes ot-fresh { from { background: var(--tint-hover); } to { background: transparent; } }
 .ot-activity .ot-step.is-fresh { animation: ot-fresh 2s ease-out; border-radius: var(--radius-sm); }
 @media (prefers-reduced-motion: reduce) { .ot-activity .ot-step.is-fresh { animation: none; } .ot-track > span { transition: none; } }
-
-/* M4: plan cards and blocked plans. */
-.ot-plan-blocked { display: flex; flex-direction: column; gap: var(--space-3); }
-.ot-plan .ot-diff { margin-top: 2px; }
-.ot-insight-preview .ot-turn { margin-top: var(--space-2); }
 
 /* v1.4: up to three cards. 3 across when wide, 2 when medium, stacked when narrow (CSS only). The open card spans
    the row; the others sit beneath it. Only the first card keeps live blur; the others use a fuller fill. */
@@ -110,6 +97,10 @@
 .ot-aiscan > .ot-activity, .ot-aiscan > .ot-answers { width: 100%; max-width: none; margin: 0; }
 /* Answers keep the AI's own line breaks (numbered points). */
 .ot-answer > .text-callout, .ot-reply > span { white-space: pre-line; }
+/* design v70 finished run in the app: paragraphs keep the AI's line breaks. v72: the × at the right of the AI's name line
+   (the answer panels' own .ot-answer-head below aligns to the top). */
+.ot-run-para { white-space: pre-line; overflow-wrap: anywhere; }
+.ot-activity-answer > .ot-answer-head { align-items: center; justify-content: space-between; }
 
 /* An answer on the main page: Close at the top right; the AI's follow-ups as a wrapping row of buttons. */
 .ot-answers { position: relative; }
@@ -350,3 +341,51 @@
 @media (prefers-reduced-motion: reduce) {
   .ot-gauge-fill, .ot-bstep-bar > span { transition: none; }
 }
+
+/* M9: the permissions line under the ask box (PermissionsSummary), as wide as the box. */
+.ot-perm-sum.ot-perm-under { width: 100%; max-width: 640px; margin-top: var(--space-2); padding: 0 var(--space-4); }
+/* Text for screen readers only (a state the page shows with an icon). */
+.ot-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* Design v60: a card under the ask box is capped at 680px and centred, like issue cards (the design's .ot-ask-result >
+   .ot-approval; here the card is a child of the main column). */
+.ot-flow-main > .ot-approval { max-width: 680px; margin-inline: auto; }
+/* m9 §17.2: an administrator-checks request beside the chat (design AdminRights: AdminChecks in a glass panel), as wide as a plan there. */
+.ot-flow-main > .ot-checks-side { width: 100%; max-width: 680px; margin-inline: auto; box-sizing: border-box; }
+
+/* ---------- Report a problem (design ReportProblem): the preview, the prompt and the logo's app menu ---------- */
+.ot-rp { width: 100%; max-width: 680px; margin-inline: auto; padding: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); box-sizing: border-box; }
+.ot-rp:focus { outline: none; }
+.ot-rp p { margin: 0; }
+.ot-rp-head { display: flex; align-items: center; gap: var(--space-3); }
+.ot-rp-head h2 { margin: 0 auto 0 0; }
+.ot-rp-x { width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: var(--radius-sm); background: none; color: var(--ink-muted); cursor: pointer; }
+.ot-rp-x:hover { background: var(--tint-hover); color: var(--ink); }
+.ot-rp-x:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-rp-box { margin: 0; max-height: 320px; min-height: 120px; overflow: auto; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); background: var(--ground); box-shadow: var(--shadow-neu-inset-sm); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.ot-rp-box:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-rp-box.is-building { display: flex; align-items: center; gap: 10px; color: var(--ink-muted); }
+.ot-rp-note { display: flex; align-items: flex-start; gap: 6px; }
+.ot-rp-note .ot-icon { flex: none; margin-top: 2px; color: var(--exposure); }
+.ot-rp-status:empty { display: none; }
+.ot-rp-status.is-warn { color: var(--ink); font-weight: 600; }
+.ot-rp-foot { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
+.ot-rp-hint { margin-right: auto; }
+.ot-rp-foot .ot-approval-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; }
+.ot-rp-status, .ot-rp-note, .ot-problem-text { overflow-wrap: anywhere; }
+/* On the main page: under the toolbar, spaced like the benchmark panel. Away from it: under the top row, before the step. */
+.ot-flow-main > .ot-rp, .ot-flow-main > .ot-problem { margin-top: var(--space-4); }
+.ot-flow-stage > .ot-rp-top { flex: none; margin-bottom: var(--space-5); }
+
+.ot-problem { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); width: min(100%, 520px); padding: 10px 12px 10px 16px; box-sizing: border-box; }
+.ot-problem-icon { flex: none; color: var(--exposure); }
+.ot-problem-text { flex: 1 1 200px; min-width: 0; }
+.ot-problem-btns { display: inline-flex; gap: var(--space-2); margin-left: auto; }
+
+.ot-appmenu { position: relative; display: inline-block; }
+.ot-appmenu-btn { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; padding: 4px 8px 4px 6px; border: 0; border-radius: var(--radius-md); background: none; color: var(--ink-muted); cursor: pointer; }
+.ot-appmenu-btn:hover { background: var(--tint-hover); }
+.ot-appmenu-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ot-appmenu-chev { transform: rotate(90deg); }
+.ot-appmenu-btn[aria-expanded="true"] .ot-appmenu-chev { transform: rotate(-90deg); }
+.ot-appmenu .ot-popover.ot-appmenu-pop { left: 0; right: auto; margin: 0; width: min(calc(100vw - 32px), 300px); }
+.ot-appmenu-ver { padding: 8px 12px 4px; border-top: 1px solid var(--grid-major); margin-top: 4px; }

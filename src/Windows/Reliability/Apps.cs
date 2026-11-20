@@ -127,8 +127,7 @@ internal static class AppsNormalizer
             var name = R.Clean(e.DisplayName, 100);
             if (name.Length == 0) continue;
             if (e.SystemComponent) { skippedSystem++; continue; }
-            if (e.HasParent || KbName.IsMatch(name) || KbName.IsMatch(e.KeyName) ||
-                (e.ReleaseType is { } rt && Regex.IsMatch(rt, "update|hotfix", RegexOptions.IgnoreCase))) { skippedUpdates++; continue; }
+            if (IsUpdate(e, name)) { skippedUpdates++; continue; }
             var publisher = R.Clean(e.Publisher, 80);
             var version = R.Clean(e.Version, 40);
             var identity = $"{name}\0{publisher}\0{version}".ToLowerInvariant();
@@ -169,6 +168,9 @@ internal static class AppsNormalizer
                 ["kind"] = "app",
                 ["sizeBytes"] = null,
                 ["sizeQuality"] = "unknown",
+                // Local only (m9 §3.1): the package family name, so app.uninstall_store can find this package again. The
+                // projector's allowlist never releases it.
+                ["familyName"] = p.FamilyName,
             }, $"{name} is installed from the Store or a package; size unknown.", null));
         }
 
@@ -192,6 +194,11 @@ internal static class AppsNormalizer
         else status = "partial";
         return new CollectorResult(R.Sorted(facts), new CoverageReceipt(status, facts.Count - 1, failed.Count > 0 ? string.Join("; ", failed) : null));
     }
+
+    /// <summary>An update registration (a child of another entry, a KB number, or a release type of update or hotfix), not a program.</summary>
+    internal static bool IsUpdate(RawUninstallEntry e, string name) =>
+        e.HasParent || KbName.IsMatch(name) || KbName.IsMatch(e.KeyName) ||
+        (e.ReleaseType is { } rt && Regex.IsMatch(rt, "update|hotfix", RegexOptions.IgnoreCase));
 
     internal static string Size(long bytes)
     {

@@ -31,6 +31,12 @@ public sealed record ListeningProgram(string? ImagePath, string Protocol, int Po
 public sealed record InboundAllowRule(string Name, string? ApplicationPath, string? ServiceName, string? LocalPorts, string Protocol, bool BuiltIn,
     bool PackageScoped = false); // scoped to an app package (AppContainer SID); not attributed to a listener
 
+/// <summary>Writes exactly one field: the Public profile's EnableFirewall in the local store. Only the elevated broker has one (fakes in tests).</summary>
+public interface IPublicFirewallWriter
+{
+    void SetPublicEnabled(bool enabled);
+}
+
 /// <summary>Read-only access to the Public firewall state (fakes in tests).</summary>
 public interface IPublicFirewallReader
 {

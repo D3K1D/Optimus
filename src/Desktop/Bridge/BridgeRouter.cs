@@ -42,7 +42,7 @@ public sealed class BridgeRouter
         "starter.list",
         "scan.start", "scan.get", "scan.cancel",
         "report.get", "report.list", "evidence.get",
-        "followup.get", "followup.respond",
+        "followup.get", "followup.respond", "followup.front",
         "events.read",
         // v1.1 (§9)
         "finding.get", "finding.setDisposition", "finding.clearDisposition",
@@ -56,12 +56,19 @@ public sealed class BridgeRouter
         "operation.get", "operation.list", "manual.recheck",
         // v1.5 (m6-benchmark.md §2).
         "bench.capabilities", "bench.start", "bench.get", "bench.cancel", "bench.list", "bench.evidence",
+        // m9 §1.2 and §2 (contracts/m9-ai-powers.md §8).
+        "ai.getPermissions", "ai.setPermissions", "guide.get", "operation.stop", "operation.transcript",
+        // m9 §6. research.source is shell-only (sent by SourceOpener); the page opens a source with shell.openSource.
+        "research.get", "research.start", "research.cancel",
+        // m9 §17.3 "Fix for me".
+        "action.narrow", "fix.dismiss", "checks.approve", "checks.decline", "checks.list",
     }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>Renderer-callable methods the shell handles itself (§9). Never forwarded to the backend.</summary>
     public static readonly FrozenSet<string> ShellMethods = new[] { SettingsLauncher.Method, SettingsLauncher.UrlMethod, ApiKeyRequest.Method, PlanApproval.Method, ImageSave.Method,
         ClientConnector.StatusMethod, ClientConnector.RegisterMethod, ClientConnector.UnregisterMethod, ClientConnector.InstallMethod, ClientConnector.OpenMethod, ClientConnector.SignInMethod,
-        Backend.BackendConnection.RetryMethod }.ToFrozenSet(StringComparer.Ordinal);
+        Backend.BackendConnection.RetryMethod, SourceOpener.Method,
+        ProblemReporter.ReportMethod, ProblemReporter.OpenIssueMethod, ProblemReporter.CrashStatusMethod, ProblemReporter.CrashDismissMethod }.ToFrozenSet(StringComparer.Ordinal);
 
     private static readonly JsonDocumentOptions ParseOptions = new() { MaxDepth = 64 };
 

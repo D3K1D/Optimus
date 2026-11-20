@@ -48,7 +48,7 @@ public sealed partial class ApiKeyRequest
         _nowTicks = nowTicks ?? Stopwatch.GetTimestamp;
     }
 
-    public async Task<string> HandleAsync(JsonNode id, JsonObject? parameters, IBackend backend, DesktopLog log, CancellationToken ct)
+    public async Task<string> HandleAsync(JsonNode id, JsonObject? parameters, IBackend backend, AppLog log, CancellationToken ct)
     {
         if (parameters is null || parameters.Count != 1
             || parameters["kind"] is not JsonValue v || !v.TryGetValue<string>(out var kind) || !Kinds.Contains(kind))
@@ -79,7 +79,7 @@ public sealed partial class ApiKeyRequest
         }
     }
 
-    private async Task<JsonObject> PromptAndSetAsync(string kind, IBackend backend, DesktopLog log, CancellationToken ct)
+    private async Task<JsonObject> PromptAndSetAsync(string kind, IBackend backend, AppLog log, CancellationToken ct)
     {
         ApiKeyEntry? entry;
         try

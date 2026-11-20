@@ -38,8 +38,20 @@
         "origin": { "enum": ["report", "ai"], "description": "m5-chat §5: ai = added by add_card." },
         "sourceTaskId": { "type": ["string", "null"], "pattern": "^task-", "description": "m5-chat §5: the task that added an AI card (agent.get it for the evidence); null for report cards." },
         "note": { "type": ["string", "null"], "description": "m5-chat §5: the AI note (note_card), plain untrusted text." },
+        "fix": { "oneOf": [{ "type": "null" }, { "$ref": "fix.schema.json#/$defs/cardFix" }], "description": "m9 §17.3: the card's Fix for me state, derived on read (null: none, the card is in its normal state)." },
         "noteBy": { "type": ["string", "null"], "description": "The provider label that wrote the note." },
         "why": { "type": "string", "description": "AI cards: the add_card why text." },
+        "checkup": {
+          "description": "m9 §6.8: present on an AI check-up card (origin ai, findingId null, no action): what kind of reported problem and its numbered sources (opened by sourceId through shell.openSource). Web-derived text.",
+          "type": "object",
+          "required": ["kind", "sources", "checkedAt"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "$ref": "research.schema.json#/$defs/checkupKind" },
+            "sources": { "type": "array", "minItems": 1, "maxItems": 3, "items": { "$ref": "research.schema.json#/$defs/source" } },
+            "checkedAt": { "$ref": "scan.schema.json#/$defs/timestamp", "description": "When the check-up found it (a replacement: when it was found again)." }
+          }
+        },
         "category": { "type": "string" },
         "title": { "type": "string" },
         "text": { "type": "string" },
@@ -70,7 +82,11 @@
           ]
         },
         "actionId": { "type": ["string", "null"] },
+        "actionParameters": { "type": ["object", "null"], "description": "M4: the parameters the card's rule chose for actionId (the preview and the plan use them); absent or null when the action takes none." },
+        "addedBy": { "type": "string", "description": "m5-chat §5, AI cards: the provider label that added the card." },
+        "findingIds": { "type": "array", "items": { "type": "string", "pattern": "^fnd-" }, "description": "m5-chat §5, AI cards: the findings add_card named." },
         "settingsUri": { "type": ["string", "null"], "pattern": "^(ms-settings|windowsdefender):" },
+        "settingsPath": { "type": "string", "description": "Design v59: the page as Windows names it in English (e.g. Settings › Apps › Startup), sent beside settingsUri only when Windows’ display language is English and the page has a known path; absent otherwise." },
         "reply": {
           "oneOf": [
             { "type": "null" },

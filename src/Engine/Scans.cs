@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Engine;
 
@@ -9,7 +10,8 @@ namespace OptimizationTool.Engine;
 /// with its evidence, coverage and events in one transaction; the finish step builds the report from whatever was
 /// committed. A skippable collector (the sampler) can be skipped on its own (protocol §9 scan.skipCollector).
 /// </summary>
-internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog catalog, TimeSpan scanDeadline, TimeProvider time, Action<string> log, WorkLease? lease = null)
+internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog catalog, TimeSpan scanDeadline, TimeProvider time, Action<string> log, WorkLease? lease = null,
+    SettingsPaths? paths = null)
 {
     public const int ExpensiveSlots = 2, CheapSlots = 4;
     public static readonly TimeSpan SkipGrace = TimeSpan.FromSeconds(5);
@@ -81,6 +83,7 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
             _lease.Acquire(WorkLease.Scan, scanId);
             leased = scanId;
             started = new Run(scanId, plan, scanDeadline);
+            AppLog.Current.Info($"scan: {scanId} start intent={effective} collectors={plan.Count}");
             return new JsonObject { ["scanId"] = scanId };
         }));
         }
@@ -114,6 +117,7 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
     {
         Run? run;
         lock (_gate) _runs.TryGetValue(scanId, out run);
+        AppLog.Current.Debug($"scan: {scanId} cancel requested running={run is not null}");
         if (run is not null)
         {
             await run.UserCancel.CancelAsync().ConfigureAwait(false);
@@ -161,7 +165,7 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
         lock (_gate) runs = [.. _runs.Values];
         foreach (var run in runs) { run.ShuttingDown = true; await run.UserCancel.CancelAsync().ConfigureAwait(false); }
         try { await Task.WhenAll(runs.Select(r => r.Task)).WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false); }
-        catch (Exception ex) { log($"stopping scans: {ex.Message}"); }
+        catch (Exception ex) { AppLog.Current.Warn($"scan: stopping scans failed {ex.GetType().Name}", ErrorSites.ScanStop); }
     }
 
     private async Task RunAsync(Run run)
@@ -176,9 +180,9 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
         }
         catch (Exception ex)
         {
-            log($"scan {run.ScanId} failed: {ex}");
+            AppLog.Current.Error($"scan: {run.ScanId} failed {ex.GetType().Name}", ErrorSites.ScanFailed, ex);
             try { store.Write(db => Finish(db, run.ScanId, "failed", deadlineHit: false)); }
-            catch (Exception inner) { log($"scan {run.ScanId} could not be finished: {inner.Message}"); }
+            catch (Exception inner) { AppLog.Current.Error($"scan: {run.ScanId} could not be finished {inner.GetType().Name}", ErrorSites.ScanFailed); }
         }
         finally
         {
@@ -206,7 +210,9 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
 
             using var tick = new CancellationTokenSource();
             var ticker = AuditCatalog.IsSkippable(collector) ? TickAsync(run, tick.Token) : Task.CompletedTask;
+            var collectClock = System.Diagnostics.Stopwatch.StartNew();
             var (facts, receipt) = await CollectAsync(collector, run.UserCancel.Token, run.Deadline.Token, running.Skip.Token).ConfigureAwait(false);
+            LogCollector(run.ScanId, collector.Id, receipt, collectClock.ElapsedMilliseconds);
             await tick.CancelAsync().ConfigureAwait(false);
             await ticker.ConfigureAwait(false);
 
@@ -242,7 +248,7 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
             }
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { log($"progress tick: {ex.Message}"); }
+        catch (Exception ex) { AppLog.Current.Debug($"scan: progress tick failed {ex.GetType().Name}"); }
     }
 
     /// <summary>
@@ -315,6 +321,16 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
             ("$i", id), ("$s", scanId), ("$c", collector.Id), ("$o", ord * 1000 + index), ("$j", fact.Subject), ("$b", Json.Write(body)));
     }
 
+    /// <summary>One line per collector: id, status, observation count and time. A failure or timeout is Warn; its reason only when
+    /// it is the exception type (a collector's own reason text is not logged).</summary>
+    private static void LogCollector(string scanId, string collectorId, CoverageReceipt receipt, long ms)
+    {
+        var line = $"scan: {scanId} collector {collectorId} {receipt.Status} obs={receipt.Observations} ms={ms}";
+        if (receipt.Status is "failed") AppLog.Current.Warn(line + $" error={receipt.Reason}", ErrorSites.ScanCollectorFailed);
+        else if (receipt.Status is "timed_out" or "denied") AppLog.Current.Warn(line, ErrorSites.ScanCollectorGap);
+        else AppLog.Current.Debug(line);
+    }
+
     private static void SetStatus(Db db, string scanId, string collectorId, string status, int observations, string? reason) =>
         db.Exec("UPDATE scan_collectors SET status = $st, observations = $o, reason = $r WHERE scan_id = $s AND collector_id = $c",
             ("$st", status), ("$o", observations), ("$r", reason), ("$s", scanId), ("$c", collectorId));
@@ -340,12 +356,14 @@ internal sealed class ScanCoordinator(Store store, Fixture fixture, AuditCatalog
         if (status != "failed")
         {
             var reportStatus = status is "complete" or "complete_with_gaps" ? status : "partial";
-            reportId = new ReportBuilder(fixture, catalog).Build(db, scanId, reportStatus, finishedAt);
+            reportId = new ReportBuilder(fixture, catalog, paths ?? SettingsPaths.None).Build(db, scanId, reportStatus, finishedAt);
         }
         db.Exec("UPDATE scans SET status = $st, finished_at = $f, report_id = $r WHERE scan_id = $s",
             ("$st", status), ("$f", finishedAt), ("$r", reportId), ("$s", scanId));
         db.AppendEvent(Stream(scanId), "scan.progress", ProgressEvent(db, scanId, null));
         db.AppendEvent(Stream(scanId), "scan.finished", new JsonObject { ["status"] = status, ["reportId"] = reportId });
+        var scanEnd = $"scan: {scanId} end status={status} report={reportId ?? "none"} gaps={statuses.Count(s => s != "complete")}/{statuses.Count}";
+        if (status == "failed") AppLog.Current.Warn(scanEnd, ErrorSites.ScanFailed); else AppLog.Current.Info(scanEnd);
         // Released before the events publish, so a client reacting to scan.finished can start the next run at once.
         _lease.Release(WorkLease.Scan, scanId);
     }

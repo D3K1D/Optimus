@@ -1,6 +1,6 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
+
+
+
 using System.Text.Json.Nodes;
 using OptimizationTool.Engine.Actions;
 
@@ -16,6 +16,9 @@ public static class FirewallPlan
     public const string ActionId = "firewall.enable_public";
     public const string ManualUri = "windowsdefender://network";
     public const string Field = "PublicProfile.EnableFirewall";
+    /// <summary>Host handler and broker handler version (they must match, m9 §3.5).</summary>
+    public const string HandlerVersion = "1.0.0";
+    public const string Label = "Turn on firewall for public networks";
 
     public static JsonObject Target() => new() { ["type"] = "firewall_profile", ["id"] = "public", ["label"] = "Public network" };
 
@@ -83,7 +86,7 @@ public static class FirewallPlan
 
             return new ActionResolution(true, target2, State(false, false), State(true, true), rows,
                 [new("Network", "Public network in use")], tradeoffs,
-                "Only while the public firewall is still on");
+                "You can undo this while the public firewall is still on.");
         }
 
         // disable = undo of a verified enable
@@ -96,7 +99,7 @@ public static class FirewallPlan
             ],
             [new("Network", s.PublicActive == true ? "Public network in use" : "No public network right now")],
             ["Other devices on public networks can reach apps that accept connections.", "Windows Security will warn that your PC is at risk."],
-            "Only while the public firewall is still off");
+            "You can undo this while the public firewall is still off.");
     }
 
     public static ActionResolution Ineligible(string code, string message) => ActionResolution.Ineligible(code, message, ManualUri);
@@ -173,51 +176,6 @@ public static class FirewallPlan
     {
         try { return string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase); }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
-    }
-
-    /// <summary>
-    /// SHA-256 over the canonical (sorted-key) JSON of the fields the broker recomputes: action, mode, target id,
-    /// before and after. The broker refuses unless its live recomputation hashes to the same value.
-    /// </summary>
-    public static string ContentHash(string actionId, string mode, JsonObject target, JsonObject before, JsonObject after)
-    {
-        var doc = new JsonObject
-        {
-            ["actionId"] = actionId,
-            ["mode"] = mode,
-            ["targetId"] = Str(target["id"]),
-            ["before"] = before.DeepClone(),
-            ["after"] = after.DeepClone(),
-        };
-        var sb = new StringBuilder();
-        Canonical(doc, sb);
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
-    }
-
-    private static void Canonical(JsonNode? node, StringBuilder sb)
-    {
-        switch (node)
-        {
-            case null: sb.Append("null"); break;
-            case JsonObject o:
-                sb.Append('{');
-                var first = true;
-                foreach (var (k, v) in o.OrderBy(p => p.Key, StringComparer.Ordinal))
-                {
-                    if (!first) sb.Append(',');
-                    first = false;
-                    sb.Append(JsonSerializer.Serialize(k)).Append(':');
-                    Canonical(v, sb);
-                }
-                sb.Append('}');
-                break;
-            case JsonArray a:
-                sb.Append('[');
-                for (var i = 0; i < a.Count; i++) { if (i > 0) sb.Append(','); Canonical(a[i], sb); }
-                sb.Append(']');
-                break;
-            default: sb.Append(node.ToJsonString()); break;
-        }
     }
 
     public static string? Str(JsonNode? n) => n is JsonValue v && v.TryGetValue(out string? s) ? s : null;

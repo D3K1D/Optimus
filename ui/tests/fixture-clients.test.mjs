@@ -28,26 +28,29 @@ test('installed client: not registered → added; failed and cancelled once; out
 
 test('client not installed: status says so, register answers not_installed, the command is the fallback', async () => {
   const be = createFixtureAdapter({ fixture, extras, storage: memStore(), timeScale: 0.01 });
-  const st = await be.call('shell.clientStatus', { client: 'codex' });
+  await be.call('fixture.setClient', { client: 'claude_code', installed: false });
+  const st = await be.call('shell.clientStatus', { client: 'claude_code' });
   assert.deepEqual([st.installed, st.registered], [false, 'unknown']);
-  assert.match(st.command, /^codex mcp add optimization-tool -- /);
-  assert.deepEqual(await be.call('shell.registerClient', { client: 'codex' }), { status: 'not_installed' });
+  assert.match(st.command, /^claude mcp add --scope user optimization-tool -- /);
+  assert.deepEqual(await be.call('shell.registerClient', { client: 'claude_code' }), { status: 'not_installed' });
+  // Claude Code is the only client: any other name is invalid.
   await assert.rejects(be.call('shell.clientStatus', { client: 'other' }), (e) => e.code === -32602);
+  await assert.rejects(be.call('shell.installClient', { client: 'other' }), (e) => e.code === -32602);
 });
 
 test('install with PowerShell: started (or cancelled), the CLI shows up a little later with source installer', async () => {
   const be = createFixtureAdapter({ fixture, extras, storage: memStore(), timeScale: 0.01 });
-  await be.call('fixture.setClient', { client: 'codex', cancelNext: true });
-  assert.deepEqual(await be.call('shell.installClient', { client: 'codex' }), { status: 'cancelled' });
-  await be.call('fixture.setClient', { client: 'codex', installDelay: 20 });
-  assert.deepEqual(await be.call('shell.installClient', { client: 'codex' }), { status: 'started' });
-  assert.equal((await be.call('shell.clientStatus', { client: 'codex' })).installed, false);
+  await be.call('fixture.setClient', { client: 'claude_code', installed: false, cancelNext: true });
+  assert.deepEqual(await be.call('shell.installClient', { client: 'claude_code' }), { status: 'cancelled' });
+  await be.call('fixture.setClient', { client: 'claude_code', installDelay: 20 });
+  assert.deepEqual(await be.call('shell.installClient', { client: 'claude_code' }), { status: 'started' });
+  assert.equal((await be.call('shell.clientStatus', { client: 'claude_code' })).installed, false);
   await new Promise((r) => setTimeout(r, 60));
-  const st = await be.call('shell.clientStatus', { client: 'codex' });
-  assert.deepEqual([st.installed, st.source], [true, 'installer']);
+  const st = await be.call('shell.clientStatus', { client: 'claude_code' });
+  assert.deepEqual([st.installed, st.source, st.version], [true, 'installer', '2.1.0']);
 });
 
-test('Claude app present without Claude Code yet: app flag, only for Claude and only while not installed', async () => {
+test('Claude app present without Claude Code yet: app flag, only while not installed', async () => {
   const be = createFixtureAdapter({ fixture, extras, storage: memStore(), timeScale: 0.01 });
   await be.call('fixture.setClient', { client: 'claude_code', installed: false, app: true });
   assert.equal((await be.call('shell.clientStatus', { client: 'claude_code' })).app, true);
@@ -55,8 +58,6 @@ test('Claude app present without Claude Code yet: app flag, only for Claude and 
   const st = await be.call('shell.clientStatus', { client: 'claude_code' });
   assert.equal(st.app, undefined);
   assert.equal(st.source, 'path');
-  await be.call('fixture.setClient', { client: 'codex', app: true });
-  assert.equal((await be.call('shell.clientStatus', { client: 'codex' })).app, undefined);
 });
 
 test('ChatGPT sign-in stand-in: checking, then connected; a chosen failure comes back as the error detail', async () => {

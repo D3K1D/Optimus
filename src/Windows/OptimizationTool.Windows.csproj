@@ -8,5 +8,8 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OptimizationTool.Windows.Tests" />
+    <InternalsVisibleTo Include="OptimizationTool.Tests" />
+    <InternalsVisibleTo Include="OptimizationTool.Broker" />
+    <InternalsVisibleTo Include="OptimizationTool.Broker.Tests" />
   </ItemGroup>
 </Project>

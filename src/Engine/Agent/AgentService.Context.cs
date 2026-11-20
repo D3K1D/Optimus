@@ -99,15 +99,16 @@ public sealed partial class AgentService
     // ---------------------------------------------------------------- context tools (§5)
 
     /// <summary>Phase 3 of a context tool: the result body and its main array, or an error result.</summary>
-    private (JsonObject? Body, string ArrayKey, JsonObject? Error) ContextTool(Db db, JsonObject task, Grant grant, string tool, JsonObject args)
+    private (JsonObject? Body, string ArrayKey, JsonObject? Error) ContextTool(Db db, JsonObject task, Grant grant, string tool, JsonObject args, string? turnId, out bool webText)
     {
+        webText = false; // m9 §5.5: get_cards let through AI text whose writer was web-tainted
         var reportId = task["scope"].Text("reportId");
         var taskId = task.Text("taskId");
         var label = task["recipient"].Text("label");
         switch (tool)
         {
             case Diagnostics.GetCards:
-                var cards = Followups.AgentCards(db, reportId, grant.ShareNames, taskId);
+                var cards = Followups.AgentCards(db, reportId, grant.ShareNames, taskId, out webText);
                 return cards is null
                     ? (null, "", ToolError("unavailable", "The report for this task has no suggestion cards."))
                     : (new JsonObject { ["reportId"] = reportId, ["cards"] = cards }, "cards", null);
@@ -121,12 +122,23 @@ public sealed partial class AgentService
                     : (null, "", ToolError("unavailable", "The report for this task is not readable."));
 
             case Diagnostics.NoteCard:
-                return Followups.NoteCard(db, reportId, args.Text("cardId"), args.Text("text"), taskId, label)
+                // m9 §17.3: an outcome is the AI's attributed opinion on the card's attempt, stored apart from the card's status.
+                if (args["outcome"]?.GetValue<string>() is { } outcome)
+                {
+                    if (Followups.AgentCards(db, reportId, true, taskId)?.OfType<JsonObject>().Any(c => c.Text("cardId") == args.Text("cardId")) != true)
+                        return (null, "", ToolError("invalid_arguments", "Unknown cardId for this report."));
+                    if (NoteOutcome(db, task, turnId, args.Text("cardId"), outcome, AiName(task["recipient"].Text("kind"), "in_app")) is { } refused)
+                        return (null, "", ToolError("not_allowed", refused));
+                }
+                return Followups.NoteCard(db, reportId, args.Text("cardId"), args.Text("text"), taskId, label, IsWebTainted(task))
                     ? (new JsonObject { ["cardId"] = args.Text("cardId"), ["status"] = "noted" }, "", null)
                     : (null, "", ToolError("invalid_arguments", "Unknown cardId for this report."));
 
             case Diagnostics.GetBenchmarks:
                 return Benchmarks(db, task, grant, args);
+
+            case Diagnostics.GetAppGuide:
+                return GuideTool(task, grant, args);
 
             case Diagnostics.GetFanGuidance:
                 return (global::OptimizationTool.Engine.Bench.BenchService.FanGuidanceTool(db, args.Text("part")), "", null);
@@ -145,7 +157,7 @@ public sealed partial class AgentService
                 var dropped = wantFindings.Count - keptFindings.Count + wantEvidence.Count - keptEvidence.Count;
                 if (db.Scalar("SELECT 1 FROM followups WHERE report_id = $r", ("$r", reportId)) is null)
                     return (null, "", ToolError("unavailable", "The report for this task has no suggestion cards."));
-                var cardId = Followups.AddAiCard(db, reportId, taskId, args.Text("title"), args.Text("why"), args.Text("category"), keptFindings, keptEvidence, label);
+                var cardId = Followups.AddAiCard(db, reportId, taskId, args.Text("title"), args.Text("why"), args.Text("category"), keptFindings, keptEvidence, label, IsWebTainted(task));
                 if (cardId is null) return (null, "", ToolError("not_allowed", $"This task already added {Followups.MaxAiCards} cards."));
                 var added = new JsonObject { ["cardId"] = cardId, ["status"] = "added" };
                 if (dropped > 0) added["dropped"] = dropped;

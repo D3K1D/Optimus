@@ -139,7 +139,8 @@
       var scan = Object.keys(S.scans || {}).filter(function (id) { var s = S.scans[id].status; return s === 'running' || s === 'queued'; })[0];
       if (scan) throw E(-32004, 'scan_active', { scanId: scan });
       var ops = (S.actions && S.actions.ops) || {};
-      var op = Object.keys(ops).filter(function (k) { var o = ops[k]; return (o.state === 'prepared' || o.state === 'attempted') && /^(power\.|defender\.)/.test(o.actionId || ''); })[0];
+      var op = Object.keys(ops).filter(function (k) { var o = ops[k]; return ((o.state === 'prepared' || o.state === 'attempted') && /^(power\.|defender\.)/.test(o.actionId || '')) ||
+        (o.kind === 'script' && (o.state === 'prepared' || o.state === 'running')); })[0];   // m9 §5.1: a script's lease
       if (op) throw E(-32013, 'invalid_state', { reason: 'action_active', operationId: op });
       var a = active();
       if (a) throw E(-32013, 'invalid_state', { reason: 'bench_active', runId: a.runId });

@@ -30,13 +30,14 @@ public sealed class BridgeTests
         Assert.Contains("approval in the app", instructions);
         Assert.Contains("get_operation with the planId", instructions);
         Assert.Contains("Never say a change happened unless get_operation returns a verified receipt", instructions);
+        Assert.Contains("call get_app_guide. Do not guess features.", instructions); // m9 §2: the same pointer as prompt v9
 
         var tools = await mcp.Client.ListToolsAsync();
-        Assert.Equal(["add_card", "get_benchmarks", "get_cards", "get_fan_guidance", "get_findings", "get_operation", "get_pc_specs", "get_report_history", "list_capabilities", "note_card", "request_action", "run_diagnostic"], tools.Select(t => t.Name).Order().ToArray());
+        Assert.Equal(["add_card", "get_app_guide", "get_benchmarks", "get_cards", "get_fan_guidance", "get_findings", "get_operation", "get_pc_specs", "get_report_history", "list_capabilities", "note_card", "propose_fix", "propose_script", "request_action", "run_diagnostic", "web_lookup"], tools.Select(t => t.Name).Order().ToArray());
         foreach (var tool in tools)
         {
             var annotations = tool.ProtocolTool.Annotations!;
-            Assert.Equal(tool.Name is not ("request_action" or "note_card" or "add_card"), annotations.ReadOnlyHint);
+            Assert.Equal(tool.Name is not ("request_action" or "propose_fix" or "propose_script" or "note_card" or "add_card"), annotations.ReadOnlyHint);
             Assert.False(annotations.OpenWorldHint);
             Assert.False(annotations.DestructiveHint);
             Assert.False(annotations.IdempotentHint);
@@ -47,7 +48,7 @@ public sealed class BridgeTests
         }
 
         var run = JsonNode.Parse(tools.Single(t => t.Name == "run_diagnostic").ProtocolTool.InputSchema.GetRawText())!;
-        Assert.Equal(10, run["properties"]!["diagnosticId"]!["enum"]!.AsArray().Count);
+        Assert.Equal(13, /* m9 §17.2: ten user-tier diagnostics and three administrator checks */ run["properties"]!["diagnosticId"]!["enum"]!.AsArray().Count);
         Assert.Contains("sensors.snapshot", run["properties"]!["diagnosticId"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()));
         Assert.Equal("diagnosticId", run["required"]![0]!.GetValue<string>());
         Assert.Equal(["system", "application", "update", "defender", "exposed", "all"], run["properties"]!["target"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
@@ -63,13 +64,20 @@ public sealed class BridgeTests
         Assert.Contains("approve", request.Description);
         Assert.Contains("planId", request.Description);
         var ra = JsonNode.Parse(request.ProtocolTool.InputSchema.GetRawText())!;
-        Assert.Equal(["actionId", "targetRef", "parameters", "findingRef"], ra["properties"]!.AsObject().Select(p => p.Key).ToArray());
-        Assert.Equal(["power.select_scheme", "defender.update_signatures", "defender.quick_scan", "defender.full_scan", "firewall.enable_public"],
-            ra["properties"]!["actionId"]!["enum"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        Assert.Equal(["actionId", "targetRef", "parameters", "findingRef", "cardRef", "why"], ra["properties"]!.AsObject().Select(p => p.Key).ToArray());
+        Assert.Null(ra["properties"]!["actionId"]!["enum"]); // m9 §2: a shape; the host checks the ID
+        Assert.Equal(ToolCatalog.ActionIdPattern, ra["properties"]!["actionId"]!["pattern"]!.GetValue<string>());
         Assert.Equal("object", ra["properties"]!["targetRef"]!["type"]!.GetValue<string>());
         Assert.Equal("object", ra["properties"]!["parameters"]!["type"]!.GetValue<string>());
         Assert.Equal("^fnd-[A-Za-z0-9-]{1,80}$", ra["properties"]!["findingRef"]!["pattern"]!.GetValue<string>());
+        Assert.Equal("^card-[A-Za-z0-9-]{1,80}$", ra["properties"]!["cardRef"]!["properties"]!["cardId"]!["pattern"]!.GetValue<string>()); // m9 §17.3
         Assert.Equal(["actionId"], ra["required"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        // m9 §4: propose_fix asks for one multi-step fix; its steps name catalog actions by shape.
+        var fix = JsonNode.Parse(tools.Single(t => t.Name == "propose_fix").ProtocolTool.InputSchema.GetRawText())!;
+        Assert.Equal(["findingRef", "cardRef", "title", "why", "steps"], fix["properties"]!.AsObject().Select(p => p.Key).ToArray());
+        Assert.Equal(["title", "why", "steps"], fix["required"]!.AsArray().Select(n => n!.GetValue<string>()).ToArray());
+        Assert.Equal(6, fix["properties"]!["steps"]!["maxItems"]!.GetValue<int>());
+        Assert.Equal(ToolCatalog.ActionIdPattern, fix["properties"]!["steps"]!["items"]!["properties"]!["actionId"]!["pattern"]!.GetValue<string>());
 
         Assert.Equal(0, host.Connections); // listing tools never touches the host
     }
@@ -134,7 +142,7 @@ public sealed class BridgeTests
         var r = await mcp.CallAsync("request_action", new
         {
             actionId = "power.select_scheme",
-            targetRef = new { schemeAlias = "Scheme B" },
+            targetRef = new { evidenceId = "ev-0123456789abcdef" },
             parameters = new { },
             findingRef = "fnd-abc",
         });
@@ -143,7 +151,7 @@ public sealed class BridgeTests
         var call = host.Last("tool.call")!;
         Assert.Equal("request_action", call["name"]!.GetValue<string>());
         Assert.Equal("power.select_scheme", call["arguments"]!["actionId"]!.GetValue<string>());
-        Assert.Equal("Scheme B", call["arguments"]!["targetRef"]!["schemeAlias"]!.GetValue<string>());
+        Assert.Equal("ev-0123456789abcdef", call["arguments"]!["targetRef"]!["evidenceId"]!.GetValue<string>());
         Assert.Equal("fnd-abc", call["arguments"]!["findingRef"]!.GetValue<string>());
         Assert.Equal("plan-7", Json(r)["planId"]!.GetValue<string>());
         Assert.Equal("awaiting_user", Json(r)["status"]!.GetValue<string>());
@@ -196,6 +204,22 @@ public sealed class BridgeTests
         await using var mcp = await McpHarness.StartAsync(host.PipeName, clientName, "9.9");
         await mcp.CallAsync("list_capabilities");
         Assert.Equal(expected, host.Last("agent.pair")!["client"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task RefusedClient_GetsTheHostsMessage_AsClientNotSupported_AndNoCode()
+    {
+        const string message = "Optimus no longer works with Codex. Use Claude Code or the Optimus app.";
+        await using var host = new StubAgentHost { RefusedClient = "codex", RefusalMessage = message };
+        await using var mcp = await McpHarness.StartAsync(host.PipeName, "codex-mcp-client", "0.170.0");
+        var r = await mcp.CallAsync("get_findings");
+        Assert.True(r.IsError);
+        var error = Json(r)["error"]!;
+        Assert.Equal("client_not_supported", error["code"]!.GetValue<string>());
+        Assert.Equal(message, error["message"]!.GetValue<string>()); // word for word, no "could not start pairing" prefix
+        Assert.DoesNotContain("code 4", Text(r));
+        Assert.Equal(0, host.Count("tool.call"));
+        Assert.Contains("client_not_supported", mcp.Client.ServerInstructions); // the model is told what to do with it
     }
 
     [Fact]

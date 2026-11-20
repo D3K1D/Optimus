@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 using System.Text.Json.Nodes;
 using Microsoft.Win32;
 using OptimizationTool.Engine;
+using OptimizationTool.Engine.Agent;
+using OptimizationTool.Windows.Inventory;
 using OptimizationTool.Windows.Security.Common;
 
 namespace OptimizationTool.Windows.Security.Collectors;
@@ -11,10 +13,13 @@ namespace OptimizationTool.Windows.Security.Collectors;
 /// One autostart entry as read. <see cref="ImagePath"/> and <see cref="PayloadPath"/> are full local paths (only
 /// ever normalized before they become evidence). Arguments are never kept — only <see cref="HasArguments"/>.
 /// Source: run | runonce | folder | task | service. Location: hkcu | hklm | user | common | task folder | services.
+/// LocalKey (run, runonce, folder): the exact registry value name or Startup-folder file name; evidence keeps only its
+/// hash (entryKey, local) so a startup action can find the entry again.
 /// </summary>
 internal sealed record StartupItemRaw(
     string Source, string Location, string? View, string Name, string? ValueType,
-    string? ImagePath, bool HasArguments, string? PayloadPath, SignatureInfo Signature, bool? Enabled, string? Trigger);
+    string? ImagePath, bool HasArguments, string? PayloadPath, SignatureInfo Signature, bool? Enabled, string? Trigger,
+    string? LocalKey = null, global::OptimizationTool.Windows.Inventory.FileVersionFacts? File = null);
 
 internal sealed record StartupRaw(
     IReadOnlyList<StartupItemRaw> Items, IReadOnlyList<string> SourceErrors,
@@ -47,9 +52,15 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
 
     // ------------------------------------------------------------------ read
 
-    internal override StartupRaw Read(CancellationToken ct)
+    internal override StartupRaw Read(CancellationToken ct) => ReadScope(_roots, inventory: false, ct);
+
+    /// <summary>
+    /// The read itself. <paramref name="inventory"/> (m9 §6.10, win.inventory.background) widens it to scheduled tasks with
+    /// any trigger and to services of any start type except disabled; the Microsoft rules and caps are the same.
+    /// </summary>
+    internal static StartupRaw ReadScope(PathRoots roots, bool inventory, CancellationToken ct)
     {
-        var ctx = new ReadContext(_roots, ct);
+        var ctx = new ReadContext(roots, inventory, ct);
         try
         {
             Try(ctx, "run keys", () => ReadRunKeys(ctx));
@@ -62,9 +73,11 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
         finally { ctx.Signatures.Dispose(); }
     }
 
-    private sealed class ReadContext(PathRoots roots, CancellationToken ct)
+    private sealed class ReadContext(PathRoots roots, bool inventory, CancellationToken ct)
     {
+        private readonly Dictionary<string, global::OptimizationTool.Windows.Inventory.FileVersionFacts?> _files = new(StringComparer.OrdinalIgnoreCase);
         public PathRoots Roots { get; } = roots;
+        public bool Inventory { get; } = inventory;
         public CancellationToken Ct { get; } = ct;
         public SignatureChecker Signatures { get; } = new();
         public List<StartupItemRaw> Items { get; } = [];
@@ -83,6 +96,15 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
         public LaunchString.Parsed Parse(string? raw) => LaunchString.Parse(raw, Roots, File.Exists, SystemDir);
 
         public SignatureInfo Sign(LaunchString.Parsed p) => Signatures.Check(p.Payload ?? p.Image);
+
+        /// <summary>The version resource (company, version, product) of what the entry launches, read once per file.</summary>
+        public global::OptimizationTool.Windows.Inventory.FileVersionFacts? FileFacts(LaunchString.Parsed p)
+        {
+            var path = p.Payload ?? p.Image;
+            if (path is null) return null;
+            if (!_files.TryGetValue(path, out var facts)) _files[path] = facts = global::OptimizationTool.Windows.Inventory.FileVersions.Read(path);
+            return facts;
+        }
     }
 
     private static void Try(ReadContext ctx, string source, Action read)
@@ -117,7 +139,7 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
                     var parsed = ctx.Parse(raw);
                     bool? enabled = source == "run" && approved.TryGetValue(name, out var en) ? en : source == "run" ? true : null;
                     if (!ctx.Add(new StartupItemRaw(source, loc, viewName, name.Length == 0 ? "(Default)" : name, KindName(kind),
-                        parsed.Image, parsed.HasArguments, parsed.Payload, ctx.Sign(parsed), enabled, "logon"))) return;
+                        parsed.Image, parsed.HasArguments, parsed.Payload, ctx.Sign(parsed), enabled, "logon", LocalKey: name, File: ctx.FileFacts(parsed)))) return;
                 }
             }
         }
@@ -160,7 +182,7 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
                 else parsed = new LaunchString.Parsed(file, false, null);
                 var enabled = approved.TryGetValue(fileName, out var en) ? en : true;
                 if (!ctx.Add(new StartupItemRaw("folder", loc, null, Path.GetFileNameWithoutExtension(fileName), null,
-                    parsed.Image, parsed.HasArguments, null, ctx.Sign(parsed), enabled, "logon"))) return;
+                    parsed.Image, parsed.HasArguments, null, ctx.Sign(parsed), enabled, "logon", LocalKey: fileName, File: ctx.FileFacts(parsed)))) return;
             }
         }
     }
@@ -252,7 +274,11 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
                 if (type == 8) trigger ??= "boot";             // TASK_TRIGGER_BOOT
             }
             Automation.Release(triggers);
-            if (trigger is null) return;
+            if (trigger is null)
+            {
+                if (!ctx.Inventory) return;
+                trigger = "schedule"; // m9 §6.10: the inventory lists every task, whatever starts it
+            }
 
             string? execPath = null;
             var hasArgs = false;
@@ -281,7 +307,7 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
             var enabled = Automation.Get(task, "Enabled") is bool b ? b : (bool?)null;
             var folder = path.LastIndexOf('\\') is var i and > 0 ? path[..i] : "\\";
             ctx.Add(new StartupItemRaw("task", folder, null, Automation.Get(task, "Name") as string ?? path, actionKind,
-                parsed.Image, parsed.HasArguments, parsed.Payload, sig, enabled, trigger));
+                parsed.Image, parsed.HasArguments, parsed.Payload, sig, enabled, trigger, LocalKey: path.Length > 0 ? path : null, File: ctx.FileFacts(parsed)));
         }
         finally { Automation.Release(def); }
     }
@@ -300,7 +326,8 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
             if (key is null) continue;
             using (key)
             {
-                if (key.GetValue("Start") is not int start || start != 2) continue;      // SERVICE_AUTO_START
+                if (key.GetValue("Start") is not int start) continue;
+                if (ctx.Inventory ? start is not (0 or 1 or 2 or 3) : start != 2) continue; // SERVICE_AUTO_START (the inventory: any but disabled)
                 if (key.GetValue("Type") is not int type || (type & 0x30) == 0) continue;  // Win32 own/share process only
                 var imagePath = key.GetValue("ImagePath", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
                 if (string.IsNullOrWhiteSpace(imagePath)) continue;
@@ -322,7 +349,7 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
                 var display = key.GetValue("DisplayName") as string;
                 if (string.IsNullOrWhiteSpace(display) || display.StartsWith('@')) display = name;
                 if (!ctx.Add(new StartupItemRaw("service", "services", null, display, name,
-                    parsed.Image, parsed.HasArguments, parsed.Payload, sig, true, "boot"))) return;
+                    parsed.Image, parsed.HasArguments, parsed.Payload, sig, true, start == 3 ? "manual" : "boot", LocalKey: name, File: ctx.FileFacts(parsed)))) return;
             }
         }
     }
@@ -344,6 +371,10 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
     // ------------------------------------------------------------------ normalize
 
     internal string? UserName { get; init; } = Environment.UserName;
+
+    /// <summary>This PC's user, PC and domain names, which the stored company and version may not name (m9 review R4).</summary>
+    internal IReadOnlyList<LocalIdentity> Identities { get => _identities ??= InventoryKit.LocalIdentities(); init => _identities = value; }
+    private IReadOnlyList<LocalIdentity>? _identities;
 
     internal override CollectorResult Normalize(StartupRaw raw)
     {
@@ -389,7 +420,15 @@ internal sealed class StartupCollector(CollectorOptions options, PathRoots? root
                 ["catalogSigned"] = item.Signature.Catalog,
                 ["enabled"] = item.Enabled,
                 ["trigger"] = item.Trigger,
+                // m9 §6.10: what the launched file says about itself (its version resource), unverified; the signer above is the verified publisher.
+                // m9 review R4: the same never-store and identity check as an inventory item's publisher and version.
+                ["company"] = InventoryKit.Clean(item.File?.Company, Identities, 80),
+                ["version"] = InventoryKit.Version(item.File?.Version, Identities),
                 ["signIn"] = isSignIn,
+                // Local only (m9 §3.1): a SHA-256 key of the exact value name (run, runonce), file name (folder), full task
+                // path (task) or service key name (service), so an action can find this entry again without the name (which
+                // may hold the user's name) in evidence. The projector's allowlist never releases it.
+                ["entryKey"] = item.LocalKey is not null ? global::OptimizationTool.Windows.Actions.Startup.StartupKeys.Of(item.LocalKey) : null,
             }, Display(item, name));
         }
 

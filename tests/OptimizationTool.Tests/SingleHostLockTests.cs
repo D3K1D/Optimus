@@ -146,9 +146,15 @@ public class SingleHostLockTests
             Assert.Equal(HostExitCodes.NeedsUpdate, host.ExitCode);
             var err = (await stderr).Trim();
             Assert.Contains($"needs_update: database schema v{Migrations.Latest + 1} is newer than this build supports (v{Migrations.Latest})", err);
-            Assert.Single(err.Split('\n', StringSplitOptions.RemoveEmptyEntries));
+            var lines = err.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            Assert.Equal(2, lines.Length);                        // "start …", then the one needs_update line
+            Assert.Contains(" start ", lines[0]);
             Assert.DoesNotContain("   at ", err); // no stack trace
             Assert.DoesNotContain("ready ", await stdout);
+            // The same lines are kept in <data dir>\logs\host.log, since the shell starts the host with no console.
+            var file = await File.ReadAllTextAsync(OptimizationTool.Transport.Logging.AppLog.PathFor(dataDir, "host"));
+            Assert.Contains($"needs_update: database schema v{Migrations.Latest + 1}", file);
+            Assert.Contains(" start ", file);
         }
         finally
         {

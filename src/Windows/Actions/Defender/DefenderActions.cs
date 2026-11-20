@@ -50,7 +50,29 @@ internal sealed class DefenderHandler(DefenderOp op, IDefenderSystem system, Tim
     };
     public string Privilege => "none";
     public bool SupportsUndo => false;
+    public bool NothingToUndo => true;
     public string Kind => "provider";
+    public string Group => "security";
+    public string What => op switch
+    {
+        DefenderOp.UpdateSignatures => "Asks Microsoft Defender to download its latest security intelligence.",
+        DefenderOp.QuickScan => "Asks Microsoft Defender to scan the places malware usually hides; it takes a few minutes.",
+        _ => "A full scan can take an hour or more.",
+    };
+    public IReadOnlyList<string> Flags => op switch
+    {
+        DefenderOp.UpdateSignatures => [ActionFlags.Network],
+        DefenderOp.QuickScan => [],
+        _ => [ActionFlags.Long],
+    };
+    public JsonObject? ParameterSchema => op == DefenderOp.FullScan
+        ? new JsonObject
+        {
+            ["type"] = "object", ["additionalProperties"] = false, ["required"] = new JsonArray("confirmLong"),
+            ["properties"] = new JsonObject { ["confirmLong"] = new JsonObject { ["const"] = true } },
+        }
+        : null;
+    public bool TakesLease => true;
 
     private string TargetId => op switch { DefenderOp.UpdateSignatures => "signatures", DefenderOp.QuickScan => "quick_scan", _ => "full_scan" };
     private string ScanKind => op == DefenderOp.QuickScan ? "quick" : "full";
@@ -63,6 +85,19 @@ internal sealed class DefenderHandler(DefenderOp op, IDefenderSystem system, Tim
     };
 
     public ActionRequest? UndoRequest(JsonObject target, JsonObject before) => null;
+
+    /// <summary>
+    /// The running line (design v57): Defender reports no percent, so the line says the whole minutes elapsed.
+    /// Under a minute: "Quick scan · just started" / "Full scan · just started" / "Updating virus definitions";
+    /// then "… · running for N min".
+    /// </summary>
+    internal string ProgressText(TimeSpan elapsed)
+    {
+        var verb = op switch { DefenderOp.UpdateSignatures => "Updating virus definitions", DefenderOp.QuickScan => "Quick scan", _ => "Full scan" };
+        var min = (int)Math.Floor(elapsed.TotalMinutes);
+        if (min < 1) return op == DefenderOp.UpdateSignatures ? verb : verb + " · just started";
+        return $"{verb} · running for {min.ToString(CultureInfo.InvariantCulture)} min";
+    }
 
     public async Task<ActionResolution> ResolveAsync(ActionRequest request, CancellationToken ct)
     {
@@ -103,7 +138,7 @@ internal sealed class DefenderHandler(DefenderOp op, IDefenderSystem system, Tim
         }
         context.Add(new("Admin", "Not usually needed"));
         var target = new JsonObject { ["type"] = "defender", ["id"] = TargetId, ["label"] = "Microsoft Defender" };
-        return new ActionResolution(true, target, before, after, rows, context, tradeoffs, null);
+        return new ActionResolution(true, target, before, after, rows, context, tradeoffs, null, Resources: ["defender:" + TargetId]);
     }
 
     public async Task<JsonObject> ReadTargetAsync(JsonObject target, CancellationToken ct)
@@ -124,7 +159,7 @@ internal sealed class DefenderHandler(DefenderOp op, IDefenderSystem system, Tim
         if (tool.Path is null) return Fail(tool.Problem == "untrusted" ? "tool_untrusted" : "tool_missing", "Defender's command tool could not be verified.", new JsonObject(), ManualUri);
 
         var started = _clock.GetUtcNow();
-        progress?.Report(op == DefenderOp.UpdateSignatures ? "Updating definitions" : $"Scanning · {ScanKind}");
+        progress?.Report(ProgressText(TimeSpan.Zero));
         int exit;
         try
         {
@@ -135,8 +170,7 @@ internal sealed class DefenderHandler(DefenderOp op, IDefenderSystem system, Tim
                 var done = await Task.WhenAny(run, Task.Delay(_tick, _clock, ct)).ConfigureAwait(false);
                 if (done == run) break;
                 ct.ThrowIfCancellationRequested();
-                var min = (int)_clock.GetElapsedTime(t0).TotalMinutes;
-                progress?.Report(op == DefenderOp.UpdateSignatures ? $"Updating definitions · {min} min" : $"Scanning · {ScanKind} · {min} min");
+                progress?.Report(ProgressText(_clock.GetElapsedTime(t0)));
             }
             exit = await run.ConfigureAwait(false);
         }

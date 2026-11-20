@@ -14,7 +14,7 @@ internal sealed class MainForm : Form
     public static readonly Color Ground = Color.FromArgb(0x14, 0x16, 0x1b);
 
     private readonly DesktopOptions _options;
-    private readonly DesktopLog _log;
+    private readonly AppLog _log;
     private readonly BackendConnection _backend;
     private readonly BridgeDispatcher _dispatcher;
     private readonly ClientConnector _clients;
@@ -23,7 +23,7 @@ internal sealed class MainForm : Form
     private int _documentGeneration;
     private bool _documentReady;
 
-    public MainForm(DesktopOptions options, DesktopLog log, BackendConnection backend)
+    public MainForm(DesktopOptions options, AppLog log, BackendConnection backend)
     {
         _options = options;
         _log = log;
@@ -222,13 +222,40 @@ internal sealed class MainForm : Form
             var generation = _documentGeneration;
             string? json;
             try { json = e.WebMessageAsJson; } catch (ArgumentException) { json = null; }
+            var started = Stopwatch.GetTimestamp();
             var reply = await _dispatcher.HandleAsync(json, e.Source, isTopLevel: true, _closing.Token);
+            if (_log.DevEnabled) _log.Debug(BridgeLine(json, reply, started));
             if (reply is not null && generation == _documentGeneration) Post(reply);
         }
         catch (Exception ex)
         {
             _log.Error($"bridge: handler failed ({ex.GetType().Name})");
         }
+    }
+
+    /// <summary>
+    /// <c>bridge: &lt;method&gt; &lt;ms&gt;ms ok|err &lt;code&gt;</c>: the method name only (letters, digits, dots and
+    /// underscores, ≤ 64 chars), never its parameters or the reply's content.
+    /// </summary>
+    internal static string BridgeLine(string? json, string? reply, long started)
+    {
+        var ms = (long)Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+        string method = "?";
+        try
+        {
+            if (json is not null && JsonNode.Parse(json) is JsonObject m && m["method"] is JsonValue mv && mv.TryGetValue<string>(out var name)
+                && name.Length is > 0 and <= 64 && name.All(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_'))
+                method = name;
+        }
+        catch (System.Text.Json.JsonException) { }
+        if (reply is null) return $"bridge: {method} {ms}ms none";
+        try
+        {
+            if (JsonNode.Parse(reply) is JsonObject r && r["error"] is JsonObject err)
+                return $"bridge: {method} {ms}ms err {(err["code"] is JsonValue cv && cv.TryGetValue<int>(out var code) ? code : 0)}";
+        }
+        catch (System.Text.Json.JsonException) { }
+        return $"bridge: {method} {ms}ms ok";
     }
 
     private void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)

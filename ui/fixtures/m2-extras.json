@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "synthetic": true,
-  "note": "UI-only additions on top of contracts/fixtures/m1-simulated-audit.json so the website demo can show the protocol v1.1 (M2) features offline. Not read by the backend. No data from a real PC.",
+  "note": "UI-only additions on top of contracts/fixtures/m1-simulated-audit.json so the website demo can show the protocol v1.1 (M2) features offline. Not read by the backend. No data from a real PC. M9: three network listeners of the host rule net.wildcard_listener_public (c11 signed, c12 unsigned, c13 with nothing found online) give the research demo its eligible findings; what the simulated research finds lives in js/adapter-fixture-research.js. M9 P3a-2A: per-entry startup evidence (win.security.startup) gives c4 a startup.disable action whose card lets the user pick the entry; a process sample (win.perf.sample), a power value and an Explorer setting give c14-c16 real process.end, power.set_value and setting.set actions (adapter-fixture-actions.js simulates the handlers). ruleExtras adds evidence and card fields to an M1 rule.",
   "settingsUri": {
     "c1": "windowsdefender://network",
     "c2": "ms-settings:powersleep",
@@ -12,7 +12,11 @@
     "c7": "ms-settings:display-advanced",
     "c8": "ms-settings:personalization-start",
     "c9": "ms-settings:storagesense",
-    "c10": "windowsdefender://threat"
+    "c10": "windowsdefender://threat",
+    "c11": "windowsdefender://network",
+    "c12": "windowsdefender://network",
+    "c13": "windowsdefender://network",
+    "c14": "ms-settings:powersleep"
   },
   "sensitivity": {
     "e4": "local",
@@ -142,6 +146,247 @@
           "display": "Volume D: has 9 GiB free out of 512 GiB."
         }
       ]
+    },
+    {
+      "id": "fixture.listeners",
+      "version": "1.0.0",
+      "category": "security",
+      "delayMs": 450,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e12",
+          "subject": "net.listener.steam",
+          "source": "Network listeners",
+          "quality": "measured",
+          "value": {
+            "process": "steam.exe",
+            "ports": [
+              "27036/udp"
+            ],
+            "bind": "0.0.0.0",
+            "signed": "valid",
+            "publisher": "Valve Corp.",
+            "product": "Steam"
+          },
+          "display": "steam.exe (signed by Valve Corp.) listens on UDP port 27036 on all networks."
+        },
+        {
+          "key": "e13",
+          "subject": "net.listener.remotehelper",
+          "source": "Network listeners",
+          "quality": "measured",
+          "value": {
+            "process": "RemoteHelper.exe",
+            "ports": [
+              "5900/tcp"
+            ],
+            "bind": "0.0.0.0",
+            "signed": "none"
+          },
+          "display": "RemoteHelper.exe (not signed) listens on TCP port 5900 on all networks."
+        },
+        {
+          "key": "e14",
+          "subject": "net.listener.mediashare",
+          "source": "Network listeners",
+          "quality": "measured",
+          "value": {
+            "process": "MediaShare.exe",
+            "ports": [
+              "8200/tcp"
+            ],
+            "bind": "0.0.0.0",
+            "signed": "unknown"
+          },
+          "display": "MediaShare.exe listens on TCP port 8200 on all networks."
+        }
+      ]
+    },
+    {
+      "id": "win.security.startup",
+      "version": "1.0.0",
+      "category": "performance",
+      "delayMs": 600,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e15",
+          "subject": "startup.run.spotify",
+          "source": "Startup apps",
+          "quality": "measured",
+          "value": {
+            "source": "run",
+            "location": "hkcu",
+            "view": 64,
+            "valueType": "string",
+            "name": "Spotify",
+            "image": "Spotify.exe",
+            "hasArguments": true,
+            "signature": "valid",
+            "signer": "Spotify AB",
+            "enabled": true,
+            "signIn": true,
+            "entryKey": "6c1d0b3f9a7e4e21b8f5d2c47a90e13b5f6d8c2a1e4b7f90d3c5a6b8e2f1d4c7"
+          },
+          "display": "Spotify starts when you sign in. It was last opened 41 days ago."
+        },
+        {
+          "key": "e16",
+          "subject": "startup.run.discord",
+          "source": "Startup apps",
+          "quality": "measured",
+          "value": {
+            "source": "run",
+            "location": "hkcu",
+            "view": 64,
+            "valueType": "string",
+            "name": "Discord",
+            "image": "Update.exe",
+            "hasArguments": true,
+            "signature": "valid",
+            "signer": "Discord Inc.",
+            "enabled": true,
+            "signIn": true,
+            "entryKey": "4e7a1d9c3b6f2e8a5d0c7b4e1f9a6d3c8b5e2f7a4d1c9b6e3f0a7d4c1b8e5f2a"
+          },
+          "display": "Discord starts when you sign in. It was last opened 63 days ago."
+        },
+        {
+          "key": "e17",
+          "subject": "startup.run.armourycrate",
+          "source": "Startup apps",
+          "quality": "measured",
+          "value": {
+            "source": "run",
+            "location": "hkcu",
+            "view": 64,
+            "valueType": "string",
+            "name": "Armoury Crate",
+            "image": "ArmouryCrate.exe",
+            "hasArguments": false,
+            "signature": "valid",
+            "signer": "ASUSTeK COMPUTER INC.",
+            "enabled": true,
+            "signIn": true,
+            "entryKey": "8b3e6a1f4c9d2e7b0a5f8c3d6e1b4a9f2c7e0d5b8a3f6c1e4d9b2a7f0c5e8d3b"
+          },
+          "display": "Armoury Crate starts when you sign in. It was last opened 35 days ago."
+        }
+      ]
+    },
+    {
+      "id": "win.perf.sample",
+      "version": "1.0.0",
+      "category": "performance",
+      "delayMs": 650,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e18",
+          "subject": "perf.process.apphelper",
+          "source": "Process list",
+          "quality": "measured",
+          "value": {
+            "image": "AppHelper.exe",
+            "pid": 7412,
+            "startTime": "2026-11-10T07:12:00Z",
+            "createTime": 133790000000000000,
+            "cpuAvgPercent": 31,
+            "cpuMaxPercent": 58,
+            "validIntervals": 10,
+            "totalIntervals": 10,
+            "foregroundIntervals": 0,
+            "isThisTool": false,
+            "isDefender": false,
+            "normalization": "percentOfAllLogicalProcessors"
+          },
+          "display": "AppHelper.exe averaged 31% CPU over 10 samples while it had no open window."
+        },
+        {
+          "key": "e19",
+          "subject": "perf.process.explorer",
+          "source": "Process list",
+          "quality": "measured",
+          "value": {
+            "image": "explorer.exe",
+            "pid": 5120,
+            "startTime": "2026-11-10T06:58:00Z",
+            "createTime": 133789990000000000,
+            "cpuAvgPercent": 4,
+            "cpuMaxPercent": 9,
+            "validIntervals": 10,
+            "totalIntervals": 10,
+            "foregroundIntervals": 6,
+            "isThisTool": false,
+            "isDefender": false,
+            "normalization": "percentOfAllLogicalProcessors"
+          },
+          "display": "explorer.exe averaged 4% CPU over 10 samples."
+        }
+      ]
+    },
+    {
+      "id": "win.power.values",
+      "version": "1.0.0",
+      "category": "performance",
+      "delayMs": 550,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e20",
+          "subject": "power.setting.display_off",
+          "source": "Windows power settings",
+          "quality": "measured",
+          "value": {
+            "settingId": "power.display_off",
+            "acSeconds": 900,
+            "dcSeconds": 3600
+          },
+          "display": "On battery, the screen turns off after 1 hour without input."
+        }
+      ]
+    },
+    {
+      "id": "win.custom.explorer",
+      "version": "1.0.0",
+      "category": "customization",
+      "delayMs": 500,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e21",
+          "subject": "explorer.file_extensions",
+          "source": "File Explorer options",
+          "quality": "measured",
+          "value": {
+            "hideFileExt": true
+          },
+          "display": "File Explorer hides file name extensions."
+        }
+      ]
+    },
+    {
+      "id": "fixture.biosfan",
+      "version": "1.0.0",
+      "category": "performance",
+      "delayMs": 300,
+      "outcome": "complete",
+      "evidence": [
+        {
+          "key": "e22",
+          "subject": "cooling.bios_fan_mode",
+          "source": "Fan settings (BIOS)",
+          "quality": "reported",
+          "value": {
+            "fan": "CPU",
+            "mode": "Silent",
+            "cpuTempC": 88,
+            "fanRpm": 900
+          },
+          "display": "During the benchmark the CPU reached 88 °C while its fan stayed at 900 RPM."
+        }
+      ]
     }
   ],
   "rules": [
@@ -197,6 +442,184 @@
           "Remove what you don’t need."
         ]
       }
+    },
+    {
+      "ruleId": "net.wildcard_listener_public",
+      "version": "1.0.0",
+      "category": "security",
+      "evidence": [
+        "e12"
+      ],
+      "severity": "low",
+      "confidence": "high",
+      "actionEligibility": "manual_review",
+      "title": "An app listens on all networks",
+      "card": {
+        "key": "c11",
+        "text": "Steam accepts connections on UDP port 27036 from any network. Is that what you want?",
+        "options": [
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ],
+        "guide": [
+          "Open Windows Security › Firewall & network protection.",
+          "Choose Allow an app through firewall.",
+          "Turn off Public for apps that only need your home network."
+        ]
+      }
+    },
+    {
+      "ruleId": "net.wildcard_listener_public",
+      "version": "1.0.0",
+      "category": "security",
+      "evidence": [
+        "e13"
+      ],
+      "severity": "medium",
+      "confidence": "medium",
+      "actionEligibility": "manual_review",
+      "title": "An unsigned app listens on all networks",
+      "card": {
+        "key": "c12",
+        "text": "RemoteHelper.exe isn’t signed and accepts connections on TCP port 5900 from any network. Do you know what it is?",
+        "options": [
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ],
+        "guide": [
+          "Open Windows Security › Firewall & network protection.",
+          "Choose Allow an app through firewall.",
+          "Remove RemoteHelper if you don’t use it."
+        ]
+      }
+    },
+    {
+      "ruleId": "net.wildcard_listener_public",
+      "version": "1.0.0",
+      "category": "security",
+      "evidence": [
+        "e14"
+      ],
+      "severity": "low",
+      "confidence": "high",
+      "actionEligibility": "manual_review",
+      "title": "An app listens on all networks",
+      "card": {
+        "key": "c13",
+        "text": "MediaShare.exe accepts connections on TCP port 8200 from any network. Is that what you want?",
+        "options": [
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ],
+        "guide": [
+          "Open Windows Security › Firewall & network protection.",
+          "Choose Allow an app through firewall.",
+          "Turn off Public for MediaShare if you only share at home."
+        ]
+      }
+    },
+    {
+      "ruleId": "power.display_timeout_long",
+      "version": "1.0.0",
+      "category": "performance",
+      "evidence": [
+        "e20"
+      ],
+      "severity": "low",
+      "confidence": "high",
+      "actionEligibility": "preview_available",
+      "title": "Screen stays on for an hour on battery",
+      "card": {
+        "key": "c14",
+        "actionId": "power.set_value",
+        "actionParameters": {
+          "settingId": "power.display_off",
+          "dc": "5"
+        },
+        "text": "On battery, your screen stays on for an hour after you step away. Would you like it to turn off after 5 minutes?",
+        "options": [
+          "Preview change",
+          "Ask about this",
+          "Ignore"
+        ]
+      }
+    },
+    {
+      "ruleId": "explorer.extensions_hidden",
+      "version": "1.0.0",
+      "category": "customization",
+      "evidence": [
+        "e21"
+      ],
+      "severity": "low",
+      "confidence": "high",
+      "actionEligibility": "preview_available",
+      "title": "File name extensions are hidden",
+      "card": {
+        "key": "c15",
+        "actionId": "setting.set",
+        "actionParameters": {
+          "settingId": "explorer.file_extensions",
+          "value": "shown"
+        },
+        "text": "File Explorer hides file name extensions, so “invoice.pdf.exe” shows as “invoice.pdf”. Would you like to show them?",
+        "options": [
+          "Preview change",
+          "Ask about this",
+          "Ignore"
+        ]
+      }
+    },
+    {
+      "ruleId": "perf.background_cpu",
+      "version": "1.0.0",
+      "category": "performance",
+      "evidence": [
+        "e18"
+      ],
+      "severity": "low",
+      "confidence": "medium",
+      "actionEligibility": "preview_available",
+      "title": "An app keeps the CPU busy in the background",
+      "card": {
+        "key": "c16",
+        "actionId": "process.end",
+        "text": "AppHelper.exe used 31% of the CPU while it had no open window. Would you like to end it now?",
+        "options": [
+          "Preview change",
+          "Ask about this",
+          "Ignore"
+        ]
+      }
+    },
+    {
+      "ruleId": "cooling.bios_fan_silent",
+      "version": "1.0.0",
+      "category": "performance",
+      "evidence": [
+        "e22"
+      ],
+      "severity": "low",
+      "confidence": "medium",
+      "actionEligibility": "manual_review",
+      "title": "Fan curve is set to silent in the BIOS",
+      "card": {
+        "key": "c17",
+        "text": "Your CPU fan stays slow while the CPU runs hot.",
+        "options": [
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ],
+        "guide": [
+          "Restart and open the BIOS (press Delete or F2 while the PC starts)",
+          "Set the CPU fan to Standard (usually under Monitor or Hardware Monitor)",
+          "Save and exit"
+        ]
+      }
     }
   ],
   "rescan": {
@@ -205,5 +628,23 @@
       "e8",
       "e5"
     ]
+  },
+  "ruleExtras": {
+    "startup.many_unused": {
+      "evidence": [
+        "e15",
+        "e16",
+        "e17"
+      ],
+      "card": {
+        "actionId": "startup.disable",
+        "options": [
+          "Preview change",
+          "View steps",
+          "Ask about this",
+          "Ignore"
+        ]
+      }
+    }
   }
 }

@@ -4,7 +4,7 @@ namespace OptimizationTool.Transport;
 
 /// <summary>
 /// One child process invocation, shared by the desktop shell (CLI status, registration) and the host (headless
-/// Claude Code / Codex runs, contracts/m5-chat.md §3). Either <see cref="ArgumentList"/> (passed to
+/// Claude Code runs, contracts/m5-chat.md §3). Either <see cref="ArgumentList"/> (passed to
 /// ProcessStartInfo.ArgumentList), or, only for a .cmd shim, a <see cref="CmdArguments"/> line for cmd.exe built from
 /// validated tokens by <see cref="ForCli"/>. User text never belongs in an argument: callers pass it on stdin.
 /// <see cref="Argv"/> is always the logical CLI argv (the .cmd path for a resolved npm shim, too).
@@ -18,7 +18,7 @@ public sealed record ProcessCommand(string FileName, IReadOnlyList<string> Argum
     public IReadOnlyList<string> Argv { get; init; } = [];
 
     /// <summary>
-    /// .exe → run directly with an argument list. A known npm shim (<c>claude.cmd</c> / <c>codex.cmd</c>, see
+    /// .exe → run directly with an argument list. A known npm shim (<c>claude.cmd</c>, see
     /// <see cref="NpmShim"/>) → what it runs, directly with an argument list (no cmd.exe, so any profile path works).
     /// Any other .cmd → <c>%SystemRoot%\System32\cmd.exe /d /s /c ""shim" "arg" …"</c>:
     /// every token is validated to contain no quote or cmd metacharacter, so quoting each token and wrapping the

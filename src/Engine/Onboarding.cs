@@ -47,10 +47,13 @@ internal sealed class OnboardingService(Store store, Fixture fixture)
         ["goals"] = Json.Array(profile.Goals.Where(GoalLabels.Contains)),
     };
 
-    /// <summary>Provider values and the labels the server reports for them. M1 stores the choice only.</summary>
+    /// <summary>
+    /// Provider values a save accepts and the labels the server reports for them. M1 stores the choice only. A profile saved
+    /// earlier with a value no longer listed (M9 dropped one) still loads as stored, so the app can ask the user again.
+    /// </summary>
     public static readonly IReadOnlyDictionary<string, string> Providers = new Dictionary<string, string>
     {
-        ["local"] = "Local only", ["later"] = "Later", ["claude-code"] = "Claude Code", ["codex"] = "Codex", ["api"] = "API key", ["chatgpt"] = "ChatGPT",
+        ["local"] = "Local only", ["later"] = "Later", ["claude-code"] = "Claude", ["api"] = "API key", ["chatgpt"] = "ChatGPT",
     };
 
     private const int MaxChoices = 16, MaxChoiceLength = 100, MaxCustomLength = 200;
@@ -87,7 +90,11 @@ internal sealed class OnboardingService(Store store, Fixture fixture)
         return view;
     }
 
-    public JsonObject Save(JsonObject p)
+    /// <summary>
+    /// onboarding.save. <paramref name="saved"/> runs in the same transaction with the profile before and after (the agent
+    /// gateway ends other AIs' tasks when the chosen kind changed).
+    /// </summary>
+    public JsonObject Save(JsonObject p, Action<Db, Profile, Profile>? saved = null)
     {
         var expected = P.Int(p, "expectedRevision")!.Value;
         if (p["patch"] is not JsonObject patch) throw RpcError.Params("patch", "patch must be an object.");
@@ -100,6 +107,7 @@ internal sealed class OnboardingService(Store store, Fixture fixture)
                 throw new RpcError(ErrorCodes.StaleRevision, "The onboarding profile changed.", new JsonObject { ["current"] = View(db) });
             db.Exec("UPDATE onboarding SET revision = $r, state = $s, updated_at = $t WHERE id = 1",
                 ("$r", revision + 1), ("$s", Json.Write(next.ToJson())), ("$t", db.Now()));
+            saved?.Invoke(db, current, next);
             return View(db);
         });
     }
@@ -148,14 +156,31 @@ internal sealed class OnboardingService(Store store, Fixture fixture)
         return list;
     }
 
-    /// <summary>Accepts "local", {"value":"local"} or {"value":"local","label":…}; the label is always the server's.</summary>
+    /// <summary>The recipient kinds each provider value may name as its exact choice (provider.kind); none for local and later.</summary>
+    public static readonly IReadOnlyDictionary<string, string[]> ProviderKinds = new Dictionary<string, string[]>
+    {
+        ["local"] = [], ["later"] = [], ["claude-code"] = ["claude_code_mcp"], ["api"] = ["anthropic_api", "openai_api"], ["chatgpt"] = ["chatgpt_plan"],
+    };
+
+    /// <summary>
+    /// Accepts "local", {"value":"local"} or {"value":"local","label":…}, plus an optional "kind": the exact recipient kind
+    /// chosen, which must match the value (claude-code ↔ claude_code_mcp, chatgpt ↔ chatgpt_plan, api ↔ anthropic_api or
+    /// openai_api, local / later ↔ none). The label is always the server's.
+    /// </summary>
     private static JsonObject? ParseProvider(JsonNode? value, string field)
     {
         if (value is null) return null;
         var v = value is JsonObject o ? o["value"] : value;
         var s = Text(v, field, 32);
         if (!Providers.TryGetValue(s, out var label)) throw RpcError.Params(field, $"Unknown provider {s}.");
-        return new JsonObject { ["value"] = s, ["label"] = label };
+        var provider = new JsonObject { ["value"] = s, ["label"] = label };
+        if (value is JsonObject obj && obj["kind"] is { } kindNode)
+        {
+            var kind = Text(kindNode, field + ".kind", 32);
+            if (!ProviderKinds[s].Contains(kind)) throw RpcError.Params(field + ".kind", $"{field}.kind {kind} does not match provider {s}.");
+            provider["kind"] = kind;
+        }
+        return provider;
     }
 
     /// <summary>The prototype's buildStarters, over the saved uses and the latest finished inventory's capabilities.</summary>

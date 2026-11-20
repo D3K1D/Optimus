@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using OptimizationTool.Transport;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Mcp;
 
@@ -31,6 +32,7 @@ internal sealed record ClientIdentity(string Kind, string? Version)
     public static ClientIdentity From(string? name, string? version)
     {
         var n = (name ?? "").ToLowerInvariant();
+        // M9 legacy: a Codex client still names itself, so the host can refuse it with a message (client_not_supported).
         var kind = n.Contains("claude") ? "claude_code" : n.Contains("codex") ? "codex" : "unknown";
         return new ClientIdentity(kind, string.IsNullOrWhiteSpace(version) ? null : Truncate(version, 64));
     }
@@ -49,6 +51,9 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
 {
     public static string WaitingMessage(string code) =>
         $"Waiting for approval in Optimus (code {code}). Ask the user to approve it in the app, then call this tool again.";
+
+    /// <summary>agent.pair's -32013 reason for a client Optimus no longer works with (M9).</summary>
+    public const string ClientNotSupported = "client_not_supported";
 
     public const string NotRunningMessage =
         "Optimus isn't running. Open Optimus to connect, then call this tool again.";
@@ -82,7 +87,9 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         var started = Stopwatch.StartNew();
         var reply = await CallCoreAsync(tool, arguments, client, ct).ConfigureAwait(false);
         var outcome = reply.IsError ? reply.Structured?["error"]?["code"]?.ToString() ?? "error" : "ok";
-        Log.Info($"tool={tool} outcome={outcome} ms={started.ElapsedMilliseconds}");
+        var name = ToolCatalog.IsKnown(tool) ? tool : "<unknown>"; // an unknown name is client text
+        if (outcome == "ok") AppLog.Current.Info($"tool={name} outcome=ok ms={started.ElapsedMilliseconds}");
+        else AppLog.Current.Warn($"tool={name} outcome={outcome} ms={started.ElapsedMilliseconds}", ErrorSites.McpToolFailed);
         return reply;
     }
 
@@ -135,10 +142,14 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         {
             rpc = await JsonRpcClient.ConnectAsync(options.PipeName, options.ConnectTimeout, ct).ConfigureAwait(false);
         }
-        catch (TimeoutException) { throw new HostUnavailableException("unavailable", NotRunningMessage); }
-        catch (IOException) { throw new HostUnavailableException("unavailable", NotRunningMessage); }
+        catch (Exception e) when (e is TimeoutException or IOException)
+        {
+            AppLog.Current.Warn($"connect failed: host not running ({e.GetType().Name})", ErrorSites.McpConnectFailed);
+            throw new HostUnavailableException("unavailable", NotRunningMessage);
+        }
         catch (UnauthorizedAccessException)
         {
+            AppLog.Current.Warn("connect failed: pipe belongs to another user", ErrorSites.McpConnectFailed);
             throw new HostUnavailableException("unavailable", "Optimus's connection belongs to another user. Open Optimus as this user.");
         }
 
@@ -157,13 +168,13 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         catch (Exception e) when (e is JsonRpcException or IOException or OperationCanceledException && !ct.IsCancellationRequested)
         {
             await rpc.DisposeAsync().ConfigureAwait(false);
-            Log.Warn($"hello failed: {(e is JsonRpcException j ? j.Code.ToString() : e.GetType().Name)}");
+            AppLog.Current.Warn($"hello failed: {(e is JsonRpcException j ? j.Code.ToString() : e.GetType().Name)}", ErrorSites.McpHelloFailed);
             throw e is JsonRpcException { Code: -32010 }
-                ? new HostUnavailableException("unavailable", "This Optimus version doesn't support Claude Code or Codex yet. Update Optimus.")
+                ? new HostUnavailableException("unavailable", "This Optimus version doesn't support Claude Code yet. Update Optimus.")
                 : new HostUnavailableException("unavailable", "Optimus refused the connection. Use the bridge installed with the app, then call this tool again.");
         }
 
-        Log.Info("connected");
+        AppLog.Current.Info("connected");
         _connection = connection;
         return connection;
     }
@@ -193,11 +204,11 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
                     return Waiting();
                 case "denied":
                     ResetPairing();
-                    Log.Info("pairing denied");
+                    AppLog.Current.Info("pairing: denied by the user");
                     return Error("not_allowed", "The pairing was denied in Optimus. Call this tool again to request a new code.");
                 default: // expired, revoked, unknown to this host (e.g. host restarted)
                     ResetPairing();
-                    Log.Info($"pairing {status}; re-pairing");
+                    AppLog.Current.Debug($"pairing: {status}; re-pairing");
                     break;
             }
         }
@@ -223,18 +234,24 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         }
         catch (JsonRpcException e)
         {
+            // M9: a client the app no longer works with gets the host's own message, word for word, to show the user.
+            if (HostCodeName(e) == ClientNotSupported) throw new HostUnavailableException(ClientNotSupported, Clip(e.Message, 200));
+            AppLog.Current.Warn($"pairing: agent.pair failed {e.Code} {HostCodeName(e)}", ErrorSites.McpPairingFailed);
             throw new HostUnavailableException(HostCodeName(e), $"Optimus could not start pairing: {Clip(e.Message)}");
         }
         var pairingId = result?["pairingId"]?.GetValue<string>();
         var approved = result?["status"]?.GetValue<string>() == "approved";
         var code = result?["code"]?.GetValue<string>();
         if (string.IsNullOrEmpty(pairingId) || (!approved && string.IsNullOrEmpty(code)))
+        {
+            AppLog.Current.Warn("pairing: agent.pair returned an invalid pairing", ErrorSites.McpPairingFailed);
             throw new HostUnavailableException("unavailable", "Optimus returned an invalid pairing.");
+        }
         _pairingId = pairingId;
         _code = approved ? null : Clip(code!, 16);
         _approved = approved; // a run token is approved at once: no code, no waiting
         _verifyPairing = false;
-        Log.Info(approved ? $"run paired client={client.Kind}" : $"pairing requested client={client.Kind}");
+        AppLog.Current.Debug(approved ? $"pairing: run paired client={client.Kind}" : $"pairing: requested client={client.Kind}");
     }
 
     private async Task<string> PairStatusAsync(Connection connection, CancellationToken ct)
@@ -302,7 +319,7 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
                 // the next call requests a new code.
                 await _gate.WaitAsync(ct).ConfigureAwait(false);
                 try { ResetPairing(); } finally { _gate.Release(); }
-                Log.Info($"task {code}; next call re-pairs");
+                AppLog.Current.Debug($"pairing: task {code}; next call re-pairs");
             }
             return new BridgeReply(obj.ToJsonString(), IsError: true, obj);
         }
@@ -315,7 +332,7 @@ internal sealed class HostBridge(BridgeOptions options) : IAsyncDisposable
         try
         {
             ResetPairing();
-            Log.Info("host lost the pairing; re-pairing");
+            AppLog.Current.Debug("pairing: host lost the pairing; re-pairing");
             await PairAsync(connection, client, ct).ConfigureAwait(false);
             return _approved ? Error("unavailable", "The connection to Optimus was renewed. Call this tool again.") : Waiting();
         }

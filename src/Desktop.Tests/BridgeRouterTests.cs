@@ -25,7 +25,7 @@ public class BridgeRouterTests
     [InlineData("onboarding.get")] [InlineData("onboarding.save")] [InlineData("inventory.start")] [InlineData("inventory.get")]
     [InlineData("inventory.cancel")] [InlineData("starter.list")] [InlineData("scan.start")] [InlineData("scan.get")]
     [InlineData("scan.cancel")] [InlineData("report.get")] [InlineData("report.list")] [InlineData("evidence.get")]
-    [InlineData("followup.get")] [InlineData("followup.respond")] [InlineData("events.read")]
+    [InlineData("followup.get")] [InlineData("followup.respond")] [InlineData("followup.front")] [InlineData("events.read")]
     [InlineData("finding.get")] [InlineData("finding.setDisposition")] [InlineData("finding.clearDisposition")]
     [InlineData("scan.skipCollector")] [InlineData("report.compare")]
     [InlineData("provider.list")] [InlineData("provider.connect")] [InlineData("provider.disconnect")]
@@ -35,6 +35,7 @@ public class BridgeRouterTests
     [InlineData("action.undo")] [InlineData("operation.get")] [InlineData("operation.list")] [InlineData("manual.recheck")]
     [InlineData("bench.capabilities")] [InlineData("bench.start")] [InlineData("bench.get")] [InlineData("bench.cancel")]
     [InlineData("bench.list")] [InlineData("bench.evidence")]
+    [InlineData("ai.getPermissions")] [InlineData("ai.setPermissions")] [InlineData("guide.get")] [InlineData("operation.stop")] [InlineData("operation.transcript")]
     public void Every_desktop_method_is_allowed(string method) =>
         Assert.IsType<BridgeDecision.Forward>(_router.Evaluate($$"""{"type":"rpc","id":1,"method":"{{method}}"}""", Doc, true));
 

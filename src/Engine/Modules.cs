@@ -36,6 +36,13 @@ public interface IRule
     /// <summary>Collector IDs whose coverage this rule depends on; drives "insufficient" vs "clear".</summary>
     IReadOnlyList<string> Inputs { get; }
     RuleResult Evaluate(RuleContext context);
+
+    /// <summary>
+    /// m9 §6.1: what kind of thing a finding of this rule is about when benign software is commonly flagged by it, so the AI
+    /// may research it online: program | port | startup | service | task. Null (the default): never researched. Rules for
+    /// malware detections and Defender threats never declare it.
+    /// </summary>
+    string? Research => null;
 }
 
 /// <summary>One committed evidence item as rules see it.</summary>

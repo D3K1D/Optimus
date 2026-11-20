@@ -9,7 +9,7 @@ namespace OptimizationTool.Providers;
 /// Every output item (reasoning with encrypted_content, messages, function_call) is kept verbatim in
 /// <see cref="AssistantTurn.ProviderState"/> and replayed unchanged as input on the next turn.
 /// </summary>
-public sealed class OpenAiAdapter : IProviderAdapter
+public sealed partial class OpenAiAdapter : IProviderAdapter, IWebResearch
 {
     public const string KindId = "openai_api";
     const string Provider = "OpenAI";
@@ -79,7 +79,7 @@ public sealed class OpenAiAdapter : IProviderAdapter
         using var http = NewRequest(HttpMethod.Post, "v1/responses", credential);
         http.Content = ProviderHttp.JsonBody(body);
 
-        var raw = await ProviderHttp.SendAsync(_http, http, TurnTimeout, Provider, ct).ConfigureAwait(false);
+        var raw = await ProviderHttp.SendAsync(_http, http, TurnTimeout, Provider, ct, request.Model).ConfigureAwait(false);
         if (!raw.Status.IsSuccess()) throw ProviderHttp.MapError(raw, Provider, credential.ApiKey);
         var root = ProviderHttp.ParseObject(raw.Body, Provider);
         try
@@ -303,7 +303,7 @@ public sealed class OpenAiAdapter : IProviderAdapter
         return new JsonObject { ["__invalid_json"] = raw.Length > 2000 ? raw[..2000] : raw };
     }
 
-    static ProviderException FailedResponse(JsonObject root, string apiKey)
+    internal static ProviderException FailedResponse(JsonObject root, string apiKey)
     {
         var code = root["error"]?["code"].AsString();
         var detail = ProviderHttp.Scrub(root["error"]?["message"].AsString(), apiKey);

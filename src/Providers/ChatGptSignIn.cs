@@ -179,11 +179,17 @@ public sealed class ChatGptSignIn : IProviderSignIn
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(Options.SignInTimeout);
         var callbackTask = listener.WaitAsync(timeout.Token);
-        if (!openBrowser(url)) throw new ChatGptSignInException("browser", "The browser could not be opened.");
+        // The browser is launched beside the wait, not before it: a shell launch that is slow to return (ShellExecute
+        // on its own STA thread) must never hold back a callback that has already arrived. A refusal still ends the
+        // sign-in at once, unless the callback won the race.
+        var openTask = Task.Run(() => openBrowser(url), CancellationToken.None);
+        _ = openTask.ContinueWith(t => _ = t.Exception, CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
 
         IReadOnlyDictionary<string, string> query;
         try
         {
+            if (await Task.WhenAny(callbackTask, openTask).ConfigureAwait(false) == openTask && !await openTask.ConfigureAwait(false))
+                throw new ChatGptSignInException("browser", "The browser could not be opened.");
             query = await callbackTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -624,11 +630,19 @@ public sealed class ChatGptSignIn : IProviderSignIn
 /// <summary>
 /// One-shot loopback HTTP listener on 127.0.0.1 with an OS-assigned port. Answers the first GET to
 /// /auth/callback with a tiny static page and returns its query; other paths get 404. Bound only while in use.
+/// Each connection is read on its own: a browser's idle pre-opened socket, an HTTPS-upgrade attempt or any other
+/// connection that sends nothing can never hold back the real callback on another socket (it used to, 10 s each).
 /// (A raw TcpListener rather than HttpListener: http.sys URL ACLs would otherwise be needed for 127.0.0.1.)
 /// </summary>
 internal sealed class LoopbackCallback : IDisposable
 {
+    /// <summary>A connection that has not sent its request line and headers by then is dropped.</summary>
+    internal static readonly TimeSpan ReadTimeout = TimeSpan.FromSeconds(10);
+    /// <summary>Connections read at once; more are closed straight away (only local processes can connect).</summary>
+    const int MaxOpenConnections = 32;
+
     readonly TcpListener _listener;
+    readonly CancellationTokenSource _closed = new();
 
     LoopbackCallback(TcpListener listener) => _listener = listener;
 
@@ -638,7 +652,7 @@ internal sealed class LoopbackCallback : IDisposable
     {
         var l = new TcpListener(IPAddress.Loopback, 0);
         l.Server.ExclusiveAddressUse = true;
-        l.Start(backlog: 4);
+        l.Start(backlog: 16);
         return new LoopbackCallback(l);
     }
 
@@ -646,35 +660,65 @@ internal sealed class LoopbackCallback : IDisposable
 
     public async Task<IReadOnlyDictionary<string, string>> WaitAsync(CancellationToken ct)
     {
-        while (true)
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(ct, _closed.Token);
+        var done = new TaskCompletionSource<IReadOnlyDictionary<string, string>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var open = new List<Task>();
+        Task<TcpClient>? accept = null;
+        try
         {
-            using var client = await _listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
-            using var stream = client.GetStream();
-            using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            readCts.CancelAfter(TimeSpan.FromSeconds(10));
-            string? target;
-            try
+            while (true)
             {
-                target = await ReadRequestTargetAsync(stream, readCts.Token).ConfigureAwait(false);
+                accept = _listener.AcceptTcpClientAsync(stop.Token).AsTask();
+                if (await Task.WhenAny(accept, done.Task).ConfigureAwait(false) == done.Task) return await done.Task.ConfigureAwait(false);
+                TcpClient client;
+                try
+                {
+                    client = await accept.ConfigureAwait(false);
+                }
+                catch (Exception e) when (e is SocketException or ObjectDisposedException or OperationCanceledException)
+                {
+                    if (done.Task.IsCompletedSuccessfully) return done.Task.Result;
+                    stop.Token.ThrowIfCancellationRequested();
+                    throw new OperationCanceledException("The loopback listener stopped.", e);
+                }
+                open.RemoveAll(t => t.IsCompleted);
+                if (open.Count >= MaxOpenConnections) { client.Dispose(); continue; }
+                open.Add(ServeAsync(client, done, stop.Token));
             }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
-                continue; // a stalled connection; keep waiting for the real callback
-            }
-            catch (IOException)
-            {
-                continue;
-            }
+        }
+        finally
+        {
+            stop.Cancel(); // the other connections, and the pending accept, end here
+            try { if (accept is not null) await accept.ConfigureAwait(false); } catch (Exception) { /* cancelled */ }
+            await Task.WhenAll(open).ConfigureAwait(false); // ServeAsync never throws
+        }
+    }
 
-            if (target is null || !target.StartsWith(ChatGptSignIn.CallbackPath, StringComparison.Ordinal) ||
-                (target.Length > ChatGptSignIn.CallbackPath.Length && target[ChatGptSignIn.CallbackPath.Length] != '?'))
+    /// <summary>Reads one connection: answers it, and completes <paramref name="done"/> when it is the callback. Never throws.</summary>
+    static async Task ServeAsync(TcpClient client, TaskCompletionSource<IReadOnlyDictionary<string, string>> done, CancellationToken ct)
+    {
+        try
+        {
+            using (client)
             {
-                await WriteAsync(stream, "404 Not Found", "", ct).ConfigureAwait(false);
-                continue;
+                var stream = client.GetStream();
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                readCts.CancelAfter(ReadTimeout);
+                var target = await ReadRequestTargetAsync(stream, readCts.Token).ConfigureAwait(false);
+                if (target is null || !target.StartsWith(ChatGptSignIn.CallbackPath, StringComparison.Ordinal) ||
+                    (target.Length > ChatGptSignIn.CallbackPath.Length && target[ChatGptSignIn.CallbackPath.Length] != '?'))
+                {
+                    await WriteAsync(stream, "404 Not Found", "", ct).ConfigureAwait(false);
+                    return;
+                }
+                await WriteAsync(stream, "200 OK", Page, ct).ConfigureAwait(false);
+                var q = target.IndexOf('?');
+                done.TrySetResult(ParseQuery(q < 0 ? "" : target[(q + 1)..])); // the first callback wins
             }
-            await WriteAsync(stream, "200 OK", Page, ct).ConfigureAwait(false);
-            var q = target.IndexOf('?');
-            return ParseQuery(q < 0 ? "" : target[(q + 1)..]);
+        }
+        catch (Exception e) when (e is OperationCanceledException or IOException or SocketException or ObjectDisposedException)
+        {
+            // a stalled, reset or cancelled connection; the wait goes on for the real callback
         }
     }
 
@@ -721,5 +765,9 @@ internal sealed class LoopbackCallback : IDisposable
         return result;
     }
 
-    public void Dispose() => _listener.Stop();
+    public void Dispose()
+    {
+        _closed.Cancel(); // no timer behind it: nothing to dispose, and a late WaitAsync still sees it cancelled
+        _listener.Stop();
+    }
 }

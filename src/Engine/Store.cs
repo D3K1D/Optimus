@@ -132,6 +132,8 @@ public sealed class Store : IDisposable
             if (isNew) Acl.RestrictFile(path);
             var before = Migrations.CurrentVersion(conn);
             Migrations.Upgrade(conn, path, Migrations.Latest);
+            Exec(conn, Migrations.ResearchTables); // m9 §6: idempotent; covers a v8 file created before the research tables were appended
+            Exec(conn, Migrations.ScriptTables); // m9 §5: the same for script_runs and the script nonce bindings
             if (before != Migrations.Latest) Checkpoint(conn); // a migrated file carries its new version itself
             return conn;
         }

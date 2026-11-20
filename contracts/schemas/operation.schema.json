@@ -2,35 +2,119 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.optimizationtool.invalid/v1/operation.schema.json",
   "title": "Operation",
-  "description": "Result of action.approve, operation.get and operation.list entries (m4-actions §3). One per approved plan; its journal is in steps.",
+  "description": "Result of action.approve, operation.get, operation.stop and operation.list entries (m4-actions §3). One per approved plan. A single operation's journal is in steps; a fix operation (m9 §4.1, kind fix) has one entry per step in steps and its journal in history. A script operation (m9 §5.4/§5.7, kind script) has its own lifecycle, options, restore point, receipt and shared output; steps null; never verified, never undone.",
   "type": "object",
   "required": ["operationId", "planId", "actionId", "state", "receipt", "undo", "error", "steps"],
   "properties": {
     "operationId": { "type": "string", "pattern": "^op-[0-9a-f]{16}$" },
     "planId": { "type": "string", "pattern": "^plan-" },
-    "actionId": { "type": "string" },
-    "state": { "enum": ["prepared", "attempted", "verified", "failed", "indeterminate", "rolled_back_failed"] },
-    "progress": { "type": ["string", "null"], "description": "Provider operations: the handler's latest progress line while running." },
-    "result": { "type": "string", "description": "Provider operations: updated | already_current | no_threats | threats_found | threats_unknown (scan finished, but Defender's event history was not fully readable)." },
+    "actionId": { "type": ["string", "null"], "description": "null on a fix operation." },
+    "kind": { "enum": ["fix", "script"], "description": "Present on fix and script operations only." },
+    "state": { "enum": ["prepared", "attempted", "verified", "failed", "indeterminate", "partial", "rolled_back_failed", "running", "completed", "stopped", "timed_out", "not_run"],
+      "description": "partial (m9 §4, terminal): at least one step verified and a later one failed, or the run was stopped. A script (m9 §5.4): prepared → running → completed | failed | stopped | timed_out | not_run | indeterminate." },
+    "progress": { "type": ["string", "null"], "description": "Provider operations: the handler's latest progress line while running. Fix operations: Step n of k." },
+    "result": { "type": "string", "description": "Provider operations: updated | already_current | no_threats | threats_found | threats_unknown (scan finished, but Defender's event history was not fully readable); restore points created | reused; repairs (m9 P3b-2) repair.sfc no_violations | repaired | could_not_repair | finished | failed, repair.dism_restorehealth healthy | repaired | finished | failed, and stopped after operation.stop (always present; a timeout or a tool that could not start is failed); network.flush_dns flushed | failed; explorer.restart restarted | started | not_running | failed (report-only, design v59: restarted, started and not_running end the operation and plan completed, never verified or indeterminate; failed ends failed). repair finished: the tool ended but its result lines could not be read." },
     "manualUri": { "type": "string" },
-    "receipt": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/receipt" }] },
+    "settingsPath": { "type": "string", "description": "Design v59: the page as Windows names it in English (e.g. Settings › Apps › Startup), sent beside manualUri only when Windows’ display language is English and the page has a known path; absent otherwise." },
+    "receipt": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/receipt" }, { "$ref": "#/$defs/scriptReceipt" }] },
+    "options": { "type": "object", "required": ["restorePoint", "shareOutput"], "additionalProperties": false, "description": "Scripts: the dialog's choices, bound in the approval nonce.",
+      "properties": { "restorePoint": { "type": "boolean" }, "shareOutput": { "type": "boolean" } } },
+    "startedAt": { "oneOf": [{ "type": "null" }, { "$ref": "scan.schema.json#/$defs/timestamp" }] },
+    "endedAt": { "oneOf": [{ "type": "null" }, { "$ref": "scan.schema.json#/$defs/timestamp" }] },
+    "restorePoint": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/restorePoint" }], "description": "Scripts: the restore point made first (null when not asked for)." },
+    "sharedOutput": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["excerpt", "omittedLines"], "additionalProperties": false,
+      "description": "Scripts: exactly what the AI was sent (the scrubbed last lines), for the card's Sent to <AI>.",
+      "properties": { "excerpt": { "type": "string", "maxLength": 4096 }, "omittedLines": { "type": "integer", "minimum": 0 } } }] },
     "undo": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["available", "reason"],
-      "properties": { "available": { "type": "boolean" }, "reason": { "enum": [null, "changed_since", "not_supported", "not_verified"] } } }] },
-    "error": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"] }] },
+      "properties": { "available": { "type": "boolean" }, "reason": { "enum": [null, "changed_since", "not_supported", "not_verified", "undone"] } } }] },
+    "error": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"],
+      "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "n": { "type": "integer", "minimum": 1, "description": "Fix operations: the failing step." } } }] },
     "reconciled": { "type": "boolean" },
+    "leftOut": { "$ref": "action-plan.schema.json#/properties/leftOut", "description": "m9 §17.3: a fix operation keeps its plan's left-out steps (receipt)." },
+    "removed": { "$ref": "action-plan.schema.json#/properties/removed", "description": "m9 §17.3: a fix operation keeps the steps the user switched off (receipt)." },
     "note": { "type": "string" },
-    "steps": { "type": "array", "items": { "type": "object", "required": ["state", "at", "detail"] } }
+    "steps": { "type": ["array", "null"], "items": { "oneOf": [{ "$ref": "#/$defs/journalEntry" }, { "$ref": "#/$defs/fixStep" }] }, "description": "null on a script operation." },
+    "history": { "type": "array", "items": { "$ref": "#/$defs/journalEntry" }, "description": "Fix operations: the append-only transition history." }
   },
+  "allOf": [
+    {
+      "if": { "required": ["kind"], "properties": { "kind": { "const": "fix" } } },
+      "then": { "required": ["history"], "properties": { "actionId": { "type": "null" }, "receipt": { "type": "null" }, "steps": { "type": "array", "items": { "$ref": "#/$defs/fixStep" } },
+        "state": { "enum": ["prepared", "attempted", "verified", "failed", "indeterminate", "partial"] } } }
+    },
+    {
+      "if": { "required": ["kind"], "properties": { "kind": { "const": "script" } } },
+      "then": {
+        "required": ["options", "startedAt", "endedAt", "restorePoint", "sharedOutput"],
+        "properties": {
+          "actionId": { "type": "null" }, "steps": { "type": "null" },
+          "state": { "enum": ["prepared", "running", "completed", "failed", "stopped", "timed_out", "not_run", "indeterminate"] },
+          "receipt": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/scriptReceipt" }] },
+          "undo": { "const": { "available": false, "reason": "not_supported" } },
+          "error": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["code", "message"], "additionalProperties": false,
+            "properties": { "code": { "enum": ["exit_code", "no_restore_point", "timeout", "interrupted", "not_started"] }, "message": { "type": "string" } } }] } } }
+    },
+    {
+      "if": { "not": { "required": ["kind"] } },
+      "then": { "properties": { "actionId": { "type": "string" }, "steps": { "type": "array", "items": { "$ref": "#/$defs/journalEntry" } },
+        "state": { "enum": ["prepared", "attempted", "verified", "completed", "failed", "indeterminate", "rolled_back_failed"],
+          "description": "completed (m9 §3.8 as built): a tool finished and reported its result (repair.sfc, repair.dism_restorehealth, network.flush_dns); nothing was verified, result says what it reported, the finding stays open." } } }
+    }
+  ],
   "$defs": {
+    "scriptReceipt": {
+      "type": "object",
+      "description": "m9 §5.4: a script's receipt. exitCode is null for stopped, timed_out, indeterminate and not_run (and when it never started).",
+      "required": ["state", "exitCode", "durationMs", "outputLines", "truncated", "sha256", "restorePoint", "sharedWithAi"],
+      "additionalProperties": false,
+      "properties": {
+        "state": { "enum": ["completed", "failed", "stopped", "timed_out", "not_run", "indeterminate"] },
+        "exitCode": { "type": ["integer", "null"] },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "outputLines": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "restorePoint": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/restorePoint" }] },
+        "sharedWithAi": { "type": "boolean" }
+      }
+    },
+    "restorePoint": {
+      "type": "object", "required": ["result", "at"], "additionalProperties": false,
+      "description": "m9 §5.2: created, reused (Windows returned one from the last 24 hours; at is its time), failed or declined (the script did not run).",
+      "properties": { "result": { "enum": ["created", "reused", "failed", "declined"] }, "at": { "oneOf": [{ "type": "null" }, { "$ref": "scan.schema.json#/$defs/timestamp" }] } }
+    },
     "receipt": {
       "type": "object",
-      "required": ["receiptId", "verifiedAt", "observed", "text", "benefit"],
+      "required": ["receiptId", "observed", "text", "benefit"],
+      "description": "verifiedAt for a verified change; completedAt (and no verifiedAt) when a tool only reported its result (state completed).",
+      "oneOf": [{ "required": ["verifiedAt"], "not": { "required": ["completedAt"] } }, { "required": ["completedAt"], "not": { "required": ["verifiedAt"] } }],
       "properties": {
         "receiptId": { "type": "string", "pattern": "^rcpt-" },
         "verifiedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+        "completedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
         "observed": { "type": "object" },
         "text": { "type": "string" },
-        "benefit": { "const": "unmeasured" }
+        "benefit": { "const": "unmeasured" },
+        "brokerReceiptId": { "type": "string", "pattern": "^rcpt-[0-9a-f]{16}$", "description": "m9 §3.5: the elevated broker's protected record of an administrator write; its undo names it." }
+      }
+    },
+    "journalEntry": { "type": "object", "required": ["state", "at", "detail"],
+      "properties": { "state": { "type": "string" }, "at": { "type": "string" }, "detail": { "type": ["string", "null"] } } },
+    "fixStep": {
+      "type": "object",
+      "required": ["n", "state", "receipt", "undo"],
+      "additionalProperties": false,
+      "properties": {
+        "n": { "type": "integer", "minimum": 1 },
+        "state": { "enum": ["pending", "prepared", "attempted", "verified", "failed", "indeterminate", "skipped"] },
+        "receipt": { "oneOf": [{ "type": "null" }, { "type": "object", "required": ["receiptId", "verifiedAt", "observed", "text"], "additionalProperties": false,
+          "properties": { "receiptId": { "type": "string", "pattern": "^rcpt-" }, "verifiedAt": { "$ref": "scan.schema.json#/$defs/timestamp" },
+            "observed": { "type": "object" }, "text": { "type": "string" },
+            "brokerReceiptId": { "type": "string", "pattern": "^rcpt-[0-9a-f]{16}$", "description": "m9 §3.5: the elevated broker's protected record of an administrator step; its undo names it." } } }] },
+        "undo": { "type": "object", "required": ["available", "reason"], "additionalProperties": false,
+          "properties": { "available": { "type": "boolean" }, "reason": { "enum": [null, "not_verified", "not_supported", "changed_since", "undone"] } } },
+        "error": { "type": "object", "required": ["code", "message"], "additionalProperties": false,
+          "properties": { "code": { "type": "string" }, "message": { "type": "string" } } }
       }
     }
   }

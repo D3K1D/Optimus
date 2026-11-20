@@ -5,6 +5,12 @@ namespace OptimizationTool.Windows.SystemDomain.Rules;
 /// <summary>System volume under 10% or under 15 GiB free.</summary>
 internal sealed class SystemVolumeLowRule : IRule
 {
+    /// <summary>
+    /// m9 §3.2: the card previews emptying the Recycle Bin (no target, no parameters). The preview shows what the bin holds
+    /// now and is already_set when it is empty; the guide stays as the manual route.
+    /// </summary>
+    public const string ActionId = "cleanup.empty_recycle_bin";
+
     public string Id => "storage.system_low";
     public string Version => "1.0.0";
     public string Category => "storage";
@@ -32,9 +38,11 @@ internal sealed class SystemVolumeLowRule : IRule
             EvidenceIds: [vol.Id],
             Card: new CardDraft(
                 $"The system drive has {RuleKit.Gib(free)} GiB free. Would you like to review storage usage?",
-                RuleKit.Options,
+                HighPerfOnBatteryRule.PreviewOptions,
                 ["Open Settings › System › Storage.", "Review Temporary files and Cleanup recommendations.", "Remove what you don’t need."],
-                "ms-settings:storagesense")));
+                "ms-settings:storagesense",
+                ActionId),
+            ActionEligibility: "preview_available"));
     }
 }
 

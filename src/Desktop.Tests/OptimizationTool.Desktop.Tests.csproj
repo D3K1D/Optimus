@@ -12,6 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="OptimizationTool.Transport.Logging" />
     <ProjectReference Include="..\Desktop\OptimizationTool.Desktop.csproj" />
     <ProjectReference Include="..\Transport\OptimizationTool.Transport.csproj" />
   </ItemGroup>

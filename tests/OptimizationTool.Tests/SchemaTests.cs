@@ -19,13 +19,23 @@ public class SchemaTests
     });
 
 
+    /// <summary>
+    /// The cached schemas are shared by every test class, and xunit runs classes in parallel: evaluating one schema object
+    /// from two threads at once can fail inside the validator (IndexOutOfRange in PropertiesKeyword). One at a time.
+    /// </summary>
+    private static readonly object EvaluateGate = new();
+
     /// <summary>Validates against a sub-schema, e.g. "review.schema.json#/$defs/preview".</summary>
     internal static void AssertValidRef(string reference, JsonNode? instance)
     {
         var wrapper = JsonSchema.FromText($$"""{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://schemas.optimizationtool.invalid/v1/ref-{{Guid.NewGuid():N}}.json","$ref":"{{reference}}"}""");
-        var options = new EvaluationOptions { OutputFormat = OutputFormat.List };
-        foreach (var other in Schemas.Value.Values) options.SchemaRegistry.Register(other);
-        var result = wrapper.Evaluate(instance, options);
+        EvaluationResults result;
+        lock (EvaluateGate)
+        {
+            var options = new EvaluationOptions { OutputFormat = OutputFormat.List };
+            foreach (var other in Schemas.Value.Values) options.SchemaRegistry.Register(other);
+            result = wrapper.Evaluate(instance, options);
+        }
         var errors = string.Join("\n", (result.Details ?? []).Where(d => d.Errors is not null)
             .SelectMany(d => d.Errors!.Select(e => $"{d.InstanceLocation} ({d.EvaluationPath}): {e.Value}")));
         Assert.True(result.IsValid, $"{reference} failed:\n{errors}\n{instance?.ToJsonString()}");
@@ -34,10 +44,14 @@ public class SchemaTests
     internal static void AssertValid(string name, JsonNode? instance)
     {
         var schema = Schemas.Value[name];
-        var options = new EvaluationOptions { OutputFormat = OutputFormat.List };
-        options.SchemaRegistry.Register(schema);
-        foreach (var other in Schemas.Value.Values) options.SchemaRegistry.Register(other);
-        var result = schema.Evaluate(instance, options);
+        EvaluationResults result;
+        lock (EvaluateGate)
+        {
+            var options = new EvaluationOptions { OutputFormat = OutputFormat.List };
+            options.SchemaRegistry.Register(schema);
+            foreach (var other in Schemas.Value.Values) options.SchemaRegistry.Register(other);
+            result = schema.Evaluate(instance, options);
+        }
         var errors = string.Join("\n", (result.Details ?? []).Where(d => d.Errors is not null)
             .SelectMany(d => d.Errors!.Select(e => $"{d.InstanceLocation} ({d.EvaluationPath}): {e.Value}")));
         Assert.True(result.IsValid, $"{name} schema failed:\n{errors}\n{instance?.ToJsonString()}");
@@ -46,7 +60,7 @@ public class SchemaTests
     [Fact]
     public void AllSchemaFiles_Load()
     {
-        Assert.Equal(["action-plan", "agent-task", "bench-run", "compare", "event", "evidence", "finding", "followup", "hello", "onboarding", "operation", "provider-list", "report", "review", "scan", "tool-result"],
+        Assert.Equal(["action-plan", "agent-task", "bench-run", "checks", "compare", "event", "evidence", "finding", "fix", "followup", "hello", "onboarding", "operation", "permissions", "provider-list", "report", "research", "review", "scan", "tool-result"],
             Schemas.Value.Keys.Order(StringComparer.Ordinal));
     }
 

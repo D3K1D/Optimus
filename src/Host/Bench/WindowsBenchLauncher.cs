@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 using OptimizationTool.Engine.Bench;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Host.Bench;
 
@@ -109,7 +110,8 @@ internal sealed class WindowsBenchWorker : IBenchWorker
             stderr.DisposeLocalCopyOfClientHandle();
             Native.CloseHandle(pi.hThread);
             pi.hThread = IntPtr.Zero;
-            return new WindowsBenchWorker(job, new SafeProcessHandle(pi.hProcess, ownsHandle: true), stdin, stdout, stderr);
+            AppLog.Current.Debug($"bench: worker started pid={pi.dwProcessId}");
+            return new WindowsBenchWorker(job, new SafeProcessHandle(pi.hProcess, ownsHandle: true), stdin, stdout, stderr) { _pid = pi.dwProcessId };
         }
         catch
         {
@@ -136,10 +138,26 @@ internal sealed class WindowsBenchWorker : IBenchWorker
     /// <summary>stderr is drained and dropped (the worker writes at most 64 KiB of codes; nothing is logged verbatim).</summary>
     private async Task DrainStderrAsync()
     {
-        var buffer = new byte[4096];
-        try { while (await _stderr.ReadAsync(buffer).ConfigureAwait(false) > 0) { } }
+        // The worker writes only short codes to stderr (bad_command, busy, part_error:<type>): each one is logged, made safe
+        // (letters, digits and _ : . - only, ≤ 64 chars) and at most 50 per worker. Never free text.
+        var logged = 0;
+        try
+        {
+            using var reader = new StreamReader(_stderr, Encoding.UTF8, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true);
+            while (await reader.ReadLineAsync().ConfigureAwait(false) is { } line)
+            {
+                if (logged >= 50) continue;
+                var code = new string(line.Where(c => char.IsAsciiLetterOrDigit(c) || c is '_' or ':' or '.' or '-').Take(64).ToArray());
+                if (code.Length == 0) continue;
+                logged++;
+                AppLog.Current.Warn($"bench: worker pid={_pid} stderr code={code}", ErrorSites.BenchWorkerStderr);
+            }
+        }
         catch (Exception ex) when (ex is IOException or ObjectDisposedException) { }
     }
+
+    /// <summary>The worker's process id (for the developer log only).</summary>
+    private uint _pid;
 
     public async Task SendAsync(string line, CancellationToken ct)
     {
@@ -169,6 +187,13 @@ internal sealed class WindowsBenchWorker : IBenchWorker
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // Its exit code before the job is closed: STILL_ACTIVE (259) means it was still running and is killed now.
+        if (Native.GetExitCodeProcess(_process, out var exit))
+        {
+            if (exit == Native.STILL_ACTIVE) AppLog.Current.Debug($"bench: worker pid={_pid} still running; killed");
+            else if (exit == 0 || Volatile.Read(ref _killed) != 0) AppLog.Current.Debug($"bench: worker pid={_pid} exit={exit}{(Volatile.Read(ref _killed) != 0 ? " (killed)" : "")}");
+            else AppLog.Current.Warn($"bench: worker pid={_pid} exit={exit}", ErrorSites.BenchWorkerExit);
+        }
         Kill();
         _job.Dispose(); // KILL_ON_JOB_CLOSE: anything left in the job ends here
         _process.Dispose();
@@ -258,6 +283,12 @@ internal static class Native
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern uint ResumeThread(IntPtr hThread);
+
+    public const uint STILL_ACTIVE = 259;
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetExitCodeProcess(SafeProcessHandle hProcess, out uint exitCode);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool CloseHandle(IntPtr handle);

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using OptimizationTool.Transport.Logging;
 using System.Threading.Channels;
 
 namespace OptimizationTool.Engine.Bench;
@@ -206,13 +207,17 @@ public sealed partial class BenchService
         string? forced = null;
         try
         {
+            AppLog.Current.Info($"bench: run {run.RunId} start parts={string.Join(",", run.Parts)}");
             if (run.StopKind is null) Update(run, b => { if (b.Text("state") == "starting") b["state"] = "running"; });
             for (var i = 0; i < run.Parts.Count; i++)
             {
                 if (run.StopKind is not null) break;
                 if (i > 0 && !await CoolDownAsync(run).ConfigureAwait(false)) break;
                 var part = run.Parts[i];
+                var partClock = Stopwatch.StartNew();
                 var result = await RunPartAsync(run, part, repeat: null).ConfigureAwait(false);
+                if (result.State is "failed") AppLog.Current.Warn($"bench: run {run.RunId} part {part} failed reason={result.Reason} ms={partClock.ElapsedMilliseconds}", ErrorSites.BenchPartFailed);
+                else AppLog.Current.Debug($"bench: run {run.RunId} part {part} {result.State}{(result.Reason is null ? "" : " reason=" + result.Reason)} ms={partClock.ElapsedMilliseconds}");
                 run.Results[part] = result;
                 if (run.StopKind is not null && result.State == "cancelled") break; // Finish closes it with the stop reason
                 Update(run, b =>
@@ -227,7 +232,7 @@ public sealed partial class BenchService
         }
         catch (Exception ex)
         {
-            _log($"benchmark {run.RunId} failed: {ex}");
+            AppLog.Current.Error($"bench: run {run.RunId} failed {ex.GetType().Name}", ErrorSites.BenchRunFailed, ex);
             forced = "failed";
         }
         finally
@@ -236,13 +241,13 @@ public sealed partial class BenchService
             await CloseWorkerAsync(run).ConfigureAwait(false);
         }
         try { Finish(run, forced); }
-        catch (Exception ex) { _log($"benchmark {run.RunId} could not be finished: {ex.GetType().Name}"); }
+        catch (Exception ex) { AppLog.Current.Error($"bench: run {run.RunId} could not be finished: {ex.GetType().Name}", ErrorSites.BenchRunFailed); }
         finally
         {
             lock (_gate) _runs.Remove(run.RunId);
             _lease.Release(WorkLease.Bench, run.RunId);
             InvalidateCapabilities(); // the next bench.capabilities reads the hardware again
-            try { run.Hub.Dispose(); } catch (Exception ex) { _log($"sensor hub dispose: {ex.GetType().Name}"); }
+            try { run.Hub.Dispose(); } catch (Exception ex) { AppLog.Current.Debug($"bench: sensor hub dispose: {ex.GetType().Name}"); }
         }
     }
 
@@ -254,7 +259,7 @@ public sealed partial class BenchService
         // AC unknown on a PC known to have a battery (from the start or any reading since) stops too.
         if (!Blocks(state, run.KnownBattery) || !run.TryStop("battery")) return;
         try { _store.Write(db => SetStoppingInTx(db, run)); }
-        catch (Exception ex) { _log($"benchmark {run.RunId} stopping: {ex.GetType().Name}"); }
+        catch (Exception ex) { AppLog.Current.Warn($"bench: run {run.RunId} stopping: {ex.GetType().Name}", ErrorSites.BenchStop); }
         run.SignalStop();
     }
 
@@ -283,7 +288,7 @@ public sealed partial class BenchService
             if (task.Wait(T.HardwareTimeout)) return task.Result;
             _ = task.ContinueWith(t => _ = t.Exception, TaskScheduler.Default); // abandoned: observe a late failure
         }
-        catch (Exception ex) { _log($"bench prepare {part}: {(ex is AggregateException a ? a.InnerException?.GetType().Name : ex.GetType().Name)}"); }
+        catch (Exception ex) { AppLog.Current.Warn($"bench: prepare {part}: {(ex is AggregateException a ? a.InnerException?.GetType().Name : ex.GetType().Name)}", ErrorSites.BenchSensors); }
         return [];
     }
 
@@ -365,7 +370,7 @@ public sealed partial class BenchService
                     partStop.Cancel(); // polled by the coordinator; never repeated
             }
             catch (AggregateException) { run.PendingRead = null; }
-            catch (Exception ex) { _log($"bench sampler: {ex.GetType().Name}"); }
+            catch (Exception ex) { AppLog.Current.Warn($"bench: sampler: {ex.GetType().Name}", ErrorSites.BenchSensors); }
             var rest = T.SampleInterval - tick.Elapsed;
             if (rest > TimeSpan.Zero) stop.WaitHandle.WaitOne(rest);
         }
@@ -496,7 +501,7 @@ public sealed partial class BenchService
         try { worker = _options.Launcher!.Launch(); }
         catch (Exception ex)
         {
-            _log($"bench worker launch failed: {ex.GetType().Name}");
+            AppLog.Current.Warn($"bench: worker launch failed: {ex.GetType().Name}", ErrorSites.BenchWorkerLaunch);
             return null;
         }
         var conn = new WorkerConn(worker);
@@ -512,7 +517,7 @@ public sealed partial class BenchService
                 return conn;
             }
         }
-        _log("bench worker: no hello");
+        AppLog.Current.Warn("bench: worker sent no hello", ErrorSites.BenchWorkerLaunch);
         conn.Dispose();
         return null;
     }
@@ -637,6 +642,7 @@ public sealed partial class BenchService
                 };
                 if (state == "done") body["result"] = BuildResult(db, run);
                 Save(db, body);
+                AppLog.Current.Info($"bench: run {run.RunId} end state={state}{(body["reason"] is JsonValue rs ? " reason=" + rs : "")} score={body["result"]?["score"]?.ToJsonString() ?? "none"}");
                 db.AppendEvent(Stream(run.RunId), "bench.progress", ProgressPayload(body));
                 db.AppendEvent(Stream(run.RunId), "bench.finished", new JsonObject
                 {

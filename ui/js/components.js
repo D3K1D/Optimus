@@ -30,6 +30,7 @@
     pulse: 'M3 12h4l2-6 4 12 2-6h6',
     dots: 'M6 12h.01M12 12h.01M18 12h.01',
     close: 'M6 6l12 12M18 6L6 18',
+    minus: 'M6 12h12',
     back: 'M15 6l-6 6 6 6',
     collapse: 'M6 15l6-6 6 6',
     history: 'M4 12a8 8 0 108-8 8 8 0 00-6 2.7M4 4v3.5h3.5M12 8v4.5l3 2',
@@ -49,7 +50,11 @@
     plug: 'M9 3v5M15 3v5M6 8h12v3a6 6 0 01-12 0zM12 17v4',
     clock: 'M12 3.5a8.5 8.5 0 110 17 8.5 8.5 0 010-17zM12 7.5V12l3 2',
     copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
-    download: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14'
+    download: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14',
+    // M9 (design: AI permissions)
+    globe: 'M12 3.5a8.5 8.5 0 110 17 8.5 8.5 0 010-17zM3.5 12h17M12 3.5c2.4 2.4 3.5 5.3 3.5 8.5s-1.1 6.1-3.5 8.5M12 3.5C9.6 5.9 8.5 8.8 8.5 12s1.1 6.1 3.5 8.5',
+    external: 'M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5',
+    grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z'
   };
 
   function Icon(p) {
@@ -355,16 +360,20 @@
     }), p.icon && h(Icon, { name: p.icon, size: s === 'sm' ? 16 : 18 }), p.children, p.iconRight && h(Icon, { name: p.iconRight, size: s === 'sm' ? 16 : 18 }));
   }
 
+  // Tile status words that need attention (shown with an alert mark).
+  var PROVIDER_WARN = ['Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not available for this account'];
   function ProviderOption(p) {
     var sel = !!p.selected;
     return h('button', {
-      type: 'button', role: 'radio', 'aria-checked': sel, className: cx('ot-provider', sel && 'is-selected', p.className),
+      type: 'button', role: 'radio', 'aria-checked': sel, tabIndex: p.tabIndex, 'data-value': p.value, className: cx('ot-provider', sel && 'is-selected', p.className),
       onClick: function () { if (p.onSelect) p.onSelect(p.value); }
     },
-      h('span', { className: 'ot-provider-glyph' }, p.icon ? h(Icon, { name: p.icon, size: 22 }) : h('span', { className: 'text-mono-sm' }, p.glyph)),
+      h('span', { className: 'ot-provider-glyph', 'aria-hidden': true }, p.icon ? h(Icon, { name: p.icon, size: 22 }) : h('span', { className: 'text-mono-sm' }, p.glyph)),
       h('span', { className: 'ot-provider-text' },
         h('span', { className: 'text-headline' }, p.title),
-        p.description && h('span', { className: 'ot-muted text-callout' }, p.description)),
+        p.description && h('span', { className: 'ot-muted text-callout' }, p.description),
+        p.status && h('span', { className: cx('text-mono-sm ot-provider-status', (p.status.warn || PROVIDER_WARN.indexOf(p.status.text || p.status) >= 0) && 'is-warn') },
+          (p.status.warn || PROVIDER_WARN.indexOf(p.status.text || p.status) >= 0) && h(Icon, { name: 'alert', size: 12 }), p.status.text || p.status)),
       h('span', { className: 'ot-provider-check', 'aria-hidden': true }, sel && h(Icon, { name: 'check', size: 14, strokeWidth: 2.5 })));
   }
 
@@ -411,10 +420,52 @@
     return h('span', { className: cx('ot-badge', 'ot-badge-' + (p.kind || 'gap'), p.className) }, h(Icon, { name: p.icon || k.icon, size: 14, strokeWidth: 2 }), p.children || k.label);
   }
 
+  /* AI research on a finding (design: ResearchTag, ResearchNote; contracts/m9-ai-powers.md §6.2): a clickable label in
+     the card's head that opens the explanation under the claim. The finding itself never changes. */
+  var RESEARCH = {
+    safe: { cls: 'is-safe', icon: 'check', text: 'AI researched: considered safe' },
+    look: { cls: 'is-look', icon: 'alert', text: 'AI researched: worth a look' },
+    running: { cls: 'is-running', icon: 'globe', text: 'AI researching…' },
+    checkup: { cls: 'is-checkup', icon: 'globe', text: 'AI check-up' }
+  };
+  function ResearchTag(p) {
+    var r = RESEARCH[p.verdict] || RESEARCH.safe;
+    var inner = [p.verdict === 'running' ? h(Logo, { key: 'i', size: 12, mono: true, spin: true, decorative: true }) : h(Icon, { key: 'i', name: r.icon, size: 12, strokeWidth: 2.5 }),
+      h('span', { key: 't' }, r.text)];
+    if (!p.onClick) return h('span', { className: cx('ot-tag ot-research-tag', r.cls, 'text-mono-sm', p.className) }, inner);
+    return h('button', { type: 'button', className: cx('ot-tag ot-research-tag is-button', r.cls, p.open && 'is-open', 'text-mono-sm', p.className), 'aria-expanded': !!p.open, 'aria-controls': p.open ? p.controls : undefined, onClick: p.onClick },
+      inner, h(Icon, { name: 'chevron', size: 12, strokeWidth: 2.5, className: 'ot-research-chev' }));
+  }
+  // Numbered sources, 1–3: title + site + external icon (design v48 SourceList, shared by ResearchNote, the check-up
+  // card and answers). Each opens by id through the shell (shell.openSource): the app never holds a URL; a url is for
+  // previews only. `max` (answers list up to 8) is this port's only addition.
+  function SourceList(p) {
+    var srcs = (p.sources || []).slice(0, p.max || 3);
+    if (!srcs.length) return null;
+    return h('div', { className: cx('ot-sources', p.className) },
+      h('span', { className: 'text-caption ot-muted ot-sources-cap' }, 'Sources'),
+      h('ol', { className: 'ot-sources-list' }, srcs.map(function (s, i) {
+        var body = [h('span', { key: 'n', className: 'ot-source-n text-mono-sm' }, i + 1), h('span', { key: 't', className: 'ot-source-t' }, s.title), h('span', { key: 's', className: 'text-mono-sm ot-muted' }, s.site || s.domain),
+          h(Icon, { key: 'x', name: 'external', size: 14, className: 'ot-source-x' })];
+        return h('li', { key: s.sourceId || s.url || i }, s.url && !p.onOpenSource
+          ? h('a', { className: 'ot-source', href: s.url, target: '_blank', rel: 'noopener noreferrer', title: s.title }, body)
+          : h('button', { type: 'button', className: 'ot-source', title: s.title, onClick: function () { if (p.onOpenSource) p.onOpenSource(s.sourceId); } }, body));
+      })));
+  }
+  var RESEARCH_CLOSING = 'This is about the program in general, based on its name and verified publisher. It is not a scan of your copy.';
+  function ResearchNote(p) {
+    var srcs = (p.sources || []).slice(0, 3);
+    return h('div', { id: p.id, className: cx('ot-research', RESEARCH[p.verdict] ? RESEARCH[p.verdict].cls : 'is-safe', p.className) },
+      p.summary && h('p', { className: 'text-callout ot-research-text' }, p.summary),
+      p.unsigned && h('p', { className: 'text-callout ot-research-unsigned' }, h(Icon, { name: 'alert', size: 16 }), 'Not signed, so the name alone doesn’t prove what it is.'),
+      h('p', { className: 'text-callout ot-muted ot-research-closing' }, RESEARCH_CLOSING),
+      h(SourceList, { sources: srcs, onOpenSource: p.onOpenSource }));
+  }
+
   function FindingCard(p) {
     return h(NeuCard, { as: 'article', className: cx('ot-finding', p.kind === 'gap' && 'ot-finding-gap', p.className) },
       h('div', { className: 'ot-finding-head' },
-        h(SeverityBadge, { kind: p.kind }),
+        h('span', { className: 'ot-finding-tags' }, h(SeverityBadge, { kind: p.kind }), p.research && h(ResearchTag, { verdict: p.research })),
         p.confidence && h('span', { className: 'text-mono-sm ot-muted' }, p.confidence)),
       h('h3', { className: 'text-headline' }, p.title),
       h('p', { className: 'text-body ot-muted' }, p.observation),
@@ -454,40 +505,125 @@
         h('span', { className: 'text-callout' }, p.provider || 'Local only'),
         (p.detail || status === 'expired' || status === 'live') && h('span', { className: 'text-mono-sm ot-muted' }, p.detail || (status === 'expired' ? 'Expired' : 'Live'))),
       p.onActivity && h(Button, { variant: 'ghost', size: 'sm', 'aria-pressed': !!p.activityOpen, onClick: p.onActivity }, 'Activity'),
-      p.onChange !== null && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onChange }, p.actionLabel || 'Change'));
+      p.onChange !== null && h(Button, { variant: 'ghost', size: 'sm', 'aria-label': p.actionLabel ? undefined : 'Change AI', onClick: p.onChange }, p.actionLabel || 'Change'));
   }
 
-  function GrantRow(p) {
-    return h('div', { className: cx('ot-grant-row', p.locked && 'is-locked') },
-      h('div', { className: 'ot-grant-text' },
-        h('span', { className: 'text-callout', style: { fontWeight: 600 } }, p.title),
-        p.detail && h('span', { className: 'text-mono-sm ot-muted' }, p.detail)),
-      p.locked ? h('span', { className: 'ot-grant-lock text-mono-sm ot-muted' }, h(Icon, { name: 'lock', size: 14 }), 'Never') :
-        p.fixed ? h('span', { className: 'ot-grant-lock text-mono-sm ot-muted' }, h(Icon, { name: 'check', size: 14, strokeWidth: 2.5 }), 'Shared') :
-        h(Toggle, { checked: p.checked, onChange: p.onChange, disabled: p.compact, ariaLabel: p.title }));
+  /* ---------- AI permissions (M9; design: PermissionsStep, PermissionsPanel, PermissionsSummary) ---------- */
+  /* Rows from the M9 permission model. `fixed` rows have no toggle; `when` is the grey line per toggle state (at most one). */
+  var PERM_SEE = [
+    { id: 'findings', icon: 'report', title: 'Report and measurements', fixed: 'Always' },
+    { id: 'specs', icon: 'cpu', title: 'PC specs', on: true },
+    { id: 'history', icon: 'history', title: 'Past reports and benchmarks', on: true },
+    { id: 'names', icon: 'grid', title: 'Share app and device names', on: false },
+    { id: 'secrets', icon: 'lock', title: 'Paths, accounts, addresses', fixed: 'Never' }
+  ];
+  var PERM_DO = [
+    { id: 'checks', icon: 'scan', title: 'Run read-only checks', on: true },
+    { id: 'ask', icon: 'check', title: 'Ask to make single changes', on: true, when: ['Gives steps you do', 'You approve each'] },
+    { id: 'fix', icon: 'list', title: 'Make approved multi-step fixes', on: true, when: [null, 'A whole fix, approved once'] },
+    { id: 'scripts', icon: 'terminal', title: 'Run approved scripts', on: false, when: [null, 'You read and approve each one · can’t be undone'] },
+    // design v75 (AdminRights): off and never pre-selected; disabled with its grey line while not available (adminUnavailable).
+    { id: 'admin', icon: 'key', title: 'Use administrator rights', on: false, when: [null, 'Windows asks each time.'] },
+    { id: 'web', icon: 'globe', title: 'Look things up online', on: false, web: true, when: [null, 'Sends the names, makers and versions of what’s on this PC · uses your AI plan'] }
+  ];
+  function permDefaults() { var o = {}; PERM_SEE.concat(PERM_DO).forEach(function (r) { if (!r.fixed) o[r.id] = r.on; }); return o; }
+  // The toggles' linking lives in connection-state.js (permSet, tested there; loaded after this file, used at click time).
+  function permSet(cur, id, val) { return window.OptTool.permSet(cur, id, val); }
+
+  function PermRow(p) {
+    var r = p.row, on = !!p.value, line = p.line !== undefined ? p.line : r.when ? r.when[on ? 1 : 0] : null;
+    return h('div', { className: cx('ot-perm-row', r.fixed && 'is-fixed', p.disabled && 'is-off') },
+      h('span', { className: 'ot-perm-icon', 'aria-hidden': true }, h(Icon, { name: r.icon, size: 18 })),
+      h('span', { className: 'ot-perm-text' },
+        h('span', { className: 'text-callout ot-perm-title' }, r.title),
+        line && h('span', { className: 'text-mono-sm ot-muted ot-perm-line' }, line)),
+      r.fixed ? h('span', { className: cx('ot-perm-fixed text-mono-sm', r.fixed === 'Never' ? 'is-never' : 'is-always') }, h(Icon, { name: r.fixed === 'Never' ? 'lock' : 'check', size: 14, strokeWidth: 2.25 }), r.fixed)
+        : h(Toggle, { checked: on && !p.disabled, disabled: p.disabled, label: h('span', { className: 'ot-sr' }, r.title), onChange: function (v) { p.onChange(r.id, v); } }));
   }
 
+  // The permissions content: full page after "Choose your AI" (frosted, on the sea) and compact when an outside window pairs.
+  // App additions: `showScripts` (the scripts row only where the host offers it) and `busy` (while the choice is saved).
+  // design v70: Continue first opens the note over the blurred page (its Continue goes on; Esc closes it); `skipNote`
+  // goes straight on, `noteOpen` opens it at once (demos).
+  function PermissionsPanel(p) {
+    var s = React.useState(p.initial || permDefaults()), v = s[0], setV = s[1];
+    var nt = React.useState(!!p.noteOpen), note = nt[0], setNote = nt[1];
+    var noteBtn = React.useRef(null);
+    React.useEffect(function () { if (note && noteBtn.current) noteBtn.current.focus(); }, [note]);
+    var agent = p.agent || (p.compact ? 'Claude Code' : 'Claude'), explain = !!p.explainOnly;
+    function set(id, val) { setV(function (cur) { return permSet(cur, id, val); }); }
+    function rows(list, isDo) {
+      return list.filter(function (r) { return r.id !== 'scripts' || p.showScripts; }).map(function (r) {
+        var off = isDo && (explain || (r.web && p.webUnavailable) || (r.id === 'admin' && p.adminUnavailable));
+        var line = r.web && p.webUnavailable ? 'Not available with ' + (p.provider || agent) : r.id === 'admin' && p.adminUnavailable ? 'Not available in this version yet' : undefined;
+        return h(PermRow, { key: r.id, row: r, value: v[r.id], onChange: set, disabled: off, line: line });
+      });
+    }
+    var groups = h('div', { className: 'ot-perm-cols' },
+      h('section', { className: 'ot-perm-group', 'aria-label': 'Can see' }, h('h2', { className: 'text-caption ot-muted' }, 'Can see'), rows(PERM_SEE, false)),
+      h('section', { className: 'ot-perm-group', 'aria-label': 'Can do' }, h('h2', { className: 'text-caption ot-muted' }, 'Can do'),
+        explain && h('p', { className: 'ot-perm-note text-callout' }, h(Icon, { name: 'eye', size: 16 }), 'Explain only with this account'),
+        rows(PERM_DO, true)));
+    function done() { if (p.onContinue && !p.busy) p.onContinue(v); }
+    // focusTitle (opened from the pill or from Change): the page replaces what had focus, so focus starts at its title.
+    var titleRef = React.useRef(null);
+    React.useEffect(function () { if (p.focusTitle && titleRef.current) titleRef.current.focus({ preventScroll: true }); }, []);
+    var updated = h('span', { role: 'status', className: 'ot-perm-updated-wrap' }, p.updated && h('span', { className: 'ot-perm-updated text-mono-sm' }, h(Icon, { name: 'repeat', size: 12 }), 'Updated'));
+    if (p.compact) {
+      return h(GlassPanel, { strong: true, className: cx('ot-perm-panel', 'is-compact', p.className), role: 'dialog', 'aria-label': agent + ' permissions' },
+        h('div', { className: 'ot-perm-chead' }, h(Icon, { name: 'terminal', size: 18 }), h('span', { className: 'text-headline' }, 'What ' + agent + ' may see and do in its own window.'), updated),
+        groups,
+        h('div', { className: 'ot-login-actions' },
+          h(Button, { variant: 'ghost', onClick: p.onCancel }, 'Not now'),
+          h(Button, { variant: 'primary', disabled: !!p.busy, onClick: done }, 'Allow')));
+    }
+    return h(GlassPanel, { strong: true, className: cx('ot-login-panel', 'ot-perm-panel', 'ot-frost', p.className) },
+      h('div', { className: 'ot-brand' }, h(Logo, { size: 30 }), h('span', { className: 'text-callout' }, 'Optimus')),
+      h('div', { className: 'ot-perm-titlerow' }, h('h1', { ref: titleRef, tabIndex: -1, className: 'text-title-1 ot-focus-title' }, 'What can ' + agent + ' do?'), updated),
+      groups,
+      h('div', { className: 'ot-login-actions' },
+        p.onBack && h(Button, { variant: 'ghost', icon: 'back', className: 'ot-login-back', onClick: p.onBack }, 'Back'),
+        h(Button, { variant: 'primary', iconRight: 'chevron', disabled: !!p.busy, onClick: function () { if (p.skipNote) done(); else setNote(true); } }, 'Continue')),
+      // The choices are saved only from the note's Continue, so Esc leaves the page as it was, still editable.
+      note && h('div', { className: 'ot-perm-note-layer', onKeyDown: function (e) {
+          if (e.key !== 'Escape') return;
+          e.stopPropagation(); setNote(false);
+          // Focus goes back to the page's Continue.
+          var back = e.currentTarget.parentNode && e.currentTarget.parentNode.querySelector(':scope > .ot-login-actions .ot-btn-primary'); if (back) back.focus();
+        } },
+        h(GlassPanel, { strong: true, className: 'ot-perm-notecard', role: 'dialog', 'aria-modal': true, 'aria-labelledby': 'ot-perm-note-t' },
+          h('p', { id: 'ot-perm-note-t', className: 'text-callout' }, 'You can change these settings any time from the AI pill.'),
+          h('div', { className: 'ot-login-actions' },
+            h('button', { ref: noteBtn, type: 'button', className: 'ot-btn ot-btn-primary ot-btn-md', disabled: !!p.busy, onClick: function () { setNote(false); done(); } }, 'Continue', h(Icon, { name: 'chevron', size: 18 }))))));
+  }
+  function PermissionsStep(p) {
+    return h('div', { className: cx('ot-login', p.className) },
+      h(WaveBackground, null),
+      h('div', { className: 'ot-login-scroll' }, h(PermissionsPanel, Object.assign({}, p, { className: null }))));
+  }
+  // For paired outside windows: the compact panel, pre-filled (`preset`), with Not now / Allow.
   function PermissionGrant(p) {
-    var a = React.useState(true), b = React.useState(true), c = React.useState(true), d = React.useState(true);
-    var who = p.recipient || 'Claude Code';
-    return h(GlassPanel, { className: cx('ot-grant', p.compact && 'is-compact', p.className) },
-      !p.compact && h('div', { className: 'ot-grant-head' },
-        h('div', { className: 'text-headline' }, p.goal || 'Loud on battery')),
-      h('div', { className: 'ot-grant-cols' },
-        h('section', null,
-          h('h3', { className: 'text-caption ot-muted' }, 'Can do'),
-          h(GrantRow, { title: 'Run checks', detail: 'Up to 10', checked: a[0], onChange: a[1], compact: p.compact }),
-          h(GrantRow, { title: 'Suggest changes', detail: 'You approve each', checked: b[0], onChange: b[1], compact: p.compact })),
-        h('section', null,
-          h('h3', { className: 'text-caption ot-muted' }, 'Can share with ' + who),
-          h(GrantRow, { title: 'Findings (3)', detail: 'Redacted', checked: c[0], onChange: c[1], compact: p.compact }),
-          h(GrantRow, { title: 'New results', detail: 'Up to 128 KiB', checked: d[0], onChange: d[1], compact: p.compact }),
-          h(GrantRow, { title: 'Personal data', locked: true }))),
-      h('div', { className: 'ot-grant-foot' },
-        h('span', { className: 'text-mono-sm ot-muted' }, 'Ends after 15 min idle'),
-        !p.compact && h('div', { className: 'ot-grant-actions' },
-          h(Button, { variant: 'ghost' }, 'Explain only'),
-          h(Button, { variant: 'primary', iconRight: 'arrow' }, 'Start'))));
+    return h(PermissionsPanel, { compact: true, agent: p.client || p.recipient || 'Claude Code', initial: p.preset && p.preset !== true ? p.preset : undefined,
+      explainOnly: p.explainOnly, webUnavailable: p.webUnavailable, adminUnavailable: p.adminUnavailable, provider: p.provider, showScripts: p.showScripts, busy: p.busy, updated: p.updated,
+      onCancel: p.onCancel, onContinue: p.onContinue, className: p.className });
+  }
+  // One line under the ask box in chat, in place of a grant panel. `text`: the app's own line (permissionLine).
+  function permSummaryText(v, explainOnly) {
+    v = v || permDefaults();
+    var parts = ['Reads your report'];
+    if (v.checks && !explainOnly) parts.push('runs checks');
+    parts.push(explainOnly || !(v.ask || v.fix) ? 'explains only' : 'asks before changes');
+    if (v.scripts && !explainOnly) parts.push('runs approved scripts');
+    if (v.admin && !explainOnly) parts.push('can ask for administrator rights');
+    if (v.web && !explainOnly) parts.push('looks things up');
+    return parts.join(' · ');
+  }
+  function PermissionsSummary(p) {
+    // Icon, text and Change stay on one row; only the text wraps.
+    return h('div', { className: cx('ot-perm-sum text-mono-sm', p.className) },
+      h(Icon, { name: 'eye', size: 14 }),
+      h('span', { className: 'ot-perm-sum-text' }, p.text || permSummaryText(p.values, p.explainOnly)),
+      h('button', { type: 'button', className: 'ot-perm-change', onClick: p.onChange }, 'Change'));
   }
 
   var STEP = {
@@ -500,7 +636,7 @@
     declined: { icon: 'gap', label: 'Declined' }
   };
 
-  function AgentActivity(p) {
+  function AgentActivityLive(p) {
     var steps = p.steps || [], b = p.budget || {};
     function meter(label, v) {
       if (!v) return null;
@@ -508,10 +644,10 @@
         h('div', { className: 'ot-meter-label text-mono-sm ot-muted' }, h('span', null, label), h('span', null, v[0] + ' / ' + v[1] + (v[2] || ''))),
         h('div', { className: 'ot-track' }, h('span', { style: { width: Math.min(100, v[0] / v[1] * 100) + '%' } })));
     }
-    return h(GlassPanel, { className: cx('ot-activity', p.className) },
-      h('div', { className: 'ot-activity-head' },
+    return h(GlassPanel, { className: cx('ot-activity', p.embedded && 'is-embedded', p.className) },
+      !p.embedded && h('div', { className: 'ot-activity-head' },
         h('div', null,
-          h('div', { className: 'ot-live text-caption' }, h('span', { className: 'ot-live-dot', 'aria-hidden': true }), (p.agent || 'Claude Code') + ' · live'),
+          h('div', { className: 'ot-live text-caption' }, h('span', { className: 'ot-live-dot', 'aria-hidden': true }), (p.agent || 'Claude') + ' · live'),
           h('h2', { className: 'text-headline' }, p.goal)),
         h(Button, { variant: 'neu', size: 'sm', icon: 'stop', onClick: p.onStop }, 'Stop')),
       h('ol', { className: 'ot-steps' }, steps.map(function (s, i) {
@@ -520,44 +656,441 @@
           h('span', { className: 'ot-step-mark', 'aria-hidden': true }, st.icon && h(Icon, { name: st.icon, size: 14, strokeWidth: 2.25 })),
           h('div', { className: 'ot-step-body' },
             h('div', { className: 'ot-step-top' },
-              h('span', { className: cx('ot-origin', s.origin === 'client' && 'is-client', 'text-mono-sm') }, s.origin === 'client' ? (p.agent || 'Claude Code') : 'Optimizer'),
+              h('span', { className: cx('ot-origin', s.origin === 'client' && 'is-client', 'text-mono-sm') }, s.origin === 'client' ? (p.agent || 'Claude') : 'Optimizer'),
               h('span', { className: 'text-mono-sm ot-muted' }, s.tool)),
             h('div', { className: 'text-callout ot-step-title' }, s.title),
-            s.detail && h('div', { className: 'text-mono-sm ot-muted' }, s.detail)),
+            s.detail && h('div', { className: 'text-mono-sm ot-muted' }, s.detail),
+            s.action && h(Button, { variant: 'ghost', size: 'sm', icon: s.action.icon || 'file', className: 'ot-step-action', onClick: s.action.onClick }, s.action.label)),
           h('span', { className: 'ot-step-state text-mono-sm' }, st.label));
       })),
-      h('div', { className: 'ot-meters' }, meter('Checks', b.diagnostics), meter('Shared', b.shared), meter('Turns', b.turns)));
+      !p.embedded && h('div', { className: 'ot-meters' }, meter('Checks', b.diagnostics), meter('Shared', b.shared), meter('Turns', b.turns)));
   }
 
+  /* Design AgentActivity (v72). Live: the step list as before. Finished: the answer first (the AI's name with the spark
+     and, with `onClose`, the × at the right of that line; the goal as a headline, “First look at your PC” when there is
+     none; the text in paragraphs split by a blank line, none without `answer`), then the steps folded into one line,
+     “Steps <AI> took · N”, which opens the list. `list` renders the list (default: the design's live list, embedded). */
+  function FinishedRun(p) {
+    var o = React.useState(false), open = o[0], setOpen = o[1];
+    var who = p.agent || 'Claude';
+    var paras = typeof p.answer === 'string' ? p.answer.split(/\n\n+/) : null;
+    return h(GlassPanel, { className: cx('ot-activity is-finished', p.className), role: p.role, 'aria-label': p.ariaLabel },
+      h('div', { className: 'ot-activity-answer' },
+        h('div', { className: 'ot-answer-head' },
+          h('div', { className: 'text-caption ot-muted ot-answer-from' }, h(Icon, { name: 'spark', size: 14 }), who),
+          p.onClose && h('button', { type: 'button', className: 'ot-rp-x', 'aria-label': 'Close', onClick: p.onClose }, h(Icon, { name: 'close', size: 18 }))),
+        h('h2', { className: 'text-headline' }, p.goal || 'First look at your PC'),
+        paras ? paras.map(function (t, i) { return h('p', { key: i, className: 'text-body' }, t); }) : p.answer),
+      p.count > 0 && h('button', { type: 'button', className: 'ot-steps-toggle text-callout', 'aria-expanded': open, onClick: function () { setOpen(!open); } },
+        h(Icon, { name: 'list', size: 16 }), h('span', null, 'Steps ' + who + ' took'), h('span', { className: 'text-mono-sm ot-muted' }, p.count),
+        h(Icon, { name: 'chevron', size: 16, className: 'ot-steps-chev' })),
+      h(Expand, { contentKey: open ? 'open' : 'closed' }, open ? p.list() : null));
+  }
+  function AgentActivity(p) {
+    if (!p.finished) return AgentActivityLive(p);
+    return h(FinishedRun, { className: p.className, agent: p.agent, goal: p.goal, answer: p.answer, onClose: p.onClose, count: (p.steps || []).length,
+      list: function () { return AgentActivityLive(Object.assign({}, p, { embedded: true, className: null })); } });
+  }
+
+  /* Every change, single or multi-step (design: ApprovalCard with `steps`, M9 §4; a single change is one step, v53).
+     States: awaiting → applying → verified | partial | stopped | failed, ineligible (which step and why), and expired
+     (stale or lapsed before approval: a plain line and Dismiss). */
+  var STEP_BADGES = {
+    admin: { text: 'Admin', icon: 'key' },
+    irreversible: { text: 'Can’t be undone', icon: 'lock', risk: true },
+    unsaved: { text: 'May lose unsaved work', icon: 'alert', risk: true },
+    program: { text: 'Runs a program', icon: 'terminal' },
+    restart: { text: 'Restart needed', icon: 'repeat' },
+    signout: { text: 'Sign-out needed', icon: 'back' },
+    network: { text: 'Changes network', icon: 'network' },
+    slow: { text: 'Takes a while', icon: 'clock' }
+  };
+  var STATE_ALIAS = { ask: 'awaiting', running: 'applying', done: 'verified' };
+  var ASTEP = { done: 'Verified', running: 'Applying', queued: 'Next', failed: 'Failed', skipped: 'Not run', undone: 'Undone', unclear: 'Unclear', blocked: 'Blocked' };
+  var ASTEP_NOTE = { unclear: 'Optimus couldn’t confirm this worked.' };
+  // Why an approval couldn't start (design RebuildCases, v53); the free-text error is only the fallback.
+  var START_ERRORS = {
+    busy: 'Another change is running. Try again when it finishes.',
+    scan: 'A scan is running. Try again when it finishes.',
+    benchmark: 'A benchmark is running. Try again when it finishes.',
+    closed: 'The Windows approval window was closed, so nothing changed.',
+    cancelled: 'This plan was cancelled. Nothing changed.'
+  };
+  function startError(p) { return START_ERRORS[p.errorCause] || (p.error ? 'Couldn’t start: ' + p.error : null); }
+  // Results of actions that only report (design GuidedAndReports, v56). Keys for the engine; text for anything else.
+  var REPORT_RESULTS = {
+    sfcClean: 'Windows checked its files and found nothing wrong.',
+    sfcRepaired: 'Windows found damaged files and repaired them.',
+    sfcPartial: 'Windows found damaged files but couldn’t repair some of them. Repairing the Windows image may help.',
+    dismHealthy: 'The Windows image is healthy. Nothing needed repair.',
+    dismRepaired: 'Windows repaired its image. Check Windows files again to finish.',
+    dismFailed: 'Windows couldn’t repair its image.',
+    dnsCleared: 'The DNS cache is cleared. Websites will look up their addresses again.',
+    // design ReportsMore (v59)
+    sfcUnknown: 'Windows finished checking its files. Optimus couldn’t read what it found.',
+    dismUnknown: 'Windows finished repairing its image. Optimus couldn’t read the result.',
+    explorerRestarted: 'Windows Explorer restarted.',
+    explorerStarted: 'Windows Explorer had to be started again. It’s running now.',
+    explorerDown: 'Windows Explorer didn’t come back. Press Ctrl+Shift+Esc, choose Run new task, type explorer and press Enter.'
+  };
+  // Tone per key when the app doesn't pass one (design v59).
+  var REPORT_TONE = { sfcPartial: 'problem', dismFailed: 'problem', explorerDown: 'problem', sfcUnknown: 'unknown', dismUnknown: 'unknown', sfcRepaired: 'fixed', dismRepaired: 'fixed', explorerStarted: 'fixed' };
+  // A report-only action's failure on its step (the Failed card, design v59 step.failKey; explorerFailed v60).
+  var FAIL_NOTES = { sfcFailed: 'Windows couldn’t finish checking its files. Restart your PC and try again.', dnsFailed: 'Windows couldn’t clear the DNS cache.',
+    explorerFailed: 'Windows Explorer couldn’t be restarted. If the taskbar is missing, restart your PC.' };
+  // Why a script never started (design notStartedCause, v53); never the app's or the host's own text.
+  var NOT_STARTED = {
+    changed: 'The script changed after you approved it, so it didn’t run.',
+    policy: 'A setting on this PC now blocks scripts.',
+    powershell: 'Windows PowerShell on this PC couldn’t be checked, so it didn’t run.',
+    failed: 'Windows couldn’t start it.',
+    version: 'Scripts can’t run in this version of Optimus.',
+    appstopped: 'Optimus closed before it started.',
+    declined: 'You closed the Windows prompt, so it didn’t run.',
+    helper: 'Windows didn’t allow it to run as administrator.'
+  };
+  // `undo` (from the operation) wins; without it, the design's rule from the badges; never a step with nothing to undo
+  // (design v62). The rule lives in fix-plan.js (stepCanUndo), shared with the tests.
+  function canUndo(s) { return window.OptTool.fixPlan.stepCanUndo(s); }
+  function stepWord(list, single) { return single ? 'This' : (list.length === 1 ? 'Step ' : 'Steps ') + list.join(list.length === 2 ? ' and ' : ', '); }
+  // The red banner and the required tick before Approve (irreversible or data-loss). risky / lose: step numbers.
+  function RiskTick(p) {
+    var risky = p.risky || [], lose = p.lose || [], hasR = risky.length > 0, hasL = lose.length > 0;
+    return h('div', { className: 'ot-plan-warn', role: 'note' },
+      h(Icon, { name: 'alert', size: 18 }),
+      h('div', { className: 'ot-plan-warn-body' },
+        h('span', { className: 'text-callout' },
+          hasR && h('strong', null, stepWord(risky, p.single) + ' can’t be undone.'), hasR && hasL ? ' ' : '',
+          hasL && h('strong', null, stepWord(lose, p.single) + ' may lose unsaved work.'),
+          p.restorePoint ? ' A restore point is made first.' : ''),
+        h('label', { className: 'ot-plan-tick text-callout' },
+          h('input', { type: 'checkbox', checked: !!p.ticked, disabled: p.disabled, onChange: function (e) { p.onTick(e.target.checked); } }),
+          'I understand this can’t be undone')));
+  }
+
+  // When a card changes state the control that had focus can disappear (Approve becomes Stop, Stop becomes Transcript).
+  // Focus then falls to the page; it goes to the first control in the card's foot instead. Never moves focus that is
+  // somewhere else on the page.
+  // checking: Check again is disabled while it runs (it reads Checking…), so focus falls to the page; when the answer
+  // leaves the card as it was, focus goes back to Check again.
+  function useKeepFocus(state, checking) {
+    var ref = React.useRef(null), seen = React.useRef(state), was = React.useRef(!!checking);
+    React.useEffect(function () {
+      if (seen.current === state) return;   // not on mount: a card that appears never takes focus
+      seen.current = state;
+      var a = document.activeElement;
+      if (a && a !== document.body) return;
+      var b = ref.current && ref.current.querySelector('button:not(:disabled)');
+      if (b) b.focus();
+    }, [state]);
+    React.useEffect(function () {
+      var before = was.current; was.current = !!checking;
+      if (!before || checking) return;
+      var a = document.activeElement;
+      if (a && a !== document.body) return;
+      var b = ref.current && [].slice.call(ref.current.querySelectorAll('button:not(:disabled)')).filter(function (x) { return x.textContent.trim() === 'Check again'; })[0];
+      if (b) b.focus();
+    }, [checking]);
+    return ref;
+  }
+
+  // Design ApprovalCard with steps (v51; report results, failKey and recheck v59; guided with no Windows page v60), ported. App additions: the foot keeps focus when its control disappears
+  // (useKeepFocus, also around Check again's Checking…), one polite live region for progress and outcome, an accessible name per step Undo, `undoBusy`
+  // (an Undo on its way), and a step's `undo` from the operation (wins over the design's badge rule).
   function ApprovalCard(p) {
-    var rows = p.rows || [], details = p.details || [];
-    return h(NeuCard, { as: 'section', className: cx('ot-approval', p.className) },
-      h('div', { className: 'ot-approval-head' },
-        h(SeverityBadge, { kind: 'exposure', icon: 'alert' }, 'Approve?'),
-        h('span', { className: 'text-mono-sm ot-muted' }, p.requestedBy || 'Claude Code')),
+    var steps = p.steps;
+    var t = React.useState(false), ticked = t[0], setTicked = t[1];
+    // design v75 (PlanInCard): steps switched off in a card (stepToggles); onApprove gets the kept indexes.
+    var of = React.useState({}), offSteps = of[0], setOffSteps = of[1];
+    var footRef = useKeepFocus(p.state, p.checking);
+    if (!steps) return null;   // a single change is one step (the old rows/details card is retired)
+    steps = steps.slice(0, 6);   // the host refuses more (too_large); never cut here
+    var st = STATE_ALIAS[p.state] || p.state || 'awaiting';
+    var ended = st === 'verified' || st === 'unclear' || st === 'doneLeftOut' || st === 'partial' || st === 'failed' || st === 'stopped' || st === 'cantrun' || st === 'expired';
+    var single = steps.length === 1;
+    var tone = p.result ? (p.result.tone || REPORT_TONE[p.result.key] || 'ok') : 'ok';
+    var risky = [], lose = [];
+    steps.forEach(function (s, i) { if (offSteps[i]) return; var b = s.badges || []; if (b.indexOf('irreversible') >= 0) risky.push(i + 1); if (b.indexOf('unsaved') >= 0) lose.push(i + 1); });
+    var needsTick = risky.length + lose.length > 0;
+    var hasRP = steps.some(function (s) { return s.restorePoint; });
+    var doneN = steps.filter(function (s) { return s.state === 'done'; }).length;
+    var undoneN = steps.filter(function (s) { return s.state === 'undone'; }).length;
+    var undoable = window.OptTool.fixPlan.undoAllCount(steps);
+    var failedAt = steps.map(function (s) { return s.state; }).indexOf('failed');
+    var blockedAt = steps.map(function (s) { return s.state; }).indexOf('blocked');
+    var stepName = function (n) { return single ? 'This change' : 'Step ' + n; };
+    var head = st === 'awaiting' ? h(SeverityBadge, { kind: 'exposure', icon: 'alert' }, 'Approve?')
+      : st === 'applying' ? h('span', { className: 'ot-badge ot-badge-run' }, h(Logo, { size: 14, mono: true, spin: true, decorative: true }), 'Applying')
+        : st === 'verified' ? h(SeverityBadge, { kind: 'verified' }, 'Verified')
+          : st === 'unclear' ? h(SeverityBadge, { kind: 'gap', icon: 'report' }, 'Not confirmed')
+          : st === 'doneLeftOut' ? h(SeverityBadge, { kind: 'gap', icon: 'check' }, 'Done, steps left out')
+          : st === 'partial' ? h(SeverityBadge, { kind: 'exposure', icon: 'alert' }, 'Partly done')
+            : st === 'stopped' ? h(SeverityBadge, { kind: 'gap', icon: 'stop' }, 'Stopped')
+              : st === 'cantrun' ? h(SeverityBadge, { kind: 'gap', icon: 'lock' }, 'Can’t run')
+                : st === 'expired' ? h(SeverityBadge, { kind: 'gap', icon: 'clock' }, 'Expired')
+                  : st === 'reported' ? h(SeverityBadge, { kind: tone === 'problem' ? 'exposure' : tone === 'unknown' ? 'gap' : 'verified', icon: tone === 'problem' ? 'alert' : 'report' }, tone === 'problem' ? 'Finished with problems' : 'Finished')
+                  : st === 'guided' ? h('span', { className: 'ot-badge ot-badge-run' }, h(Icon, { name: 'sliders', size: 14 }), 'You do this one')
+                  : h(SeverityBadge, { kind: 'threat', icon: 'alert' }, 'Failed');
+    function row(r, k) {
+      // A row whose before and after are the same only names the thing: label and value, no arrow.
+      var same = r.length < 3 || r[2] == null || r[1] === r[2];
+      return h('div', { key: k, className: cx('ot-plan-row text-mono-sm', same && 'is-name') },
+        h('span', { className: 'ot-muted' }, r[0]),
+        same ? h('span', { className: 'ot-diff-after' }, r[1]) : [h('span', { key: 'b', className: 'ot-diff-before' }, r[1]),
+          h(Icon, { key: 'a', name: 'arrow', size: 14, className: 'ot-muted' }), h('span', { key: 'c', className: 'ot-diff-after' }, r[2])]);
+    }
+    var list = st !== 'expired' && h('ol', { className: cx('ot-plan', steps.length === 1 && 'is-single') }, steps.map(function (s, i) {
+      var ss = s.state || 'queued';
+      var live = st !== 'awaiting' && st !== 'guided' && st !== 'reported' && !(st === 'cantrun' && ss !== 'blocked');
+      var mark = !live ? i + 1 : ss === 'done' ? h(Icon, { name: 'check', size: 14, strokeWidth: 2.5 }) : ss === 'failed' ? h(Icon, { name: 'close', size: 14, strokeWidth: 2.5 })
+        : ss === 'undone' ? h(Icon, { name: 'undo', size: 14 }) : ss === 'running' ? h(Logo, { size: 14, mono: true, spin: true, decorative: true })
+          : ss === 'unclear' ? '?' : ss === 'blocked' ? h(Icon, { name: 'lock', size: 13 }) : i + 1;
+      var note = s.note || FAIL_NOTES[s.failKey] || ASTEP_NOTE[ss];
+      var end = live && ss === 'done' && (s.settings && p.onOpenSettings ? h(Button, { variant: 'ghost', size: 'sm', icon: 'sliders', onClick: function () { p.onOpenSettings(i); } }, 'Open settings')
+        : canUndo(s) && p.onUndoStep ? h(Button, { variant: 'ghost', size: 'sm', icon: 'undo', 'aria-label': 'Undo step ' + (i + 1), disabled: !!p.undoBusy, onClick: function () { p.onUndoStep(i); } }, 'Undo') : null)
+        || live && (ss === 'unclear' || ss === 'failed') && [
+          ss === 'failed' && s.settings && p.onOpenSettings && h(Button, { key: 's', variant: 'ghost', size: 'sm', icon: 'sliders', onClick: function () { p.onOpenSettings(i); } }, 'Open settings'),
+          p.onCheckStep && h(Button, { key: 'c', variant: 'ghost', size: 'sm', icon: 'repeat', onClick: function () { p.onCheckStep(i); } }, 'Check again')];
+      if (Array.isArray(end) && !end.some(Boolean)) end = null;
+      // In a card, each step has a switch to leave it out; at least one stays on. Review 6: locked while the approval is on its way.
+      var toggles = p.stepToggles && st === 'awaiting' && steps.length > 1;
+      if (toggles) {
+        var keptN = steps.filter(function (x, k) { return !offSteps[k]; }).length;
+        end = h(Toggle, { checked: !offSteps[i], disabled: (!offSteps[i] && keptN <= 1) || !!p.waiting, label: h('span', { className: 'ot-sr' }, 'Include step ' + (i + 1)),
+          onChange: function (v) { setOffSteps(function (cur) { var n = Object.assign({}, cur); if (v) delete n[i]; else n[i] = true; return n; }); } });
+      }
+      return h('li', { key: s.n || i, className: cx('ot-plan-step', live && 'is-' + ss, toggles && offSteps[i] && 'is-left-out') },
+        h('span', { className: 'ot-plan-num text-mono-sm', 'aria-hidden': true }, mark),
+        h('div', { className: 'ot-plan-body' },
+          h('div', { className: 'ot-plan-top' },
+            h('span', { className: 'text-callout ot-plan-title' }, s.label || s.title),
+            live && h('span', { className: cx('ot-plan-state text-mono-sm', 'is-' + ss) }, ASTEP[ss] || '')),
+          s.does && !(live && ss === 'done' && s.receipt) && h('p', { className: 'text-callout ot-muted ot-plan-does' }, s.does),
+          live && ss === 'done' && s.receipt && h('p', { className: 'text-callout ot-plan-receipt' }, s.receipt),
+          live && ss === 'running' && s.progress && h('div', { className: 'ot-plan-progress' },
+            h('span', { className: 'text-mono-sm ot-muted', 'aria-live': 'polite' }, [s.progress.text, s.progress.pct != null ? s.progress.pct + '%' : null].filter(Boolean).join(' · ')),
+            s.progress.pct != null ? h('div', { className: 'ot-track ot-track-thin', role: 'progressbar', 'aria-label': s.label || s.title, 'aria-valuenow': s.progress.pct, 'aria-valuemin': 0, 'aria-valuemax': 100 }, h('span', { style: { width: s.progress.pct + '%' } }))
+              : h('div', { className: 'ot-track ot-track-thin is-indeterminate', role: 'progressbar', 'aria-label': s.label || s.title, 'aria-valuetext': s.progress.text || 'Running' }, h('span', null))),
+          st === 'awaiting' && (single || s.undoNote) && canUndo(s) && h('p', { className: 'text-mono-sm ot-muted ot-plan-undo' }, h(Icon, { name: 'undo', size: 12 }), s.undoNote || 'You can undo this afterwards.'),
+          st === 'awaiting' && s.settings && h('p', { className: 'text-mono-sm ot-muted ot-plan-undo' }, h(Icon, { name: 'sliders', size: 12 }), 'Optimus can’t undo this one. You can change it back in Settings.'),
+          s.rows && s.rows.length > 0 && h('div', { className: 'ot-plan-rows' }, s.rows.slice(0, 4).map(row)),
+          (function () {
+            // One trade-off: one line. Several: "Trade-offs:" and a short list (v66).
+            var to = [].concat(s.tradeoff || []).filter(Boolean);
+            if (!to.length) return null;
+            if (to.length === 1) return h('p', { className: 'text-mono-sm ot-muted ot-plan-tradeoff' }, 'Trade-off: ' + to[0]);
+            return h('div', { className: 'text-mono-sm ot-muted ot-plan-tradeoff' }, 'Trade-offs:', h('ul', null, to.map(function (x, k) { return h('li', { key: k }, x); })));
+          })(),
+          s.badges && s.badges.length > 0 && h('div', { className: 'ot-plan-badges' }, s.badges.map(function (b) {
+            var d = STEP_BADGES[b]; if (!d) return null;
+            return h('span', { key: b, className: cx('ot-step-badge text-mono-sm', d.risk && 'is-risk') }, h(Icon, { name: d.icon, size: 12, strokeWidth: 2.25 }), d.text);
+          })),
+          s.why && !live && h('p', { className: 'text-mono-sm ot-muted ot-plan-why' }, 'Why: ' + s.why),
+          live && s.settings && ss === 'done' && h('p', { className: 'text-mono-sm ot-muted' }, 'Optimus can’t undo this one. Change it back in Settings.'),
+          live && note && (ss === 'failed' || ss === 'blocked' || ss === 'unclear') && h('p', { className: cx('text-callout', ss === 'unclear' ? 'ot-muted' : 'ot-plan-fail') }, note)),
+        end && h('span', { className: 'ot-plan-end' }, end));
+    }));
+    var leftN = (p.removed || []).length + (p.leftOut || []).length;
+    var count = st === 'doneLeftOut' && !undoneN ? doneN + ' done · ' + leftN + ' left out' : undoneN ? undoneN + ' undone' + (doneN ? ' · ' + doneN + ' kept' : '') : (st === 'cantrun' || st === 'expired' || (st === 'failed' && !doneN)) ? 'Nothing changed' : single ? (doneN ? 'Done' : 'Not done') : doneN + ' of ' + steps.length + ' done';
+    var closeBtns = [p.onClose && h(Button, { key: 'c', variant: 'ghost', onClick: p.onClose }, st === 'expired' ? 'Dismiss' : 'Close'),
+      p.onNext && st !== 'expired' && h(Button, { key: 'n', variant: 'neu', iconRight: 'chevron', onClick: p.onNext }, 'Next')];
+    var foot;
+    if (st === 'reported') foot = h('div', { className: 'ot-approval-actions' },
+      p.onClose && h(Button, { variant: 'ghost', onClick: p.onClose }, 'Close'),
+      p.onCheckAgain && h(Button, { variant: 'neu', icon: 'repeat', disabled: p.checking, onClick: p.onCheckAgain }, p.checking ? 'Checking…' : 'Check again'));
+    else if (st === 'guided') foot = h('div', { className: 'ot-approval-actions' },
+      p.onBack && h(Button, { variant: 'ghost', icon: 'back', className: 'ot-plan-back', onClick: p.onBack }, 'Back'),
+      p.onClose && h(Button, { variant: 'ghost', onClick: p.onClose }, 'Close'),
+      p.onCheckAgain && h(Button, { variant: p.onOpenPlanSettings ? 'neu' : 'primary', icon: 'repeat', disabled: p.checking, onClick: p.onCheckAgain }, p.checking ? 'Checking…' : 'Check again'),
+      p.onOpenPlanSettings && h(Button, { variant: 'primary', icon: 'sliders', onClick: p.onOpenPlanSettings }, 'Open settings'));
+    else if (st === 'awaiting') foot = h('div', { className: 'ot-approval-actions' },
+      p.onBack && h(Button, { variant: 'ghost', icon: 'back', className: 'ot-plan-back', onClick: p.onBack }, 'Back'),
+      p.waiting ? h('span', { className: 'text-mono-sm ot-muted ot-plan-count', 'aria-live': 'polite' }, 'Approve in the Windows window that opened.')
+        : startError(p) ? h('span', { className: 'text-callout ot-plan-fail ot-plan-count', role: 'alert' }, startError(p)) : null,
+      h(Button, { variant: 'ghost', disabled: p.waiting, onClick: p.onDecline }, p.errorCause === 'cancelled' ? 'Close' : p.inCard ? 'Not now' : 'Decline'),
+      p.errorCause !== 'cancelled' && h(Button, { variant: 'primary', icon: p.waiting ? null : startError(p) ? 'repeat' : 'check', disabled: p.waiting || (needsTick && !ticked),
+        onClick: function () { if (p.onApprove) p.onApprove(steps.map(function (x, k) { return k; }).filter(function (k) { return !offSteps[k]; })); } },
+        p.waiting ? 'Waiting…' : startError(p) ? 'Retry' : p.inCard ? 'Approve…' : 'Approve'));
+    else if (st === 'applying') foot = h('div', { className: 'ot-approval-actions' },
+      h('span', { className: 'text-mono-sm ot-muted ot-plan-count', 'aria-live': 'polite' }, single ? (p.stopping ? 'Stopping…' : 'Stop ends it now. Anything already done stays.') : p.stopping ? 'Stopping after this step…' : 'Step ' + Math.min(doneN + 1, steps.length) + ' of ' + steps.length),
+      p.onStop && h(Button, { variant: 'neu', icon: 'stop', disabled: p.stopping, onClick: p.onStop }, p.stopping ? 'Stopping…' : single ? 'Stop' : 'Stop after this step'));
+    else foot = h('div', { className: 'ot-approval-actions' },
+      h('span', { className: 'text-mono-sm ot-muted ot-plan-count' }, count),
+      undoable > 1 && p.onUndoAll && h(Button, { variant: 'neu', icon: 'undo', disabled: !!p.undoBusy, onClick: p.onUndoAll }, 'Undo all'),
+      (st === 'partial' || st === 'failed') && p.onRetry && h(Button, { variant: 'primary', onClick: p.onRetry }, 'Retry'),
+      st === 'cantrun' && p.onOpenPlanSettings && h(Button, { variant: 'neu', icon: 'sliders', onClick: p.onOpenPlanSettings }, 'Open settings'),
+      closeBtns);
+    var banner = null;
+    if (st === 'cantrun' && blockedAt < 0) banner = h('div', { className: 'ot-plan-warn is-neutral', role: 'alert' }, h(Icon, { name: 'lock', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, 'This fix can’t run. Nothing was changed.'), p.blockedWhy ? ' ' + p.blockedWhy : ''));
+    else if (st === 'cantrun' && blockedAt >= 0) banner = h('div', { className: 'ot-plan-warn is-neutral', role: 'alert' }, h(Icon, { name: 'lock', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, stepName(blockedAt + 1) + ' can’t run. Nothing was changed.'), steps[blockedAt].note ? ' ' + steps[blockedAt].note : ''));
+    else if (st === 'guided') banner = h('div', { className: 'ot-plan-warn is-guide', role: 'note' }, h(Icon, { name: 'sliders', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, p.onOpenPlanSettings ? 'You do this one in Windows Settings.' : 'You do this one yourself.'), ' ',
+        p.guideText || (p.onOpenPlanSettings ? 'Open settings takes you to the right page. Come back and press Check again.' : 'Follow the steps, then come back and press Check again.'),
+        h('span', { className: 'ot-plan-recheck text-mono-sm', role: 'status' }, p.stillSame ? 'Checked again. Nothing has changed yet.' : '')));
+    else if (st === 'reported' && p.result) banner = h('div', { className: cx('ot-plan-warn', tone === 'problem' ? 'is-result' : tone === 'unknown' ? 'is-neutral' : 'is-ok'), role: 'status' }, h(Icon, { name: tone === 'problem' ? 'alert' : tone === 'unknown' ? 'report' : 'check', size: 18 }),
+      h('span', { className: 'text-callout' }, p.result.text || REPORT_RESULTS[p.result.key] || '',
+        h('span', { className: 'ot-plan-recheck text-mono-sm', role: 'status' }, p.recheck === 'gone' ? 'Checked again: the problem is gone.' : p.recheck === 'still' ? 'Checked again: the problem is still there.' : '')));
+    else if (st === 'expired') banner = h('div', { className: 'ot-plan-warn is-neutral', role: 'note' }, h(Icon, { name: 'clock', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, 'This plan is out of date.'), ' Ask again for a new one.'));
+    else if (st === 'unclear') banner = h('div', { className: 'ot-plan-warn is-neutral', role: 'status' }, h(Icon, { name: 'report', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, 'Optimus couldn’t confirm this worked.'), single ? ' Press Check again.' : ' Press Check again on the step marked Unclear.'));
+    else if (st === 'doneLeftOut') banner = h('div', { className: 'ot-plan-warn is-neutral', role: 'status' }, h(Icon, { name: 'check', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, 'Done, with steps left out.'), ' The steps that ran are verified. The next scan shows whether the problem is gone.'));
+    else if (st === 'stopped') banner = h('div', { className: 'ot-plan-warn is-neutral', role: 'status' }, h(Icon, { name: 'stop', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, 'Stopped.'), single ? ' Anything already done stays.' : ' Later steps weren’t run.'));
+    else if ((st === 'partial' || st === 'failed') && failedAt >= 0) banner = h('div', { className: 'ot-plan-warn is-result', role: 'alert' }, h(Icon, { name: 'alert', size: 18 }),
+      h('span', { className: 'text-callout' }, h('strong', null, stepName(failedAt + 1) + ' failed.'), ' ', doneN ? 'Earlier steps are done and keep their Undo. Later steps weren’t run.' : 'Nothing was changed.'));
+    // One live region for the whole run, so progress and a calm outcome are heard (failures and Can't run are alerts).
+    var announce = st === 'applying' ? (single ? '' : 'Step ' + Math.min(doneN + 1, steps.length) + ' of ' + steps.length)
+      : st === 'verified' || st === 'unclear' || st === 'doneLeftOut' || st === 'partial' ? count : '';
+    return h(NeuCard, { as: 'section', className: cx('ot-approval', 'is-' + st, p.className), 'aria-busy': st === 'applying' || undefined, 'aria-label': p.title || undefined },
+      h('span', { className: 'ot-sr', 'aria-live': 'polite' }, announce),
+      h('div', { className: 'ot-approval-head' }, head, p.requestedBy !== null && h('span', { className: 'text-mono-sm ot-muted' }, p.requestedBy || 'Claude')),
       h('h3', { className: 'text-title-2' }, p.title),
-      p.actionId && h('div', { className: 'text-mono-sm ot-muted' }, p.actionId),
-      h('div', { className: 'ot-diff' }, rows.map(function (r) {
-        return h('div', { key: r.label, className: 'ot-diff-row' },
-          h('span', { className: 'text-caption ot-muted' }, r.label),
-          h('span', { className: 'ot-diff-before text-mono' }, r.before),
-          h(Icon, { name: 'arrow', size: 16, className: 'ot-muted' }),
-          h('span', { className: 'ot-diff-after text-mono' }, r.after));
+      p.reason && st !== 'expired' && h('blockquote', { className: 'ot-plan-quote text-callout' }, h('span', { className: 'ot-plan-from' }, 'From ' + (p.from || 'Claude') + ': '), p.reason),
+      st === 'applying' && h('div', { className: cx('ot-track', single && steps[0].progress && steps[0].progress.pct == null && 'is-indeterminate'), role: 'progressbar', 'aria-label': 'Steps done', 'aria-valuenow': doneN, 'aria-valuemin': 0, 'aria-valuemax': steps.length }, h('span', { style: { width: (single && steps[0].progress && steps[0].progress.pct != null ? steps[0].progress.pct : doneN / steps.length * 100) + '%' } })),
+      banner,
+      list,
+      // design v75/v76: left out for administrator rights (before approval, with Permissions when they are off); after
+      // approval, what the narrowed plan left out (removed: by you) and what Optimus left out.
+      st === 'awaiting' && p.leftOut && p.leftOut.length > 0 && h('ul', { className: 'ot-plan-leftout' }, p.leftOut.map(function (x, k) {
+        return h('li', { key: k, className: 'text-callout' }, h(Icon, { name: 'lock', size: 14 }),
+          h('span', null, h('strong', null, x.label), ' · ', x.reason === 'off' ? 'Left out: needs administrator rights, which are off.' : 'Left out: needs administrator rights, not available in this version yet.'),
+          x.reason === 'off' && p.onPermissions && h('button', { type: 'button', className: 'ot-perm-change', onClick: p.onPermissions }, 'Permissions'));
       })),
-      h('dl', { className: 'ot-approval-details' }, details.map(function (d) {
-        return h(React.Fragment, { key: d[0] }, h('dt', { className: 'text-callout ot-muted' }, d[0]), h('dd', { className: 'text-callout' }, d[1]));
+      st !== 'awaiting' && leftN > 0 && h('ul', { className: 'ot-plan-leftout' },
+        (p.removed || []).map(function (x, k) { return h('li', { key: 'r' + k, className: 'text-callout' }, h(Icon, { name: 'minus', size: 14 }), h('span', null, h('strong', null, x), ' · Left out by you')); }),
+        (p.leftOut || []).map(function (x, k) { return h('li', { key: 'a' + k, className: 'text-callout' }, h(Icon, { name: 'lock', size: 14 }), h('span', null, h('strong', null, x.label), ' · Left out: needs administrator rights')); })),
+      st === 'awaiting' && p.onChangeRequest && h(AskField, { placeholder: 'Change something…', onSend: p.onChangeRequest, className: 'ot-plan-change' }),
+      st === 'awaiting' && needsTick && h(RiskTick, { single: single, risky: risky, lose: lose, restorePoint: hasRP, ticked: ticked, onTick: setTicked, disabled: p.waiting }),
+      ended && hasRP && p.restorePointAt && h('div', { className: 'ot-plan-line text-callout' }, h(Icon, { name: 'history', size: 16 }), 'Restore point · ' + p.restorePointAt),
+      h('div', { className: 'ot-approval-foot', ref: footRef }, foot));
+  }
+  /* ---------- Script approval (M9 §5.2; design ScriptApproval) ---------- */
+  /* A script is always approved on its own. The full text must be scrolled to the end, the user ticks that it can't be
+     undone, and an optional restore point comes first. No Undo anywhere on this card. */
+  var SCRIPT_RP_REASON = { off: 'Restore points are off on this PC', unsupported: 'Not available in this version' };
+  var SCRIPT_ENDED = { finished: 1, failed: 1, stopped: 1, timeout: 1, interrupted: 1 };
+
+  function ScriptCode(p) {
+    var ref = React.useRef(null);
+    // Tabs show as four spaces; CRLF (the approved bytes) and LF both end a line; nothing is folded or cut.
+    var lines = (p.script || '').replace(/\r\n?/g, '\n').replace(/\t/g, '    ').replace(/\n$/, '').split('\n').slice(0, 200);
+    var parts = (p.parts || []).slice(0, 12);
+    React.useEffect(function () {
+      var el = ref.current; if (!el || !p.onReadAll) return;
+      if (el.scrollHeight <= el.clientHeight + 4) p.onReadAll();
+    }, []);
+    function onScroll(e) { var el = e.currentTarget; if (p.onReadAll && el.scrollTop + el.clientHeight >= el.scrollHeight - 4) p.onReadAll(); }
+    var rows = [], w = String(lines.length).length;
+    lines.forEach(function (ln, i) {
+      var n = i + 1, part = parts.filter(function (q) { return n >= q.fromLine && n <= q.toLine; })[0];
+      rows.push(h('div', { key: 'l' + n, className: cx('ot-script-line', part && 'is-part') },
+        h('span', { className: 'ot-script-n', 'aria-hidden': true }, String(n).padStart(w, ' ')),
+        h('span', { className: 'ot-script-src' }, ln || ' ')));
+      parts.forEach(function (q, k) {
+        if (q.toLine === n) rows.push(h('blockquote', { key: 'p' + k, className: 'ot-script-explain text-callout' },
+          h('span', { className: 'text-mono-sm ot-muted' }, (q.fromLine === q.toLine ? 'Line ' + q.fromLine : 'Lines ' + q.fromLine + '–' + q.toLine) + ' · ' + (p.ai || 'Claude') + '’s explanation, not checked by Optimus'),
+          h('span', null, q.explains)));
+      });
+    });
+    return h('div', { ref: ref, className: 'ot-script-code text-mono-sm', role: 'region', tabIndex: 0, 'aria-label': 'Script, ' + lines.length + ' lines', onScroll: onScroll }, rows);
+  }
+
+  // Design ScriptApproval (v51), ported. App additions: `contentKey` (a new plan resets the read and the tick), a
+  // controlled transcript view (`view` / `onView`), focus kept in the foot, one polite live region for the run.
+  function ScriptApproval(p) {
+    var st = p.state || 'awaiting';
+    var r = React.useState(false), readAll = r[0], setReadAll = r[1];
+    var t = React.useState(false), ticked = t[0], setTicked = t[1];
+    var rpAvail = !p.restorePoint || p.restorePoint === 'available';
+    var rp = React.useState(rpAvail), rpOn = rp[0], setRpOn = rp[1];
+    var tr = React.useState(p.transcriptOpen ? 'transcript' : p.sentOpen ? 'sent' : null), ownView = tr[0], setOwnView = tr[1];
+    var view = p.onView ? p.view || null : ownView, setView = p.onView || setOwnView;
+    var so = React.useState(true), shareOn = so[0], setShareOn = so[1];
+    var footRef = useKeepFocus(st);
+    // Any change of plan content resets the read-to-the-end and the tick (a changed byte is a new plan). Done while
+    // rendering, so the new script's own "fits without scrolling" check (a child effect) comes after it.
+    var ck = React.useState(p.contentKey), seenKey = ck[0], setSeenKey = ck[1];
+    if (seenKey !== p.contentKey) { setSeenKey(p.contentKey); setReadAll(false); setTicked(false); setRpOn(rpAvail); setShareOn(true); }
+    var ai = p.from || 'Claude';
+    var warnings = p.warnings || [];
+    var head = st === 'awaiting' ? h(SeverityBadge, { kind: 'exposure', icon: 'alert' }, 'Approve script?')
+      : st === 'running' ? h('span', { className: 'ot-badge ot-badge-run' }, h(Logo, { size: 14, mono: true, spin: true, decorative: true }), 'Running · ' + (p.elapsed || '0:00'))
+        : st === 'finished' ? h(SeverityBadge, { kind: 'verified' }, 'Finished · exit ' + (p.exitCode == null ? 0 : p.exitCode))
+          : st === 'stopped' ? h(SeverityBadge, { kind: 'gap', icon: 'stop' }, 'Stopped')
+            : st === 'timeout' ? h(SeverityBadge, { kind: 'threat', icon: 'clock' }, 'Timed out after 10 min')
+              : st === 'interrupted' ? h(SeverityBadge, { kind: 'exposure', icon: 'alert' }, 'Interrupted')
+              : st === 'notrun' ? h(SeverityBadge, { kind: 'gap', icon: 'gap' }, 'Not run')
+              : st === 'notstarted' ? h(SeverityBadge, { kind: 'gap', icon: 'lock' }, 'Not started')
+                : h(SeverityBadge, { kind: 'threat', icon: 'alert' }, 'Failed · exit ' + (p.exitCode == null ? 1 : p.exitCode));
+    var ended = !!SCRIPT_ENDED[st];
+    // The running clock is not read out; Not started, Not run and Interrupted are alerts of their own.
+    var announce = st === 'awaiting' ? (readAll ? 'Read to the end' : '') : st === 'running' ? 'Running'
+      : st === 'finished' ? 'Finished, exit ' + (p.exitCode == null ? 0 : p.exitCode) : st === 'stopped' ? 'Stopped' : st === 'timeout' ? 'Timed out'
+        : st === 'failed' ? 'Failed' + (p.exitCode == null ? '' : ', exit ' + p.exitCode) : '';
+    return h(NeuCard, { as: 'section', className: cx('ot-approval', 'ot-script', 'is-' + st, p.className), 'aria-busy': st === 'running' || undefined, 'aria-label': p.title || undefined },
+      h('span', { className: 'ot-sr', 'aria-live': 'polite' }, announce),
+      h('div', { className: 'ot-approval-head' }, head, h('span', { className: 'text-mono-sm ot-muted' }, p.requestedBy || 'Claude')),
+      h('h3', { className: 'text-title-2' }, p.title),
+      p.reason && h('blockquote', { className: 'ot-plan-quote text-callout' }, h('span', { className: 'ot-plan-from' }, 'From ' + ai + ': '), p.reason),
+      h('div', { className: 'ot-script-meta' },
+        p.admin && h('span', { className: 'ot-step-badge text-mono-sm' }, h(Icon, { name: 'key', size: 12, strokeWidth: 2.25 }), 'Admin'),
+        p.admin && h('span', { className: 'text-callout' }, 'Runs as administrator.'),
+        h('span', { className: 'text-callout ot-muted ot-script-fixed' }, h(Icon, { name: 'alert', size: 16 }), 'Optimus can’t check what a script does and can’t undo it. No warning here doesn’t mean it is safe.'),
+        p.policyNote && h('span', { className: 'text-callout ot-script-fixed' }, h(Icon, { name: 'lock', size: 16 }), 'Runs even though scripts are normally off on this PC.')),
+      warnings.length > 0 && h('ul', { className: 'ot-script-warn', 'aria-label': 'Found by Optimus' }, warnings.map(function (w, i) {
+        return h('li', { key: i, className: 'text-callout' }, h(Icon, { name: 'alert', size: 16 }), h('span', null, w));
       })),
-      h('div', { className: 'ot-approval-foot' },
-        h('div', { className: 'ot-approval-actions' },
-          h(Button, { variant: 'ghost', onClick: p.onDecline }, 'Decline'),
-          h(Button, { variant: 'primary', icon: 'check', onClick: p.onApprove }, 'Approve'))));
+      h(ScriptCode, { key: p.contentKey || 'code', ai: ai, script: p.script, parts: p.parts, onReadAll: function () { setReadAll(true); } }),
+      st === 'interrupted' && h('div', { className: 'ot-plan-warn is-result', role: 'alert' }, h(Icon, { name: 'alert', size: 18 }), h('span', { className: 'text-callout' }, h('strong', null, 'Interrupted.'), ' Optimus doesn’t know how far it got.')),
+      st === 'notstarted' && h('div', { className: 'ot-plan-warn is-neutral', role: 'alert' }, h(Icon, { name: 'lock', size: 18 }), h('span', { className: 'text-callout' }, h('strong', null, 'Not started.'), ' ', p.notStartedWhy || NOT_STARTED[p.notStartedCause] || 'Something changed after you approved it, so it didn’t run.', ' Nothing was changed.')),
+      st === 'notrun' && h('div', { className: 'ot-plan-warn is-result', role: 'alert' }, h(Icon, { name: 'alert', size: 18 }), h('span', { className: 'text-callout' }, h('strong', null, 'Not run: no restore point was made.'))),
+      st === 'awaiting' && h('div', { className: cx('ot-script-rp', !rpAvail && 'is-off') },
+        h('label', { className: 'ot-plan-tick text-callout' },
+          h('input', { type: 'checkbox', checked: rpAvail && rpOn, disabled: !rpAvail, onChange: function (e) { setRpOn(e.target.checked); } }),
+          'Make a restore point first'),
+        h('span', { className: 'text-mono-sm ot-muted' }, rpAvail ? 'Covers Windows files and settings, not your files.' : SCRIPT_RP_REASON[p.restorePoint] || SCRIPT_RP_REASON.off),
+        h('label', { className: 'ot-plan-tick text-callout ot-script-share' },
+          h('input', { type: 'checkbox', checked: shareOn, onChange: function (e) { setShareOn(e.target.checked); } }),
+          'Let ' + ai + ' see the last lines of output'),
+        h('span', { className: 'text-mono-sm ot-muted' }, 'Paths and names are removed where recognised.')),
+      st === 'awaiting' && h('div', { className: 'ot-plan-warn', role: 'note' },
+        h(Icon, { name: 'alert', size: 18 }),
+        h('div', { className: 'ot-plan-warn-body' },
+          h('span', { className: 'text-callout' }, h('strong', null, 'Can’t be undone')),
+          h('label', { className: 'ot-plan-tick text-callout' },
+            h('input', { type: 'checkbox', checked: ticked, onChange: function (e) { setTicked(e.target.checked); } }),
+            'I understand this can’t be undone'))),
+      ended && view === 'transcript' && h('div', { className: 'ot-script-out' },
+        h('pre', { className: 'ot-script-tr text-mono-sm', tabIndex: 0, role: 'region', 'aria-label': 'Transcript' }, p.transcript || ''),
+        p.transcriptCut && h('span', { className: 'text-mono-sm ot-muted' }, 'Output cut at 1 MB')),
+      ended && view === 'sent' && p.sentExcerpt != null && h('div', { className: 'ot-script-out' },
+        h('span', { className: 'text-mono-sm ot-muted' }, 'Exactly what was sent to ' + ai),
+        h('pre', { className: 'ot-script-tr text-mono-sm', tabIndex: 0, role: 'region', 'aria-label': 'Sent to ' + ai }, p.sentExcerpt)),
+      h('div', { className: 'ot-approval-foot', ref: footRef },
+        st === 'awaiting' && h('div', { className: 'ot-approval-actions' },
+          p.waiting ? h('span', { className: 'text-mono-sm ot-muted ot-plan-count', 'aria-live': 'polite' }, 'Approve in the Windows window that opened.')
+            : startError(p) ? h('span', { className: 'text-callout ot-plan-fail ot-plan-count', role: 'alert' }, startError(p))
+              : !readAll && h('span', { className: 'text-mono-sm ot-muted ot-plan-count' }, 'Read to the end to approve'),
+          h(Button, { variant: 'ghost', disabled: p.waiting, onClick: p.onDecline }, 'Decline'),
+          h(Button, { variant: 'primary', icon: p.waiting ? null : startError(p) ? 'repeat' : 'check', disabled: p.waiting || !(readAll && ticked), onClick: function () { if (p.onApprove) p.onApprove({ restorePoint: rpAvail && rpOn, shareOutput: shareOn }); } }, p.waiting ? 'Waiting…' : startError(p) ? 'Retry' : 'Approve')),
+        st === 'running' && h('div', { className: 'ot-approval-actions' },
+          h('span', { className: 'text-mono-sm ot-muted ot-plan-count' }, p.stopping ? 'Stopping…' : 'Stop ends the script. Changes it already made, and anything it started elsewhere, stay.'),
+          h(Button, { variant: 'neu', icon: 'stop', disabled: p.stopping, onClick: p.onStop }, p.stopping ? 'Stopping…' : 'Stop')),
+        (st === 'notstarted' || st === 'notrun') && p.onClose && h('div', { className: 'ot-approval-actions' }, h(Button, { variant: 'ghost', onClick: p.onClose }, 'Close')),
+        ended && h('div', { className: 'ot-approval-actions' },
+          h(Button, { variant: 'neu', icon: 'file', 'aria-expanded': view === 'transcript', onClick: function () { var v = view === 'transcript' ? null : 'transcript'; setView(v); if (v && p.onTranscript) p.onTranscript(); } }, 'Transcript'),
+          p.sentExcerpt != null && h(Button, { variant: 'ghost', icon: 'eye', 'aria-expanded': view === 'sent', onClick: function () { setView(view === 'sent' ? null : 'sent'); } }, 'Sent to ' + ai),
+          p.onClose && h(Button, { variant: 'ghost', onClick: p.onClose }, 'Close'))));
   }
 
   var PROVIDERS = [
-    { value: 'claude-code', glyph: 'CC', title: 'Claude Code', name: 'Claude Code', shares: 'Only what you allow' },
-    { value: 'codex', glyph: 'Cx', title: 'Codex', name: 'Codex', shares: 'Only what you allow' },
-    { value: 'chatgpt', glyph: 'GPT', title: 'ChatGPT', name: 'ChatGPT', shares: 'Only what you allow · uses your ChatGPT plan', needsKind: 'chatgpt_plan' },
-    { value: 'api-key', glyph: 'API', title: 'API key', shares: 'Only what you allow · billed to your key' },
+    { value: 'claude', glyph: 'C', title: 'Claude', description: 'Your Claude plan', shares: 'Only what you allow' },
+    { value: 'chatgpt', glyph: 'GPT', title: 'ChatGPT', description: 'Your ChatGPT plan', shares: 'Only what you allow', needsKind: 'chatgpt_plan' },
+    { value: 'api-key', glyph: 'API', title: 'API key', description: 'Anthropic or OpenAI', shares: 'Only what you allow · billed to your key' },
     { value: 'local', icon: 'device', title: 'Local only', shares: 'Nothing' }
   ];
 
@@ -575,95 +1108,65 @@
       h(Button, { variant: 'ghost', size: 'sm', icon: copied ? 'check' : 'file', onClick: copy }, copied ? 'Copied' : 'Copy'));
   }
 
-  // A native client asks to pair: its code must match the one it shows. Approve opens the grant sheet.
+  // Design PairingCard (v51): an outside Claude Code window asks to pair; its code must match. App addition: `busy`
+  // (the answer is on its way) disables both buttons.
   function PairingCard(p) {
-    var body = [
-      !p.inline && h('div', { key: 'h', className: 'text-headline' }, 'Pair ' + (p.client || 'Claude Code') + '?'),
-      h('div', { key: 'c', className: 'ot-pair-code text-mono', 'aria-label': 'Code ' + p.code }, p.code),
-      h('div', { key: 'f', className: 'ot-choice-foot' },
-        h(Button, { variant: 'ghost', onClick: p.onDeny, disabled: !!p.busy }, 'Deny'),
-        h(Button, { variant: 'primary', icon: 'check', onClick: p.onApprove, disabled: !!p.busy }, 'Approve'))];
-    return p.inline ? h('div', { className: cx('ot-pair is-inline', p.className), role: 'group', 'aria-label': 'Pairing' }, body)
-      : h(GlassPanel, { className: cx('ot-share ot-pair', p.className), role: 'group', 'aria-label': 'Pairing' }, body);
+    var code = String(p.code || '').split('');
+    return h(GlassPanel, { strong: true, className: cx('ot-pair', p.className), role: 'dialog', 'aria-labelledby': 'ot-pair-t' },
+      h('div', { className: 'ot-perm-chead' }, h(Icon, { name: 'terminal', size: 18 }), h('span', { id: 'ot-pair-t', className: 'text-headline' }, 'Pair ' + (p.client || 'Claude Code') + '?')),
+      h('p', { className: 'text-callout ot-muted' }, 'Check that this code matches the one in ' + (p.client || 'Claude Code') + '’s window.'),
+      h('div', { className: 'ot-pair-code' },
+        h('span', { className: 'text-caption ot-muted', id: 'ot-pair-l' }, 'Code'),
+        h('span', { className: 'ot-pair-digits', role: 'text', 'aria-labelledby': 'ot-pair-l', 'aria-label': 'Code ' + code.join(' ') },
+          code.map(function (c, i) { return h('span', { key: i, className: 'ot-pair-digit', 'aria-hidden': true }, c); }))),
+      h('div', { className: 'ot-login-actions' },
+        h(Button, { variant: 'ghost', disabled: !!p.busy, onClick: p.onCancel }, 'Not now'),
+        h(Button, { variant: 'primary', disabled: !!p.busy, onClick: p.onPair }, 'Pair')));
   }
 
-  var TILE_KIND = { 'claude-code': 'claude_code_mcp', codex: 'codex_mcp', chatgpt: 'chatgpt_plan' };
-  function tileKind(tile, api) { return tile === 'api-key' ? (api === 'openai' ? 'openai_api' : 'anthropic_api') : TILE_KIND[tile] || null; }
-  var ACTION_LABEL = { addKey: 'Add key', updateKey: 'Update key', retry: 'Retry', signIn: 'Sign in' };
+  // Picker tile → provider kind (the mapping and its tests live in connection-state.js, loaded after this file).
+  function tileKind(tile, api) { return window.OptTool.tileKind(tile, api); }
   var READY_ROWS = { paired: 1, active: 1, client_closed: 1 };
-  // Waiting: what to do next, and after a minute how to check the registration.
-  function WaitHelp(p) {
-    return h(React.Fragment, null,
-      p.hint && h('div', { className: 'text-callout ot-muted' }, p.hint),
-      p.long && p.cli && h('div', { className: 'text-mono-sm ot-muted' }, 'Run ', h('code', null, p.cli + ' mcp list'), ' to check'));
-  }
   function ConnectedLine() {
     return h('div', { className: 'ot-connected-line text-callout' }, h(Icon, { name: 'check', size: 16, strokeWidth: 2.5 }), 'Connected');
   }
-  function ProviderDetails(p) {
-    var cur = p.provider;
-    if (cur.value === 'local') return null;
-    var st = p.tileState || null;
-    var off = st && st.disconnect && p.onDisconnect && h('div', { className: 'ot-detail-row' }, h('span', null),
-      h(Button, { variant: 'ghost', size: 'sm', onClick: function () { p.onDisconnect(tileKind(cur.value, p.api)); } }, 'Disconnect'));
-    // A failed check or sign-in says why in a line (connectionState hint); the bottom button offers the next step.
-    var why = st && st.hint && h('div', { className: 'text-callout ot-muted', role: 'status' }, st.hint);
-    if (cur.value === 'chatgpt') {
-      var signing = p.connect && p.connect.tile === 'chatgpt';
-      return h('div', { className: 'ot-detail' },
-        st && st.row === 'connected' ? h(ConnectedLine, null)
-          : signing || (st && st.row === 'checking') ? h('div', { className: 'text-callout ot-muted ot-waiting' }, 'Finish signing in in your browser.')
-          : why || h('div', { className: 'text-callout ot-muted' }, 'Signs in with your ChatGPT account in your browser.'), off);
-    }
-    if (cur.value === 'api-key') {
-      // The key is typed into the app's own Windows dialog, never into this page.
-      return h('div', { className: 'ot-detail' },
-        h(SegmentedControl, { label: 'Provider', value: p.api, onChange: p.setApi, options: [
-          { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }] }), st && st.row === 'connected' && h(ConnectedLine, null), why, off);
-    }
-    var cv = p.client || null, g = nativeProgress(cv, st);
-    var name = cur.name;
-    function step(n, title, sub, more) {
-      var done = g.step > n, now = g.step === n;
-      return h('li', { key: n, className: cx('ot-cstep', done && 'is-done', now && 'is-now') },
-        h('span', { className: 'ot-connect-num text-mono-sm' }, done ? h(Icon, { name: 'check', size: 14, strokeWidth: 2.5 }) : String(n)),
-        h('div', { className: 'ot-cs-body' },
-          h('div', { className: 'text-callout ot-cs-title' }, title),
-          sub && h('div', { className: cx('text-callout ot-muted ot-cs-sub', now && cv && cv.signing && 'ot-waiting') }, sub),
-          (now || (n === 3 && g.ready)) && more));
-    }
-    // Not installed, blocked on this PC, or too old: the same install step (the official installer is the other way in).
-    var installMore = cv && cv.notInstalled && h(React.Fragment, null,
-      cv.failed && h('div', { className: 'text-callout ot-muted', role: 'status' }, cv.failed),
-      h('div', { className: 'ot-detail-row ot-install-row' },
-        h(Button, { variant: 'neu', size: 'sm', icon: 'terminal', disabled: cv.installing, onClick: cv.onInstall },
-          cv.installing ? (cv.outdated ? 'Updating…' : 'Installing…') : cv.outdated ? 'Update with PowerShell' : 'Install with PowerShell'),
-        !cv.app && !(cv.blocked && !cv.reinstall) && h(Button, { variant: 'ghost', size: 'sm', icon: 'repeat', onClick: cv.onCheck }, 'Check again'),
-        cv.installCmd && !p.cmdOpen && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onShowCommand }, 'Show command')),
-      cv.installCmd && p.cmdOpen && h(CopyField, { text: cv.installCmd, onFail: p.onCopyFail }));
-    // Sign-in runs in a window of its own; the step re-checks by itself, Check again is for the impatient.
-    // When the check gave no answer, the bottom button checks again and Sign in stays here as the other way.
-    var signMore = cv && cv.installed && h(React.Fragment, null,
-      cv.failed && h('div', { className: 'text-callout ot-muted', role: 'status' }, cv.failed),
-      cv.signing && h('div', null, h(Button, { variant: 'ghost', size: 'sm', icon: 'repeat', onClick: cv.onCheck }, 'Check again')),
-      cv.unknown && h('div', null, h(Button, { variant: 'ghost', size: 'sm', onClick: cv.onSignIn }, 'Sign in')));
-    var installTitle = cv && cv.blocked ? cv.title : cv && cv.outdated ? 'Update ' + name : 'Install ' + name;
-    var installSub = g.step !== 1 || !cv ? null : cv.blocked || cv.outdated ? cv.note : cv.app ? 'Open the Code tab in Claude once' : null;
-    var signSub = g.step === 2 && cv && cv.signing ? 'Finish in the window that opened'
-      : g.step === 2 && cv && cv.unknown ? 'Couldn’t check if you’re signed in.'
-      : g.step > 2 && cv && cv.billing ? cv.billing : null;
-    // Optional: the connector in the client's own window too (m3 pairing path).
-    var alsoMore = cv && cv.installed && (cv.registered === 'no' || cv.registered === 'outdated') &&
-      h('div', null, h(Button, { variant: 'ghost', size: 'sm', disabled: !!cv.adding, onClick: cv.onRegister }, cv.adding || 'Also use in ' + name + '’s window'));
-    return h('div', { className: 'ot-detail' },
-      h('ol', { className: 'ot-connect-steps' },
-        step(1, g.step > 1 ? 'Installed' : installTitle, installSub, installMore),
-        step(2, g.step > 2 ? 'Signed in' : 'Sign in', signSub, signMore),
-        step(3, 'Connected', null, alsoMore)),
-      g.ready && off);
+
+  // Design ConnectStep (v70): number (or check, alert or its own mark), its title, and its button (turning gears while
+  // busy). A finished step shows only its check and title: no button, no state word (screen readers still hear it).
+  function ConnectStep(p) {
+    return h('li', { className: cx(p.done && 'is-done', p.warn && 'is-warn') },
+      h('span', { className: 'ot-connect-num text-mono-sm' }, p.done ? h(Icon, { name: 'check', size: 14, strokeWidth: 2.5 }) : p.warn ? h(Icon, { name: 'alert', size: 14 }) : p.markIcon ? h(Icon, { name: p.markIcon, size: 14 }) : p.n),
+      h('div', { className: 'ot-connect-title' }, h('span', { className: 'text-callout', style: { fontWeight: 600 } }, p.title),
+        h('span', { className: 'ot-sr' }, p.done ? 'Done' : p.busy ? 'In progress' : p.warn ? 'Needs you' : 'To do')),
+      p.action && !p.done ? h(Button, { variant: 'neu', size: 'sm', icon: p.busy ? null : p.icon, disabled: p.disabled, onClick: p.onClick },
+        p.busy && h(Logo, { size: 14, mono: true, spin: true, decorative: true }), p.action) : h('span', null));
   }
 
-  // Where Claude Code / Codex setup stands (m5 §6): 1 install, 2 sign in, 3 connected (4: all done).
+  /* Design ConnectNote (v53): one grey line under the Claude steps for cases the three steps don't cover
+     (claudeNote from connection-state.js). */
+  var CLAUDE_NOTES = {
+    installing: { text: 'Installing Claude Code. This takes about a minute.' },
+    updating: { text: 'Updating Claude Code. This takes about a minute.' },
+    signinfailed: { text: 'Sign-in didn’t open. Try again.' },
+    repair: { text: 'Part of the Claude Code setup is broken. Repair installs it again to fix it.' },
+    desktoponly: { text: 'You have the Claude app. Claude Code is separate, so install it here.' },
+    installfailed: { text: 'Install didn’t finish. You can install it yourself.', action: 'command' },
+    blocked: { text: 'This PC doesn’t allow installing programs. Ask whoever manages it.' },
+    unknown: { text: 'Couldn’t check Claude Code. It may still be starting.', action: 'check' },
+    signingin: { text: 'Finish signing in in your browser.' },
+    apikey: { text: 'Claude Code is set to use an API key, so it’s billed to that key, not your Claude plan.' }
+  };
+  function ConnectNote(p) {
+    var n = CLAUDE_NOTES[p.note]; var s = React.useState(false), show = s[0], setShow = s[1];
+    if (!n) return null;
+    return h('div', { className: 'ot-connect-note' },
+      h('span', { className: 'text-callout ot-muted', role: 'status' }, n.text),
+      n.action === 'check' && p.onCheckAgain && h(Button, { variant: 'ghost', size: 'sm', icon: 'repeat', onClick: p.onCheckAgain }, 'Check again'),
+      n.action === 'command' && h(Button, { variant: 'ghost', size: 'sm', icon: 'terminal', 'aria-expanded': show, onClick: function () { setShow(!show); } }, show ? 'Hide command' : 'Show command'),
+      show && h('code', { className: 'ot-connect-cmd text-mono-sm' }, p.command || ''));
+  }
+
+  // Where Claude setup stands: 1 install, 2 sign in, 3 connected (4: all done).
   function nativeProgress(cv, st) {
     var row = st && st.row;
     var ready = !!(row === 'connected' || (row && READY_ROWS[row]));
@@ -673,60 +1176,128 @@
     return { step: 1, ready: false };
   }
 
+  // Design CHATGPT_STATES (v72): the ChatGPT line's words per chatgptState (signedin is the check line).
+  var CHATGPT_STATES = {
+    new: { title: 'Sign in with ChatGPT', action: 'Sign in', note: 'Opens your browser.' },
+    signingin: { title: 'Sign in with ChatGPT', action: 'Signing in…', busy: true, note: 'Finish signing in in your browser.' },
+    failed: { title: 'Sign-in didn’t finish', action: 'Try again', warn: true, note: 'Opens your browser.' },
+    signedout: { title: 'Signed out of ChatGPT', action: 'Sign in', warn: true, note: 'Sign in again to keep using it.' },
+    limit: { title: 'ChatGPT plan limit reached', action: null, warn: true, note: 'Try again later, or choose another AI.' },
+    notavailable: { title: 'Not available for this account', action: null, warn: true, note: 'Choose another AI.' }
+  };
+
+  // Design ProviderDetails (v53) with the app's live state. App additions: the connection hint line for ChatGPT and API
+  // keys, and the API key's own Windows dialog (no key field on this page).
+  function ProviderDetails(p) {
+    var cur = p.provider;
+    if (!cur || cur.value === 'local') return null;
+    var st = p.tileState || null;
+    // Disconnect is not in the picker (design v70): it is in the AI pill's panel, next to Permissions.
+    // A failed check or sign-in says why in a line (connectionState hint).
+    var why = st && st.hint && h('div', { className: 'text-callout ot-muted', role: 'status' }, st.hint);
+    if (cur.value === 'chatgpt') {
+      // ChatGPT signs in through the browser; nothing to install. One line whose words follow the state, and its note
+      // (design v72 chatgptState, connection-state.js). The app's own reason text is not shown.
+      var signing = !!((p.connect && p.connect.tile === 'chatgpt') || (st && st.row === 'checking'));
+      var gs = window.OptTool.chatgptState(st, signing), signedIn = gs === 'signedin';
+      var cg = CHATGPT_STATES[gs] || CHATGPT_STATES['new'];
+      return h('div', { className: 'ot-detail' },
+        h('ol', { className: 'ot-connect-steps is-one' },
+          h(ConnectStep, { n: 1, markIcon: 'globe', warn: !signedIn && !!cg.warn, busy: cg.busy, title: signedIn ? 'Signed in with ChatGPT' : cg.title,
+            action: signedIn ? null : cg.action, icon: 'external', done: signedIn, disabled: cg.busy, onClick: p.onSignIn })),
+        !signedIn && h('span', { className: 'text-mono-sm ot-muted', role: 'status' }, cg.note));
+    }
+    if (cur.value === 'api-key') {
+      // The key is typed into the app's own Windows dialog, never into this page.
+      return h('div', { className: 'ot-detail' },
+        h(SegmentedControl, { label: 'Provider', value: p.api, onChange: p.setApi, options: [
+          { value: 'anthropic', label: 'Anthropic' }, { value: 'openai', label: 'OpenAI' }] }), st && st.row === 'connected' && h(ConnectedLine, null), why);
+    }
+    // Claude runs through the Claude Code program: install it, sign in, connected.
+    var cv = p.client || null, g = nativeProgress(cv, st), note = cv ? cv.note || null : 'unknown';
+    // Once the connection itself is ready, a status check without an answer changes nothing the user can do.
+    if (g.ready && note === 'unknown') note = null;
+    var update = !!(cv && cv.outdated), install = g.step > 1, signin = g.step > 2;
+    var busy1 = note === 'installing' || note === 'updating', repair = note === 'repair';
+    var signedOut = !!(st && st.row === 'signed_out') && g.step === 2;
+    var connected = g.ready && !update && !repair && !busy1;   // = connection-state.js claudeConnected (the bottom button)
+    // Optional: the connector in Claude Code's own window too (the pairing path).
+    var also = connected && cv && cv.installed && (cv.registered === 'no' || cv.registered === 'outdated') &&
+      h(Button, { variant: 'ghost', size: 'sm', icon: 'terminal', className: 'ot-wrap-btn', disabled: !!cv.adding, onClick: cv.onRegister }, 'Also use in Claude Code’s window');
+    return h('div', { className: 'ot-detail' },
+      h('ol', { className: 'ot-connect-steps' },
+        h(ConnectStep, { n: 1, warn: update || repair, busy: busy1,
+          title: update ? 'Update needed' : repair ? 'Needs repair' : install && !busy1 ? 'Installed' : 'Install Claude Code',
+          action: note === 'installing' ? 'Installing…' : note === 'updating' ? 'Updating…' : update ? 'Update Claude Code' : repair ? 'Repair' : install ? 'Installed' : 'Install',
+          icon: update || repair ? 'repeat' : 'download', done: install && !update && !repair && !busy1,
+          disabled: !cv || note === 'blocked' || busy1, onClick: cv ? cv.onInstall : null }),
+        h(ConnectStep, { n: 2, warn: signedOut || note === 'signinfailed', busy: note === 'signingin',
+          title: update ? 'Sign in after updating' : repair ? 'Sign in after the repair' : signedOut ? 'Signed out' : signin ? 'Signed in' : 'Sign in',
+          action: update || repair ? null : signin ? 'Signed in' : note === 'signingin' ? 'Signing in…' : 'Sign in', icon: 'external',
+          disabled: !install || busy1 || repair || note === 'signingin' || !cv, done: signin && !update && !repair, onClick: cv ? cv.onSignIn : null }),
+        h(ConnectStep, { n: 3, title: connected ? 'Connected' : 'Not connected yet', done: connected })),
+      note && h(ConnectNote, { note: note, command: cv && cv.installCmd, onCheckAgain: cv ? cv.onCheck : p.onCheckAgain }),
+      connected && also && h('div', { className: 'ot-detail-row' }, also));
+  }
+
   function LoginPanel(p) {
-    var s1 = React.useState(p.initialProvider || 'claude-code'), prov = s1[0], setProv = s1[1];
+    // initialProvider null: nothing selected (a saved AI that no longer exists).
+    var s1 = React.useState(p.initialProvider === undefined ? 'claude' : p.initialProvider), prov = s1[0], setProv = s1[1];
     var s2 = React.useState(p.initialApi || 'anthropic');
-    var s3 = React.useState({}), cmdOpen = s3[0], setCmdOpen = s3[1];
-    // Selecting Claude Code / Codex checks whether the client is installed and signed in (shell.clientStatus).
-    React.useEffect(function () { if (p.onTile) p.onTile(prov); }, [prov]);
-    React.useEffect(function () { if (p.onTile) ['claude-code', 'codex'].forEach(function (t) { if (t !== prov) p.onTile(t); }); }, []);
+    // Selecting Claude checks whether Claude Code is installed and signed in (shell.clientStatus); it is checked at start too.
+    React.useEffect(function () { if (p.onTile && prov) p.onTile(prov); }, [prov]);
+    React.useEffect(function () { if (p.onTile && prov !== 'claude') p.onTile('claude'); }, []);
     // A tile that needs a provider kind (ChatGPT) shows only when the backend offers it.
     var tiles = PROVIDERS.filter(function (x) { return !x.needsKind || (p.tileStates && p.tileStates[x.needsKind]); });
-    var cur = tiles.filter(function (x) { return x.value === prov; })[0] || tiles[0];
-    var views = p.clientViews || {}, cv = views[prov] || null;
+    var cur = tiles.filter(function (x) { return x.value === prov; })[0] || null;
+    var views = p.clientViews || {}, cv = (prov && views[prov]) || null;
     var states = p.tileStates || {};
     var st = states[tileKind(prov, s2[0])] || null;
-    var details = ProviderDetails({ provider: cur, api: s2[0], setApi: s2[1], connect: p.connect, onApprove: p.onApprove, onDeny: p.onDeny, onCopyFail: p.onCopyFail,
-      tileState: st, onDisconnect: p.onDisconnect, waitLong: p.waitLong, client: cv, cmdOpen: !!cmdOpen[prov], pairBusy: p.pairBusy,
-      onShowCommand: function () { var n = Object.assign({}, cmdOpen); n[prov] = true; setCmdOpen(n); }, onRetryClient: function () { if (p.onClientAction) p.onClientAction(prov); } });
-    var STRONG = { pending: 1, paired: 1, active: 1, client_closed: 1, bridge_rejected: 1, connected: 1, signed_out: 1 };
-    var READY = { connected: 1, paired: 1, active: 1, client_closed: 1 };
-    var primary = prov === 'local' ? 'Continue' : st && ACTION_LABEL[st.action] ? ACTION_LABEL[st.action] : st && READY[st.row] ? 'Continue'
-      : st && st.row === 'not_eligible' ? 'Try again' : 'Connect';
+    var details = ProviderDetails({ provider: cur, api: s2[0], setApi: s2[1], connect: p.connect,
+      tileState: st, client: cv, onCheckAgain: function () { if (p.onTile) p.onTile(prov); },
+      onSignIn: function () { go('chatgpt'); } });
     var API_NAMES = { openai: 'OpenAI (API)', anthropic: 'Claude (API)' };
     var c = p.connect && p.connect.tile === prov ? p.connect : null;
-    var native = !!TILE_KIND[prov] && prov !== 'chatgpt', g = nativeProgress(cv, st);
-    // Claude Code / Codex: one button that always does the next step: Get / Install, Sign in, Continue.
+    var g = nativeProgress(cv, st);
+    // design v70: “Continue” when the chosen AI is already connected, else “Connect” (connection-state.js connectLabel).
+    var primaryLabel = window.OptTool.connectLabel(prov, st, cv);
+    var cgPrimary = window.OptTool.pickerPrimary(prov, st, !!(p.connect && p.connect.tile === 'chatgpt'));
+    // Claude: the button goes on once connected; before that it does the next step (install, update, sign in, check again).
     function nativePrimary() {
-      var act = function () { if (p.onClientAction) p.onClientAction(prov); };
-      if (g.ready) return h(Button, { variant: 'primary', iconRight: 'chevron', onClick: function () { go(prov); } }, 'Continue');
-      if (!cv) return h(Button, { variant: 'primary', icon: 'repeat', onClick: function () { if (p.onTile) p.onTile(prov); } }, 'Check again');
-      if (cv.blocked) return h(Button, { variant: 'primary', icon: cv.reinstall ? null : 'repeat', iconRight: cv.reinstall ? 'chevron' : null, disabled: cv.reinstall && !!cv.installing, onClick: act }, cv.reinstall && cv.installing ? 'Installing…' : cv.primary);
-      if (cv.outdated) return h(Button, { variant: 'primary', iconRight: 'chevron', disabled: !!cv.installing, onClick: act }, cv.installing ? 'Updating…' : cv.primary);
-      if (g.step === 1) return h(Button, { variant: 'primary', iconRight: cv.external ? 'link' : 'chevron', disabled: !!cv.disabled, onClick: act }, cv.primary);
-      if (cv.unknown) return h(Button, { variant: 'primary', icon: 'repeat', onClick: act }, 'Check again');
-      return h(Button, { variant: 'primary', iconRight: 'chevron', onClick: act }, 'Sign in');
+      if (g.ready) return h(Button, { variant: 'primary', iconRight: 'chevron', onClick: function () { go(prov); } }, primaryLabel);
+      if (!cv) return h(Button, { variant: 'primary', iconRight: 'chevron', onClick: function () { if (p.onTile) p.onTile(prov); } }, 'Connect');
+      var s = g.step === 1 ? { disabled: cv.note === 'blocked' || !!cv.installing, onClick: cv.note === 'unknown' ? cv.onCheck : cv.onInstall }
+        : { disabled: !!cv.signing, onClick: cv.note === 'unknown' ? cv.onCheck : cv.onSignIn };
+      return h(Button, { variant: 'primary', iconRight: 'chevron', disabled: !!s.disabled, onClick: s.onClick }, 'Connect');
     }
-    // Reports the choice with a display name for the connection pill ("Claude (API)", "Codex", "Local only").
+    // Reports the choice with a display name for the connection pill ("Claude", "ChatGPT", "Claude (API)", "Local only").
     function go(choice) {
       if (!p.onConnect) return;
       var pick = PROVIDERS.filter(function (x) { return x.value === choice; })[0] || cur;
       p.onConnect(choice, choice === 'api-key' ? API_NAMES[s2[0]] : pick.title, s2[0]);
     }
+    // One tab stop for the tiles; arrow keys, Home and End move and select, like native radio buttons.
+    function onTilesKey(e) {
+      var keys = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }; if (!keys[e.key] && e.key !== 'Home' && e.key !== 'End') return;
+      e.preventDefault();
+      var vals = tiles.map(function (x) { return x.value; }), i = vals.indexOf(prov), n = vals.length;
+      var j = e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : ((i < 0 ? (keys[e.key] > 0 ? -1 : 0) : i) + keys[e.key] + n) % n;
+      setProv(vals[j]);
+      var btn = e.currentTarget.querySelector('[data-value="' + vals[j] + '"]'); if (btn) btn.focus();
+    }
+    var tabStop = cur ? prov : tiles.length ? tiles[0].value : null;
     return h(GlassPanel, { strong: true, className: cx('ot-login-panel', 'ot-frost', p.className) },
       h('div', { className: 'ot-brand' },
         h(Logo, { size: 30 }),
         h('span', { className: 'text-callout' }, 'Optimus')),
       h('h1', { className: 'text-title-1' }, 'Choose your AI'),
-      h('div', { className: 'ot-provider-grid', role: 'radiogroup', 'aria-label': 'AI help' },
+      h('div', { className: 'ot-provider-grid', role: 'radiogroup', 'aria-label': 'AI help', onKeyDown: onTilesKey },
+        // Each tile keeps its own line; the mono word under it says where it stands (design tileStatus, v53).
         tiles.map(function (x) {
-          var ts = states[tileKind(x.value, s2[0])];
-          var xv = views[x.value];
-          var word = xv && (!(ts && STRONG[ts.row]) || (xv.unknown && ts.row === 'signed_out')) ? xv.hint || x.description : ts && ts.word ? ts.word : x.description;
-          return h(ProviderOption, Object.assign({ key: x.value, selected: x.value === prov, onSelect: setProv }, x, { description: word }));
+          return h(ProviderOption, Object.assign({ key: x.value, selected: x.value === prov, onSelect: setProv, tabIndex: x.value === tabStop ? 0 : -1 }, x, { status: p.tileStatus && p.tileStatus[x.value] }));
         })),
-      h(Expand, { contentKey: prov }, details),
-      h('div', { className: 'ot-shares' },
+      h(Expand, { contentKey: prov || 'none' }, details),
+      cur && h('div', { className: 'ot-shares' },
         h(Icon, { name: 'eye', size: 18 }),
         h('div', null,
           h('div', { className: 'text-caption ot-muted' }, 'Shared'),
@@ -734,20 +1305,22 @@
       h('div', { className: 'ot-login-actions' },
         p.onBack && h(Button, { variant: 'ghost', icon: 'back', className: 'ot-login-back', onClick: p.onBack }, 'Back'),
         h(Button, { variant: 'ghost', onClick: function () { if (p.onLater) p.onLater(); else go('local'); } }, 'Later'),
-        native ? nativePrimary()
+        !cur ? h(Button, { variant: 'primary', iconRight: 'chevron', disabled: true }, 'Connect')
+          : prov === 'claude' ? nativePrimary()
+          // design v73: ChatGPT signing in: “Waiting for browser…” (disabled, turning gears); plan limit or not
+          // available: no primary button (Later and Back stay). connection-state.js pickerPrimary.
+          : cgPrimary === 'waiting' ? h(Button, { variant: 'primary', disabled: true }, h(Logo, { size: 14, mono: true, spin: true, decorative: true }), 'Waiting for browser…')
+          : cgPrimary === 'none' ? null
+          // The API key: Connecting… while its dialog is open, Checking… while the key is checked.
           : c && c.phase === 'key' ? h(Button, { variant: 'primary', disabled: true }, 'Connecting…')
-          : c && c.phase !== 'pairing' ? h(Button, { variant: 'primary', iconRight: 'chevron', onClick: p.onContinue }, 'Continue')
-          : c ? null
           : st && st.row === 'checking' ? h(Button, { variant: 'primary', disabled: true }, 'Checking…')
-          : cv && !(st && READY[st.row]) ? h(Button, { variant: 'primary', iconRight: cv.external ? 'link' : 'chevron', disabled: !!cv.busy || !!cv.disabled,
-              onClick: function () { if (p.onClientAction) p.onClientAction(prov); } }, cv.busy || cv.primary)
-          : h(Button, { variant: 'primary', iconRight: 'chevron', onClick: function () { go(prov); } }, primary)));
+          : h(Button, { variant: 'primary', iconRight: 'chevron', onClick: function () { go(prov); } }, primaryLabel)));
   }
 
   function LoginScreen(p) {
     return h('div', { className: cx('ot-login', p.className) },
       h(WaveBackground, null),
-      h('div', { className: 'ot-login-scroll' }, h(LoginPanel, { initialProvider: p.initialProvider, onConnect: p.onConnect })));
+      h('div', { className: 'ot-login-scroll' }, h(LoginPanel, { initialProvider: p.initialProvider, claudeState: p.claudeState, claudeNote: p.claudeNote, installCommand: p.installCommand, onCheckAgain: p.onCheckAgain, onAlsoWindow: p.onAlsoWindow, tileStatus: p.tileStatus, onConnect: p.onConnect })));
   }
 
   /* ---------- Shared pieces of the main flow ---------- */
@@ -926,7 +1499,135 @@
 
   // One follow-up at a time: an everyday question, one observation, "Why am I seeing this?", and only the
   // options the finding supports. A change opens its exact preview inside the card; approval is separate.
+  /* ---------- Fix for me (design v75–v80: FixForMe, FixStates, PlanInCard, AdminRights) ---------- */
+  /* The button on an open card. availability: 'yes' | 'busy' (another fix is being worked on) | 'nochanges' (changes are off).
+     No AI or explain-only: not rendered (fixAvailable unset). Returns the button and its line, for the card's action row. */
+  function FixButton(p) {
+    var s = React.useState(false), why = s[0], setWhy = s[1];
+    var ai = p.ai || 'Claude';
+    var btn = h(Button, { key: 'b', variant: p.primary ? 'primary' : 'neu', size: 'sm', icon: 'spark', disabled: p.availability === 'busy',
+      onClick: function () { if (p.availability === 'nochanges') setWhy(!why); else if (p.onFix) p.onFix(); } }, 'Fix for me');
+    return [btn,
+      p.availability === 'busy' && h('span', { key: 'n', className: 'text-mono-sm ot-muted ot-fix-note' }, ai + ' is working on another fix.'),
+      p.availability === 'nochanges' && why && h('span', { key: 'w', className: 'ot-fix-note ot-fix-why text-callout', role: 'status' }, ai + ' can’t suggest changes yet.',
+        h('button', { type: 'button', className: 'ot-perm-change', onClick: p.onPermissions }, 'Permissions'))];
+  }
+
+  /* design v84 (FixMoreStates, script pointer states): ported as it is; the turning gears are Logo spin. App addition (review 5): working's Stop is
+     off until the fix's task is known (no onStop). */
+  /* The AI asks to read things that need administrator rights. Used in a card and beside the chat. */
+  /* States: ask | wait (a no was given under 60 s ago; secondsLeft) | running | done | declined | expired (no answer in 10 minutes)
+     | unavailable (not in this version) | failed (cause: failed | timeout) | cancelled (cause: permissions | ai | stopped | ended | limit). */
+  var CHECKS_CANCELLED = {
+    permissions: 'Checks cancelled because permissions changed.',
+    ai: 'Checks cancelled because you changed the AI.',
+    stopped: 'Checks cancelled because you stopped {ai}.',
+    ended: 'Checks cancelled because the conversation ended.',
+    limit: 'Checks cancelled because {ai} reached its step limit.'
+  };
+  // One line per way the checks can end; also used by FixPanel 'working' (checksResult) while the AI carries on.
+  function checksEndLine(st, cause, ai) {
+    if (st === 'done') return 'Checks done. ' + ai + ' is reading the results.';
+    if (st === 'partial') return 'Some checks couldn’t be read. ' + ai + ' uses the rest.';
+    if (st === 'noneRead') return 'None of the checks could be read. ' + ai + ' goes on without them.';
+    if (st === 'declined') return 'Checks skipped. ' + ai + ' goes on without them.';
+    if (st === 'expired') return 'Nobody answered, so the checks were skipped. ' + ai + ' goes on without them.';
+    if (st === 'unavailable') return 'Administrator checks aren’t available in this version yet. ' + ai + ' goes on without them.';
+    if (st === 'failed' || st === 'timeout') return (st === 'timeout' || cause === 'timeout' ? 'The checks took too long and were stopped. ' : 'The checks couldn’t run. ') + ai + ' goes on without them.';
+    if (st === 'cancelled') return (CHECKS_CANCELLED[cause] || CHECKS_CANCELLED.permissions).replace('{ai}', ai);
+    return null;
+  }
+  function AdminChecks(p) {
+    var st = p.state || 'ask', ai = p.ai || 'Claude', checks = (p.checks || []).slice(0, 4);
+    var asking = st === 'ask' || st === 'wait';
+    // done with unread (indexes into checks): each check is marked read or couldn't be read.
+    var unread = st === 'done' ? (p.unread || []).filter(function (i) { return i >= 0 && i < checks.length; }) : [];
+    var noneRead = unread.length > 0 && unread.length >= checks.length, someUnread = unread.length > 0 && !noneRead;
+    var head = asking ? ai + ' wants to read these. They need administrator rights.'
+      : st === 'running' ? 'Running checks…'
+        : noneRead ? checksEndLine('noneRead', null, ai)
+          : someUnread ? checksEndLine('partial', null, ai)
+            : st === 'done' ? 'Checks done. ' + ai + ' can use the results.'
+              : checksEndLine(st, p.cause, ai);
+    var icon = noneRead ? 'alert' : someUnread ? 'report' : st === 'done' ? 'check' : st === 'failed' ? 'alert' : st === 'expired' ? 'clock' : st === 'unavailable' ? 'lock' : st === 'cancelled' || st === 'declined' ? 'close' : 'key';
+    var secs = Math.max(1, Math.ceil(p.secondsLeft || 60));
+    return h('div', { className: cx('ot-adminchecks', 'is-' + st, p.className), role: asking ? 'group' : 'status', 'aria-label': 'Administrator checks' },
+      h('div', { className: 'ot-adminchecks-head text-callout' }, h(Icon, { name: icon, size: 16 }), head),
+      (asking || st === 'running' || st === 'done') && h('ul', { className: 'ot-adminchecks-list' }, checks.map(function (c, i) {
+        var miss = unread.indexOf(i) >= 0;
+        return h('li', { key: i, className: cx('text-callout', miss && 'is-unread') }, st === 'running' ? h(Logo, { size: 14, mono: true, spin: true, decorative: true }) : h(Icon, { name: miss ? 'minus' : st === 'done' ? 'check' : 'eye', size: 14 }),
+          h('span', null, c, miss && h('span', { className: 'ot-muted' }, ' · couldn’t be read')));
+      })),
+      asking && h('p', { className: 'text-mono-sm ot-muted' }, st === 'wait' ? 'You said no a moment ago. You can run these in ' + secs + (secs === 1 ? ' second.' : ' seconds.') : 'Nothing is changed. Windows asks first.'),
+      asking && h('div', { className: 'ot-approval-actions' },
+        h(Button, { variant: 'ghost', size: 'sm', onClick: p.onDecline }, 'Not now'),
+        h(Button, { variant: 'primary', size: 'sm', icon: 'key', disabled: st === 'wait', onClick: p.onRun }, 'Run checks')));
+  }
+
+  // The AI's own opinion ranks below what Optimus knows: shown with the card's buttons, never instead of them.
+  var FIX_OPINION = { needsYou: true, nothing: true };
+  // Why a plan can't be done (FixPanel blocked, cause). Only adminOff gets the Permissions button.
+  var BLOCKED_WHY = {
+    adminOff: 'Everything in it needs administrator rights, which are off.',
+    adminUnavailable: 'It needs administrator rights, which aren’t available in this version yet.',
+    changed: 'The setting changed since {ai} looked.',
+    managed: 'Windows or your organisation manages this setting.',
+    protected: 'It would change a protected part of Windows.',
+    conflict: 'Two of its steps change the same thing.',
+    tooLarge: 'It has too many steps.',
+    unsupported: 'This PC doesn’t support it.',
+    other: 'Optimus can’t run it.'
+  };
+
+  /* Inside the card, after Fix for me. The host decides the state; the claim and observation stay above. */
+  function FixPanel(p) {
+    var st = p.state, ai = p.ai || 'Claude';
+    function line(icon, strong, rest, tone) {
+      return h('div', { key: 'l', className: cx('ot-fix-line', tone && 'is-' + tone), role: 'status' }, h(Icon, { name: icon, size: 16 }),
+        h('span', { className: 'text-callout' }, h('strong', null, strong), rest ? ' ' + rest : ''));
+    }
+    var body;
+    if (st === 'working') body = [
+      h('div', { key: 'l', className: 'ot-fix-line', role: 'status' }, h(Logo, { size: 16, mono: true, spin: true, decorative: true }), h('span', { className: 'text-callout' }, ai + ' is looking into it…')),
+      (p.checksResult || p.declined) && h('p', { key: 'd', className: 'text-mono-sm ot-muted', role: 'status' }, checksEndLine(p.checksResult || 'declined', p.checksCause, ai)),
+      h('div', { key: 'a', className: 'ot-approval-actions' }, h(Button, { variant: 'neu', size: 'sm', icon: 'stop', disabled: !p.onStop, onClick: p.onStop }, 'Stop'))];
+    else if (st === 'script') body = [
+      // The script itself waits beside the chat (it needs the room); the card only points to it. Design v84: scriptState.
+      p.scriptState === 'running' ? h('div', { key: 'l', className: 'ot-fix-line', role: 'status' }, h(Logo, { size: 16, mono: true, spin: true, decorative: true }), h('span', { className: 'text-callout' }, h('strong', null, ai + '’s script is running.'), ' Follow it beside the chat.'))
+        : p.scriptState === 'ended' ? line('terminal', ai + '’s script has ended.', 'See what happened beside the chat.')
+          : line('terminal', ai + ' wrote a script for this.', 'Read it beside the chat.'),
+      p.onShowScript && h('div', { key: 'a', className: 'ot-approval-actions' }, h(Button, { variant: 'neu', size: 'sm', icon: 'terminal', onClick: p.onShowScript }, 'Show script'))];
+    else if (st === 'checks' || st === 'checksRunning') body = h(AdminChecks, { state: st === 'checksRunning' ? 'running' : p.checksState || 'ask', cause: p.checksCause, secondsLeft: p.secondsLeft, unread: p.unread, ai: ai, checks: p.checks, onRun: p.onRunChecks, onDecline: p.onDeclineChecks });
+    else if (st === 'finished') body = h(ApprovalCard, Object.assign({ inCard: true, from: ai, requestedBy: null, className: 'is-incard' }, p.plan, { state: 'reported' }));
+    else if (st === 'plan') body = h(ApprovalCard, Object.assign({ inCard: true, stepToggles: true, from: ai, requestedBy: null, className: 'is-incard' }, p.plan));
+    else if (st === 'blocked') body = [
+      line('lock', ai + '’s plan can’t be done.', p.reason || (BLOCKED_WHY[p.cause] || BLOCKED_WHY.other).replace('{ai}', ai)),
+      h('div', { key: 'a', className: 'ot-approval-actions' },
+        p.onPermissions && (!p.cause || p.cause === 'adminOff') && h(Button, { variant: 'ghost', size: 'sm', icon: 'sliders', onClick: p.onPermissions }, 'Permissions'),
+        h(Button, { variant: 'neu', size: 'sm', icon: 'spark', onClick: p.onRetry }, 'Fix for me'))];
+    else if (st === 'needsYou') body = [
+      line('sliders', 'You need to do this one yourself.', null),
+      p.note && h('p', { key: 'n', className: 'text-callout ot-fix-note-ai' }, p.note),
+      // Report cards can be checked again; AI-added and check-up cards only close.
+      p.recheck && h('p', { key: 'r', className: cx('ot-fix-line text-callout', p.recheck === 'gone' && 'is-ok'), role: 'status' },
+        h(Icon, { name: p.recheck === 'gone' ? 'check' : 'repeat', size: 16 }), p.recheck === 'gone' ? 'Checked again: the problem is gone.' : 'Checked again: the problem is still there.'),
+      h('div', { key: 'a', className: 'ot-approval-actions' }, p.onCheckAgain ? h(Button, { variant: 'neu', size: 'sm', icon: 'repeat', disabled: p.checking, onClick: p.onCheckAgain }, p.checking ? 'Checking…' : 'Check again')
+        : h(Button, { variant: 'ghost', size: 'sm', onClick: p.onClose }, 'Close'))];
+    else if (st === 'nothing') body = [
+      line('check', ai + ' thinks this doesn’t need fixing.', null, 'ok'),
+      p.note && h('p', { key: 'n', className: 'text-callout ot-fix-note-ai' }, p.note),
+      h('p', { key: 's', className: 'text-mono-sm ot-muted' }, 'Optimus keeps this card open until a scan shows it’s fine.'),
+      h('div', { key: 'a', className: 'ot-approval-actions' }, h(Button, { variant: 'ghost', size: 'sm', onClick: p.onClose }, 'Close'))];
+    else if (st === 'noFix') body = [
+      line('gap', ai + ' didn’t find a fix.', null),
+      h('div', { key: 'a', className: 'ot-approval-actions' }, h(Button, { variant: 'neu', size: 'sm', icon: 'spark', onClick: p.onRetry }, 'Try again'))];
+    else body = h(ApprovalCard, Object.assign({ inCard: true, from: ai, requestedBy: null, className: 'is-incard' }, p.plan, { state: st }));
+    return h('div', { className: cx('ot-fixpanel', 'is-' + st) }, body);
+  }
+
+
   var DISPOSE = { Intended: 1, Ignore: 1, Hide: 1 };
+  var FIX_MODES = { preview: 1, running: 1, verified: 1, failed: 1, ineligible: 1 };
   // A click on the card itself (not on one of its controls) makes it the main card.
   var CONTROLS = 'button, a, input, textarea, select, label, [role="button"], [role="group"]';
   function InsightCard(p) {
@@ -934,7 +1635,16 @@
     var w = React.useState(false), why = w[0], setWhy = w[1];
     var ig = React.useState(false), ignoring = ig[0], setIgnoring = ig[1];
     var mode = p.mode || 'idle';
-    var opts = mode === 'guide' ? ['Done'].concat(p.settingsUri ? ['Open settings'] : [], p.checkAgain ? ['Check again'] : [], ['Ask about this', p.hideLabel || 'Ignore']) : (p.options || []);
+    var ro = React.useState(!!(p.research && p.research.open)), rOpen = ro[0], setROpen = ro[1];
+    var rid = 'ot-research-' + (p.cardKey || key) + (p.index || '');
+    // Every change in a card (a single change or a fix) is the approval card with its steps (design v53).
+    var change = p.change && FIX_MODES[mode] ? p.change : null;
+    // design v75: Fix for me's panel replaces the action rows; the AI's opinion (needsYou, nothing) sits above them.
+    var fixShown = !!(p.fix && p.fix.state), rowsShown = mode === 'idle' && (!fixShown || !!FIX_OPINION[p.fix.state]);
+    // A guided finding's steps are the guided approval card (design v59); the card has no steps mode of its own.
+    var opts = p.options || [];
+    // Fix for me is first and primary unless the card's first option is its own action (Preview change, View steps, …).
+    var hasFix = !!p.fixAvailable && rowsShown, fixFirst = hasFix && (!opts.length || opts[0] === 'Ask about this' || !!DISPOSE[opts[0]]);
     // Ignore stays one button; with ignoreChoices it opens a compact choice of scope.
     function option(o) {
       if (o === 'Ignore' && p.ignoreChoices) { setIgnoring(!ignoring); return; }
@@ -945,15 +1655,21 @@
       if (!p.onFocus || (e.target && e.target.closest && e.target.closest(CONTROLS))) return;
       p.onFocus();
     }
+    if (p.checkup) return h(CheckupCard, p);
     return h('section', { className: cx('ot-insight', 'cat-' + key, p.leaving && 'is-leaving', p.onFocus && 'is-focusable', p.className), 'aria-label': c.label,
       'data-card': p.cardKey || undefined, onClick: onCard },
       h('div', { className: 'ot-insight-head' },
-        h('span', { className: 'ot-insight-cat text-caption' }, h(Icon, { name: c.icon, size: 14, strokeWidth: 2 }), c.label, p.ai && h('span', { className: 'ot-tag is-ai' }, 'AI')),
+        h('span', { className: 'ot-insight-tags' },
+          h('span', { className: 'ot-insight-cat text-caption' }, h(Icon, { name: c.icon, size: 14, strokeWidth: 2 }), c.label, p.aiTag && h('span', { className: 'ot-tag is-ai' }, 'AI')),
+          // M9 §6.2: the research label beside the category; it opens the explanation under the claim.
+          p.research && h(ResearchTag, { verdict: p.research.verdict, open: rOpen, controls: rid, onClick: p.research.verdict === 'running' ? null : function () { setROpen(!rOpen); } }),
+          p.isNew && h('span', { className: 'ot-new-tag text-mono-sm' }, 'New')),
         h('span', { className: 'ot-insight-meta' },
           p.total ? h('span', { className: 'text-mono-sm ot-muted' }, p.index + ' / ' + p.total) : null,
           // The open card folds only by this, Escape, or opening another card (a click elsewhere leaves it open).
           p.onCollapse && h(Button, { variant: 'ghost', size: 'sm', icon: 'collapse', className: 'ot-insight-fold', 'aria-label': 'Collapse', title: 'Collapse', onClick: p.onCollapse }))),
       h('p', { className: 'text-headline ot-insight-claim' }, p.text),
+      p.research && p.research.verdict !== 'running' && h(Expand, { contentKey: rOpen ? 'research' : 'none' }, rOpen ? h(ResearchNote, Object.assign({ id: rid }, p.research)) : null),
       p.observation && h('p', { className: 'text-callout ot-insight-obs' }, p.observation),
       p.note && h('div', { className: 'ot-note text-callout' }, h(Icon, { name: 'spark', size: 14 }),
         h('span', null, p.noteBy && h('span', { className: 'ot-note-by text-mono-sm' }, p.noteBy), p.note)),
@@ -968,57 +1684,82 @@
       }).concat((p.coverage || []).length ? [h('div', { key: 'cov', className: 'ot-why-cov' }, p.coverage.map(function (c) {
         return h('span', { key: c.collectorId, className: 'text-mono-sm ot-muted' }, c.label + ' · ' + c.state);
       }))] : [])) : null),
-      mode === 'guide' && p.guide && h('ol', { className: 'ot-guide text-callout' }, p.guide.map(function (g) { return h('li', { key: g }, g); })),
-      mode === 'guide' && p.recheck && h('div', { className: 'text-mono-sm ot-muted' }, p.recheck),
       mode === 'loading' && h('div', { className: 'text-callout ot-muted' }, 'Preparing…'),
-      mode === 'ineligible' && h(PlanBlocked, { ineligible: p.ineligible, onOpenSettings: p.onOpenSettings, onBack: p.onBack }),
-      (mode === 'preview' || mode === 'running') && p.preview && h('div', { className: 'ot-insight-preview' },
-        h('div', { className: 'ot-diff' }, p.preview.rows.map(function (r) {
-          return h('div', { key: r.label, className: 'ot-diff-row' },
-            h('span', { className: 'text-caption ot-muted' }, r.label),
-            h('span', { className: 'ot-diff-before text-mono' }, r.before),
-            h(Icon, { name: 'arrow', size: 16, className: 'ot-muted' }),
-            h('span', { className: 'ot-diff-after text-mono' }, r.after));
-        })),
-        h('dl', { className: 'ot-approval-details' }, p.preview.details.map(function (d) {
-          return h(React.Fragment, { key: d[0] }, h('dt', { className: 'text-callout ot-muted' }, d[0]), h('dd', { className: 'text-callout' }, d[1]));
-        })),
-        h('div', { className: 'ot-approval-actions' },
-          mode === 'preview' && p.onPreviewBack && h(Button, { variant: 'ghost', size: 'sm', icon: 'back', onClick: p.onPreviewBack }, 'Back'),
-          h(Button, { variant: 'ghost', size: 'sm', onClick: p.onDecline, disabled: mode === 'running' }, 'Decline'),
-          h(Button, { variant: 'primary', size: 'sm', icon: 'check', onClick: p.onApprove, disabled: mode === 'running' }, mode === 'running' ? 'Applying…' : 'Approve')),
-        mode === 'running' && p.progress && h('div', { className: 'ot-turn text-mono-sm ot-muted' }, h('span', { className: 'ot-live-dot', 'aria-hidden': true }), p.progress),
-        mode === 'preview' && p.approveError && h(ApproveError, { word: p.approveError, onRetry: p.onRetry })),
-      mode === 'verified' && h('div', { className: 'ot-receipt' },
-        h(SeverityBadge, { kind: 'verified' }),
-        h('span', { className: 'text-callout' }, p.receipt),
-        p.onUndo && h(Button, { variant: 'ghost', size: 'sm', icon: 'undo', onClick: p.onUndo }, 'Undo'),
-        h(Button, { variant: 'neu', size: 'sm', iconRight: 'chevron', onClick: p.onNext }, 'Next')),
-      mode === 'failed' && h('div', { className: 'ot-receipt' },
-        h(SeverityBadge, { kind: 'gap' }, p.failWord || 'Not changed'),
-        p.onCheck && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onCheck }, 'Check again'),
-        p.failManualUri && p.onOpenSettings && h(Button, { variant: 'ghost', size: 'sm', icon: 'link', onClick: function () { p.onOpenSettings(p.failManualUri); } }, 'Open settings'),
-        h(Button, { variant: 'neu', size: 'sm', iconRight: 'chevron', onClick: p.onNext }, 'Next')),
+      // M9 §3.6: the finding cites several entries or processes; the user picks the one to preview.
+      // Design PickChoice: the choices' labels are unique (targetChoices numbers repeats), so a label names its evidence.
+      mode === 'pick' && p.pick && h(PickChoice, { question: p.pick.question, items: p.pick.choices.map(function (c) { return c.label; }),
+        onPick: function (label) { var c = p.pick.choices.filter(function (x) { return x.label === label; })[0]; if (c) p.pick.onPick(c.evidenceId); }, onBack: p.pick.onBack }),
+      change && h(ApprovalCard, Object.assign({ className: 'ot-insight-fix' }, change)),
+      fixShown && h(FixPanel, Object.assign({ ai: p.ai }, p.fix)),
       // Things to do on one row; deciding about the card (Intended, Ignore, Later) on a quieter row of its own.
       // "Ask about this" is the field below, so it isn't repeated as a button.
-      (mode === 'idle' || mode === 'guide') && h('div', { className: 'ot-insight-actions' }, opts.filter(function (o) { return !DISPOSE[o] && o !== 'Ask about this'; }).map(function (o, i) {
-        return h(Button, { key: o, variant: i === 0 ? 'primary' : 'neu', size: 'sm', icon: o === 'Open settings' ? 'link' : undefined, onClick: function () { option(o); } }, o);
-      })),
-      (mode === 'idle' || mode === 'guide') && h('div', { className: 'ot-insight-quiet' }, opts.filter(function (o) { return DISPOSE[o]; }).map(function (o) {
+      rowsShown && h('div', { className: 'ot-insight-actions' }, (function () {
+        var btns = opts.filter(function (o) { return !DISPOSE[o] && o !== 'Ask about this'; }).map(function (o, i) {
+          return h(Button, { key: o, variant: i === 0 && !fixFirst ? 'primary' : 'neu', size: 'sm', icon: o === 'Open settings' ? 'link' : undefined, onClick: function () { option(o); } }, o);
+        });
+        if (hasFix) btns.splice(fixFirst ? 0 : 1, 0, h(FixButton, { key: 'fix', availability: p.fixAvailable, ai: p.ai, primary: fixFirst, onFix: p.onFix, onPermissions: p.onPermissions }));
+        return btns;
+      })()),
+      rowsShown && h('div', { className: 'ot-insight-quiet' }, opts.filter(function (o) { return DISPOSE[o]; }).map(function (o) {
         return h(Button, { key: o, variant: 'ghost', size: 'sm', 'aria-expanded': o === 'Ignore' && p.ignoreChoices ? ignoring : undefined, onClick: function () { option(o); } }, o);
       }), p.onLater && h(Button, { key: 'later', variant: 'ghost', size: 'sm', onClick: p.onLater }, 'Later')),
-      (mode === 'idle' || mode === 'guide') && p.ignoreChoices && h(Expand, { contentKey: ignoring ? 'ignore' : 'none' }, ignoring ? h('div', { className: 'ot-ignore-choice', role: 'group', 'aria-label': 'Ignore' },
+      rowsShown && p.ignoreChoices && h(Expand, { contentKey: ignoring ? 'ignore' : 'none' }, ignoring ? h('div', { className: 'ot-ignore-choice', role: 'group', 'aria-label': 'Ignore' },
         p.ignoreChoices.map(function (c) {
           return h('button', { key: c.id, type: 'button', className: 'ot-suggest-chip is-small', title: c.title || undefined, onClick: function () { setIgnoring(false); if (p.onIgnore) p.onIgnore(c.id); } }, c.label);
         })) : null),
+      cardReply(p),
+      h(AskField, { placeholder: 'Ask about this…', onSend: p.onAsk, focusToken: p.askToken, restore: p.askRestore, onFocusIn: p.onAskFocus, onFocusOut: p.onAskBlur }));
+  }
+  // A card's AI answer (both card variants): the voltage note, the reply or "Thinking…", its citations and sources.
+  function cardReply(p) {
+    return [
       // M6a §8: an AI reply with warnings ["voltage"] gets the risk block above it, once.
-      p.reply && p.replyRisk && h(RiskNote, { className: 'ot-reply-risk' }),
-      (p.reply || p.replyBusy) && h('div', { className: cx('ot-reply text-callout', !p.reply && 'is-busy') },
+      p.reply && p.replyRisk && h(RiskNote, { key: 'risk', className: 'ot-reply-risk' }),
+      (p.reply || p.replyBusy) && h('div', { key: 'reply', className: cx('ot-reply text-callout', !p.reply && 'is-busy') },
         p.reply ? h(Icon, { name: 'spark', size: 16 }) : h(Logo, { size: 16, spin: true, decorative: true, className: 'ot-busy-logo' }),
         h('span', null, p.reply ? h(RichText, { text: p.reply }) : h('span', { className: 'ot-muted' }, p.replyBusy),
           (p.replyCites || []).map(function (c) { return h('button', { key: c.id, type: 'button', className: 'ot-cite text-mono-sm', title: c.id, onClick: function () { if (p.onCite) p.onCite(c.id); } }, c.label); }),
           p.reply && p.onReplyConnect && h(Button, { variant: 'ghost', size: 'sm', icon: 'spark', className: 'ot-reply-connect', onClick: p.onReplyConnect }, 'Connect AI'))),
-      p.reply && p.onReplyBenchmark && h('div', { className: 'ot-answer-acts' }, h(Button, { variant: 'neu', size: 'sm', icon: 'gauge', onClick: p.onReplyBenchmark }, 'Run benchmark')),
+      p.reply && h(SourceList, { key: 'src', sources: p.replySources, max: 8, onOpenSource: p.onOpenSource }),
+      p.reply && p.onReplyBenchmark && h('div', { key: 'bench', className: 'ot-answer-acts' }, h(Button, { variant: 'neu', size: 'sm', icon: 'gauge', onClick: p.onReplyBenchmark }, 'Run benchmark'))
+    ];
+  }
+
+  /* AI check-up (design v48 CheckupCard; contracts/m9-ai-powers.md §6.8): a normal issue card for a problem the AI found
+     reported online for something on this PC. Nothing on it changes the PC: Ask about this and Hide, plus the ask
+     field; no preview or approve. The deck's own parts are kept: the card key, a click to open it, Collapse, and the
+     AI answer as on other cards. */
+  var CHECKUP_KINDS = ['Bug', 'Security', 'End of life', 'Conflict', 'Update'];
+  function CheckupCard(p) {
+    var c = p.checkup || {}, key = CATS[p.category] ? p.category : 'misc', cat = CATS[key];
+    var opts = p.options || ['Ask about this', 'Hide'];
+    function onCard(e) {
+      if (!p.onFocus || (e.target && e.target.closest && e.target.closest(CONTROLS))) return;
+      p.onFocus();
+    }
+    return h('section', { className: cx('ot-insight', 'ot-checkup', 'cat-' + key, p.leaving && 'is-leaving', p.onFocus && 'is-focusable', p.className), 'aria-label': 'AI check-up',
+      'data-card': p.cardKey || undefined, onClick: onCard },
+      h('div', { className: 'ot-insight-head' },
+        h('span', { className: 'ot-insight-tags' },
+          h('span', { className: 'ot-insight-cat text-caption' }, h(Icon, { name: cat.icon, size: 14, strokeWidth: 2 }), cat.label),
+          h(ResearchTag, { verdict: 'checkup' }),
+          // design CheckupCard isNew (v54): the small accent tag until the card has been on screen.
+          p.isNew && h('span', { className: 'ot-new-tag text-mono-sm' }, 'New')),
+        h('span', { className: 'ot-insight-meta' },
+          p.total ? h('span', { className: 'text-mono-sm ot-muted' }, p.index + ' / ' + p.total) : null,
+          p.onCollapse && h(Button, { variant: 'ghost', size: 'sm', icon: 'collapse', className: 'ot-insight-fold', 'aria-label': 'Collapse', title: 'Collapse', onClick: p.onCollapse }))),
+      h('div', { className: 'ot-checkup-title' },
+        c.kind && CHECKUP_KINDS.indexOf(c.kind) >= 0 && h('span', { className: 'ot-checkup-kind text-mono-sm' }, c.kind),
+        h('p', { className: 'text-headline ot-insight-claim' }, c.title)),
+      c.text && h('p', { className: 'text-callout ot-insight-obs' }, c.text),
+      h(SourceList, { sources: c.sources, onOpenSource: p.onOpenSource }),
+      h('p', { className: 'text-mono-sm ot-muted ot-checkup-fixed' }, 'Nothing was changed.'),
+      p.fix && p.fix.state && h(FixPanel, Object.assign({ ai: p.ai }, p.fix)),
+      (!(p.fix && p.fix.state) || FIX_OPINION[p.fix.state]) && h('div', { className: 'ot-insight-actions' },
+        p.fixAvailable && h(FixButton, { key: 'fix', availability: p.fixAvailable, ai: p.ai, primary: true, onFix: p.onFix, onPermissions: p.onPermissions }), opts.map(function (o, i) {
+          return h(Button, { key: o, variant: i === 0 && !p.fixAvailable ? 'neu' : 'ghost', size: 'sm', onClick: function () { if (p.onOption) p.onOption(o); } }, o);
+        })),
+      cardReply(p),
       h(AskField, { placeholder: 'Ask about this…', onSend: p.onAsk, focusToken: p.askToken, restore: p.askRestore, onFocusIn: p.onAskFocus, onFocusOut: p.onAskBlur }));
   }
 
@@ -1059,55 +1800,6 @@
       last.current = now; sig.current = s;
     });
     return h('div', { ref: ref, className: p.className }, p.children);
-  }
-
-  // The approval didn't happen (dialog unavailable, host error): a short word and Retry.
-  function ApproveError(p) {
-    return h('div', { className: 'ot-answer-fail', role: 'status' }, h('span', { className: 'text-callout ot-muted' }, p.word),
-      p.onRetry && h(Button, { variant: 'neu', size: 'sm', onClick: p.onRetry }, 'Retry'));
-  }
-  // A plan that can't run here: its reason and the manual route.
-  function PlanBlocked(p) {
-    var i = p.ineligible || {};
-    return h('div', { className: 'ot-plan-blocked' },
-      h('span', { className: 'text-callout ot-muted' }, i.message || 'Not available'),
-      h('div', { className: 'ot-approval-actions' },
-        p.onBack && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onBack }, p.backLabel || 'Back'),
-        i.manualUri && p.onOpenSettings && h(Button, { variant: 'neu', size: 'sm', icon: 'link', onClick: function () { p.onOpenSettings(i.manualUri); } }, 'Open settings')));
-  }
-  function PlanPreview(p) {
-    var pv = p.preview || { rows: [], details: [] };
-    return h(React.Fragment, null,
-      h('div', { className: 'ot-diff' }, pv.rows.map(function (r) {
-        return h('div', { key: r.label, className: 'ot-diff-row' },
-          h('span', { className: 'text-caption ot-muted' }, r.label),
-          h('span', { className: 'ot-diff-before text-mono' }, r.before),
-          h(Icon, { name: 'arrow', size: 16, className: 'ot-muted' }),
-          h('span', { className: 'ot-diff-after text-mono' }, r.after));
-      })),
-      pv.details.length > 0 && h('dl', { className: 'ot-approval-details' }, pv.details.map(function (d) {
-        return h(React.Fragment, { key: d[0] }, h('dt', { className: 'text-callout ot-muted' }, d[0]), h('dd', { className: 'text-callout' }, d[1]));
-      })));
-  }
-  // A change asked for by an assistant, or an undo: the same preview, Approve / Decline, then progress and the receipt.
-  function PlanCard(p) {
-    var st = p.state;
-    return h(GlassPanel, { className: cx('ot-share ot-plan', p.className), role: 'group', 'aria-label': p.title },
-      h('div', { className: 'ot-share-head' }, h('div', { className: 'text-headline' }, p.title), p.subtitle && h('span', { className: 'text-mono-sm ot-muted' }, p.subtitle)),
-      st === 'ineligible' ? h(PlanBlocked, { ineligible: p.ineligible, onOpenSettings: p.onOpenSettings, onBack: p.onClose, backLabel: 'Close' })
-        : st === 'verified' ? h('div', { className: 'ot-receipt' }, h(SeverityBadge, { kind: 'verified' }), h('span', { className: 'text-callout' }, p.receipt),
-            p.onUndo && h(Button, { variant: 'ghost', size: 'sm', icon: 'undo', onClick: p.onUndo }, 'Undo'),
-            h(Button, { variant: 'neu', size: 'sm', onClick: p.onClose }, 'Close'))
-        : st === 'failed' ? h('div', { className: 'ot-receipt' }, h(SeverityBadge, { kind: 'gap' }, p.failWord || 'Not changed'),
-            p.onCheck && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onCheck }, 'Check again'),
-            p.failManualUri && p.onOpenSettings && h(Button, { variant: 'ghost', size: 'sm', icon: 'link', onClick: function () { p.onOpenSettings(p.failManualUri); } }, 'Open settings'),
-            h(Button, { variant: 'neu', size: 'sm', onClick: p.onClose }, 'Close'))
-        : h(React.Fragment, null, h(PlanPreview, { preview: p.preview }),
-            st === 'running' ? h('div', { className: 'ot-turn text-mono-sm ot-muted' }, h('span', { className: 'ot-live-dot', 'aria-hidden': true }), p.progress || 'Applying…')
-              : h(React.Fragment, null, p.approveError && h(ApproveError, { word: p.approveError, onRetry: p.onRetry }),
-                h('div', { className: 'ot-choice-foot' },
-                  h(Button, { variant: 'ghost', onClick: p.onDecline }, 'Decline'),
-                  h(Button, { variant: 'primary', icon: 'check', onClick: p.onApprove }, 'Approve')))));
   }
 
   // End of the review: an accurate completion state, what was done, and reversible decisions.
@@ -1151,47 +1843,13 @@
         h(Button, { variant: 'primary', icon: 'spark', onClick: p.onShare }, 'Share & summarize')));
   }
 
-  // §8 grant sheet: Can do (diagnostics) / Can share, then Start.
-  function GrantSheet(p) {
-    var init = {}; (p.diagnostics || []).forEach(function (d) { init[d.id] = d.on !== false; });
-    var s = React.useState(init), on = s[0], setOn = s[1];
-    var n = React.useState(false), names = n[0], setNames = n[1];
-    var rc = React.useState(false), canChange = rc[0], setCanChange = rc[1];
-    var lim = p.limits || {};
-    function toggle(id, v) { var x = Object.assign({}, on); x[id] = v; setOn(x); }
-    return h(GlassPanel, { className: cx('ot-grant ot-grant-sheet', p.className), role: 'group', 'aria-label': 'Permissions' },
-      h('div', { className: 'ot-grant-head' },
-        h('div', { className: 'text-caption ot-muted' }, p.recipient),
-        p.goal && h('div', { className: 'text-headline' }, p.goal)),
-      h('div', { className: 'ot-grant-cols' },
-        h('section', null,
-          h('h3', { className: 'text-caption ot-muted' }, 'Can do'),
-          (p.diagnostics || []).map(function (d) { return h(GrantRow, { key: d.id, title: d.label, checked: !!on[d.id], onChange: function (v) { toggle(d.id, v); } }); }),
-          !(p.diagnostics || []).length && p.changes === false && h('div', { className: 'text-callout ot-muted' }, 'Explain only'),
-          p.changes !== false && h(GrantRow, { title: 'Can request changes', checked: canChange, onChange: setCanChange })),
-        h('section', null,
-          h('h3', { className: 'text-caption ot-muted' }, 'Can share'),
-          h(GrantRow, { title: 'Findings · ' + (p.findings || 0), fixed: true }),
-          h(GrantRow, { title: 'Measurements and times', fixed: true }),
-          h(GrantRow, { title: 'App names', checked: names, onChange: setNames }),
-          h(GrantRow, { title: 'Paths, accounts, addresses', locked: true }))),
-      h('div', { className: 'ot-grant-foot' },
-        h('span', { className: 'text-mono-sm ot-muted' }, [lim.diagnosticCalls && lim.diagnosticCalls + ' checks', lim.totalBytes && Math.round(lim.totalBytes / 1024) + ' KiB', lim.turns && lim.turns + ' turns'].filter(Boolean).join(' · ')),
-        h('div', { className: 'ot-grant-actions' },
-          p.onCancel && h(Button, { variant: 'ghost', onClick: p.onCancel }, 'Cancel'),
-          h(Button, { variant: 'primary', iconRight: 'arrow', disabled: !!p.busy, onClick: function () {
-            if (p.busy) return;
-            p.onStart({ diagnostics: (p.diagnostics || []).filter(function (d) { return on[d.id]; }).map(function (d) { return d.id; }), share: { names: names }, canRequestChanges: canChange });
-          } }, 'Start'))));
-  }
-
   var ACT_STATE = { running: 'running', complete: 'done', error: 'declined', denied: 'declined' };
   var ACT_WORD = { running: '…', complete: 'Done', error: 'Failed', denied: 'Not allowed' };
   // Optimizer tool calls only: plain words, origin, size shared, state; the task's budget; Stop.
-  // A running row: "Measuring CPU · 12 s left" for a sample, else its words with "Running… 3 s".
+  // A running row's state: "12 s left" for a sample, else "Running… 3 s" (the title keeps the design's words).
   function runningText(it, now) {
     var secs = Math.max(0, Math.floor((now - (it.startedAt || now)) / 1000));
-    if (it.window) return { title: it.title + ' · ' + Math.max(0, it.window - secs) + ' s left', state: '' };
+    if (it.window) return { title: it.title, state: Math.max(0, it.window - secs) + ' s left' };
     return { title: it.title, state: 'Running… ' + secs + ' s' };
   }
   function ActivityPanel(p) {
@@ -1211,30 +1869,53 @@
         h('div', { className: 'ot-meter-label text-mono-sm ot-muted' }, h('span', null, label), h('span', null, (fmt ? fmt(v) : v) + ' / ' + (fmt ? fmt(max) : max))),
         h('div', { className: 'ot-track' }, h('span', { style: { width: Math.min(100, (v || 0) / max * 100) + '%' } })));
     }
+    var close = p.onClose && h(Button, { variant: 'ghost', size: 'sm', icon: 'close', 'aria-label': 'Close', onClick: p.onClose });
+    // design v72: a finished run: the answer first (none for a typed question, whose answer panel carries it: the question
+    // is the headline), the × at the right of the AI's name, the steps folded into “Steps <AI> took · N”.
+    if (p.finished) {
+      return h(FinishedRun, { className: cx('is-compact', p.className), role: 'region', ariaLabel: 'Activity', agent: p.agent, goal: p.goal,
+        answer: p.answer, count: items.length, onClose: p.onClose, list: function () { return h('div', { className: 'ot-activity is-embedded' }, list()); } });
+    }
     return h(GlassPanel, { className: cx('ot-activity is-compact', p.className), role: 'region', 'aria-label': 'Activity' },
       h('div', { className: 'ot-activity-head' },
         h('div', { className: cx('text-caption', p.active ? 'ot-live' : 'ot-muted') }, p.active && h('span', { className: 'ot-live-dot', 'aria-hidden': true }), p.title),
         h('div', { className: 'ot-grant-actions' },
           p.active && p.onStop && h(Button, { variant: 'neu', size: 'sm', icon: 'stop', onClick: p.onStop }, 'Stop'),
-          p.onClose && h(Button, { variant: 'ghost', size: 'sm', icon: 'close', 'aria-label': 'Close', onClick: p.onClose }))),
-      items.length ? h('ol', { className: 'ot-steps' }, items.map(function (it, i) {
+          close)),
+      list(),
+      h('div', { className: 'ot-meters' },
+        meter('Checks', used.diagnosticCalls || 0, lim.diagnosticCalls),
+        meter('Shared', used.bytesShared || 0, lim.totalBytes, function (b) { return Math.round(b / 1024) + ' KiB'; }),
+        // Claude Code runs its own model turns, so only the in-app assistant has a turn budget to show.
+        p.nativeClient ? null : meter('Turns', used.turns || 0, lim.turns)));
+    function list() {
+      return items.length ? h('ol', { className: 'ot-steps' }, items.map(function (it, i) {
         var st = ACT_STATE[it.status] || 'done', live = it.status === 'running' ? runningText(it, now) : null;
         // Newest first; the latest row flashes once when it appears or changes state (the key includes its state).
         return h('li', { key: it.id + ':' + it.status, className: cx('ot-step', 'is-' + st, i === 0 && 'is-fresh', p.highlight && it.evidenceIds && it.evidenceIds.indexOf(p.highlight) >= 0 && 'is-hit') },
           h('span', { className: 'ot-step-mark', 'aria-hidden': true }, st === 'done' && h(Icon, { name: 'check', size: 14, strokeWidth: 2.25 }), st === 'declined' && h(Icon, { name: 'gap', size: 14 })),
-          // What happened first; where it ran and how much it read underneath, quieter.
+          // Design AgentActivity row (v53): where it ran, the tool id (and how much it read), the title, its detail, one small action.
           h('div', { className: 'ot-step-body' },
-            h('div', { className: 'text-callout ot-step-title' }, live ? live.title : it.title),
             h('div', { className: 'ot-step-top' },
               h('span', { className: cx('ot-origin text-mono-sm', it.origin !== 'in_app' && 'is-client') }, it.originLabel),
-              it.size && h('span', { className: 'text-mono-sm ot-muted' }, it.size))),
+              it.tool && h('span', { className: 'text-mono-sm ot-muted' }, it.tool),
+              it.size && h('span', { className: 'text-mono-sm ot-muted' }, it.size)),
+            h('div', { className: 'text-callout ot-step-title' }, live ? live.title : it.title),
+            it.detail && h('div', { className: 'text-mono-sm ot-muted' }, it.detail),
+            // M9 §5.4: a script run's row opens its transcript.
+            it.action && h(Button, { variant: 'ghost', size: 'sm', icon: it.action.icon || 'file', className: 'ot-step-action', onClick: it.action.onClick }, it.action.label)),
           h('span', { className: 'ot-step-state text-mono-sm' }, live ? live.state : ACT_WORD[it.status] || it.status));
-      })) : h('div', { className: 'text-callout ot-muted' }, 'No checks yet'),
-      h('div', { className: 'ot-meters' },
-        meter('Checks', used.diagnosticCalls || 0, lim.diagnosticCalls),
-        meter('Shared', used.bytesShared || 0, lim.totalBytes, function (b) { return Math.round(b / 1024) + ' KiB'; }),
-        // Claude Code and Codex run their own model turns, so only the in-app assistant has a turn budget to show.
-        p.nativeClient ? null : meter('Turns', used.turns || 0, lim.turns)));
+      })) : h('div', { className: 'text-callout ot-muted' }, 'No checks yet');
+    }
+  }
+  // A finished run's answer for the design's finished view: paragraphs split by a blank line (light Markdown kept), the
+  // citation chips after the last one.
+  function runAnswer(text, cites, onCite) {
+    var paras = String(text || '').split(/\n\s*\n+/).filter(function (t) { return t.trim(); });
+    return paras.map(function (t, i) {
+      return h('p', { key: i, className: 'text-body ot-run-para' }, h(RichText, { text: t.trim() }),
+        i === paras.length - 1 && cites && cites.length ? h(React.Fragment, null, ' ', h(CiteChips, { cites: cites, onCite: onCite })) : null);
+    });
   }
 
   // What a citation chip points at: the measurement's sentence, its source and time; report evidence can open the report.
@@ -1338,6 +2019,8 @@
         : h('div', { className: 'ot-answer-busy' },
             h('div', { className: 'text-mono-sm ot-muted ot-turn' }, h(Logo, { size: 16, spin: true, decorative: true, className: 'ot-busy-logo' }), a.busy || 'Thinking…'),
             running && p.onStop && h(Button, { variant: 'neu', size: 'sm', icon: 'stop', onClick: p.onStop }, 'Stop'))),
+      // M9 §7: the sources this turn's web lookups used (agent.message.sources, up to 8), opened by id.
+      a.text && h(SourceList, { sources: a.sources, max: 8, onOpenSource: p.onOpenSource }),
       bench && h('div', { className: 'ot-answer-acts' }, h(Button, { variant: 'neu', size: 'sm', icon: 'gauge', onClick: p.onBenchmark }, 'Run benchmark')),
       follow && h('div', { className: 'ot-followups' }, follow.map(function (q) {
         return h('button', { key: q, type: 'button', className: 'ot-suggest-chip is-small', disabled: !!p.followBusy, onClick: function () { p.onFollow(q); } }, q);
@@ -1401,28 +2084,103 @@
   }
 
   // First look after connecting an AI (m5 §6): its live activity, then its answer; Skip any time, Continue when answered.
+  // design v70: once answered, the run is shown finished (the answer first, the steps folded); a failed run keeps the
+  // live list and the failure line.
   function AiScanPanel(p) {
-    var a = p.answer;
+    var a = p.answer, answered = !!(a && a.text && !a.failed);
     return h('div', { className: cx('ot-aiscan', p.className) },
-      h(ActivityPanel, { title: p.title || 'AI', active: p.active && !p.done, items: p.items, nativeClient: true }),
-      a && (a.text || a.failed) && h(AgentAnswers, { items: [Object.assign({}, a, { q: null })], onCite: p.onCite }),
+      h(ActivityPanel, { title: p.title || 'AI', active: p.active && !p.done, items: p.items, nativeClient: true,
+        finished: answered, agent: p.title || 'AI', answer: answered ? runAnswer(a.text, a.cites, p.onCite) : null }),
+      a && !answered && a.failed && h(AgentAnswers, { items: [Object.assign({}, a, { q: null })], onCite: p.onCite }),
       h('div', { className: 'ot-choice-foot' },
         !p.done && h(Button, { variant: 'ghost', onClick: p.onSkip }, 'Skip'),
         h(Button, { variant: 'primary', iconRight: 'chevron', disabled: !p.done, onClick: p.onContinue }, 'Continue')));
   }
 
+  /* Design AIPillPanel (v73, PillPanelStates): one status per state. Head: the dot, the AI's name and a status word;
+     then an optional grey hint; for pairing the code with its “Code” label; for manual the command with Copy and a grey
+     line after it; the actions: Change and Permissions (secondary), the state's extra, then its one primary at the right;
+     Disconnect as a small text button on its own row, which asks first, in place: “Sign <AI> out of Optimus? …”
+     [Cancel] [Disconnect]. Hidden for Local only and while something runs (`busy` or live). `onAction(name)` gets the
+     button's name (Local only's Connect an AI calls onChange, as in the design).
+     App additions (no designed place): `hint`, `primary` and `tone` override the state's (undefined keeps the design's,
+     null drops it) for a connection the design has no state for (connection-state.js pillPanelState own); Change and
+     Permissions show only with their handlers; `onCopy` may return a promise (Copied once it resolves); `onDisconnect`
+     may return a promise: Disconnect is sent once and waits for it (it comes back if the disconnect fails). */
+  var PILL_STATES = {
+    connected: { tone: 'ok', word: 'Connected' },
+    live: { tone: 'live', word: 'Working…', primary: 'Activity', extra: 'Stop', noDisconnect: true, noChange: true },
+    signedout: { tone: 'warn', word: 'Signed out', primary: 'Sign in' },
+    setup: { tone: 'warn', word: 'Not set up', hint: 'Claude Code isn’t installed or can’t start on this PC.', primary: 'Set up' },
+    nokey: { tone: 'warn', word: 'Needs a key', primary: 'Add key' },
+    badkey: { tone: 'warn', word: 'Key rejected', hint: 'The key was turned down. Check it and add it again.', primary: 'Update key' },
+    offline: { tone: 'warn', word: 'Can’t reach it', hint: 'Check your internet connection.', primary: 'Retry' },
+    busy: { tone: 'warn', word: 'Busy right now', hint: 'Try again in a minute.', primary: 'Retry' },
+    pairing: { tone: 'live', word: 'Wants to pair', hint: 'Check this code matches the one in Claude Code’s window.', primary: 'Approve', extra: 'Deny', code: true },
+    paired: { tone: 'ok', word: 'Paired', hint: 'Claude Code can now work in its own window.', primary: 'Start' },
+    manual: { tone: 'warn', word: 'Not added yet', hint: 'Run this in a terminal to add Optimus to Claude Code:', command: true, after: 'Then run claude mcp list to check.', primary: 'Check again' },
+    local: { tone: 'muted', word: 'No AI connected', primary: 'Connect an AI', noPermissions: true, noDisconnect: true, noChange: true }
+  };
+  function AIPillPanel(p) {
+    var c = React.useState(!!p.confirming), confirm = c[0], setConfirm = c[1];
+    var b = React.useState(false), sending = b[0], setSending = b[1];
+    var cp = React.useState(false), copied = cp[0], setCopied = cp[1];
+    var sent = React.useRef(false), moved = React.useRef(false), confirmRef = React.useRef(null), offRef = React.useRef(null);
+    var st = PILL_STATES[p.state] || PILL_STATES.connected;
+    var who = p.state === 'local' ? 'Local only' : (p.provider || 'Claude');
+    var hint = p.hint === undefined ? st.hint : p.hint, primary = p.primary === undefined ? st.primary : p.primary;
+    var extra = p.primary === undefined ? st.extra : null, tone = p.tone || st.tone;
+    var canDisconnect = !!p.onDisconnect && !st.noDisconnect && !p.busy;
+    // Focus follows the swap: Cancel when the question opens, Disconnect again after Cancel.
+    React.useEffect(function () {
+      if (!moved.current) { moved.current = true; return; }
+      var el = confirm ? confirmRef.current && confirmRef.current.querySelector('button') : offRef.current;
+      if (el) el.focus();
+    }, [confirm]);
+    function act(name) { return p.onAction ? function () { p.onAction(name); } : undefined; }
+    function copy() { Promise.resolve(p.onCopy ? p.onCopy() : null).then(function () { setCopied(true); }, function () {}); }
+    function off() {
+      if (sent.current || !p.onDisconnect) return;
+      sent.current = true; setSending(true);
+      function done() { sent.current = false; setSending(false); }
+      Promise.resolve(p.onDisconnect()).then(done, done);
+    }
+    var digits = String(p.code || '').split('');
+    return h(GlassPanel, { strong: true, className: cx('ot-pillpanel', p.className), role: 'dialog', 'aria-label': who },
+      h('div', { className: 'ot-pillpanel-head' },
+        h('span', { className: cx('ot-pill-dot', 'is-' + tone), 'aria-hidden': true }),
+        h('span', { className: 'text-headline' }, who),
+        h('span', { className: 'text-mono-sm ot-muted' }, p.detail || st.word)),
+      hint && h('p', { className: 'text-callout ot-muted ot-pillpanel-hint' }, hint),
+      st.code && p.code && h('div', { className: 'ot-pair-code is-small' },
+        h('span', { className: 'text-caption ot-muted', id: 'ot-pp-code' }, 'Code'),
+        h('span', { className: 'ot-pair-digits', role: 'text', 'aria-label': 'Code ' + digits.join(' ') },
+          digits.map(function (d, i) { return h('span', { key: i, className: 'ot-pair-digit', 'aria-hidden': true }, d); }))),
+      st.command && h('div', { className: 'ot-pillpanel-cmd' },
+        h('code', { className: 'text-mono-sm' }, p.command || ''),
+        h(Button, { variant: 'ghost', size: 'sm', icon: copied ? 'check' : 'copy', onClick: copy }, copied ? 'Copied' : 'Copy')),
+      st.after && h('p', { className: 'text-mono-sm ot-muted ot-pillpanel-hint' }, st.after),
+      confirm ? h('div', { ref: confirmRef, className: 'ot-pillpanel-confirm', role: 'alert' },
+        h('p', { className: 'text-callout' }, 'Sign ' + who + ' out of Optimus? You can connect it again any time.'),
+        h('div', { className: 'ot-approval-actions' },
+          h(Button, { variant: 'ghost', disabled: sending, onClick: function () { setConfirm(false); } }, 'Cancel'),
+          h(Button, { variant: 'primary', icon: 'close', disabled: sending, onClick: off }, 'Disconnect')))
+        : [
+          h('div', { key: 'a', className: 'ot-pillpanel-actions' },
+            !st.noChange && p.onChange && h(Button, { variant: 'neu', size: 'sm', icon: 'repeat', 'aria-label': 'Change AI', onClick: p.onChange }, 'Change'),
+            !st.noPermissions && p.onPermissions && h(Button, { variant: 'neu', size: 'sm', icon: 'sliders', onClick: p.onPermissions }, 'Permissions'),
+            extra && h(Button, { variant: 'neu', size: 'sm', icon: extra === 'Stop' ? 'stop' : 'close', onClick: act(extra) }, extra),
+            primary && h(Button, { variant: 'primary', size: 'sm', className: 'ot-pillpanel-primary', onClick: primary === 'Connect an AI' ? p.onChange : act(primary) }, primary)),
+          canDisconnect && h('button', { key: 'd', ref: offRef, type: 'button', className: 'ot-pillpanel-off text-callout', onClick: function () { setConfirm(true); } }, 'Disconnect')
+        ]);
+  }
+  // The app's pill panel: AIPillPanel with the connection's panel state (connection-state.js pillPanelState).
+  // panel: { state, code?, detail?, hint?, primary?, tone? }; label: the AI's name.
   function ConnectionDetail(p) {
-    var st = p.state, acts = p.actions || [];
-    return h(GlassPanel, { className: cx('ot-conn', p.className), role: 'dialog', 'aria-label': st.label },
-      h('div', { className: 'ot-conn-head' },
-        h('span', { className: 'text-headline' }, st.label),
-        st.word && h('span', { className: 'text-mono-sm ot-muted' }, st.word)),
-      h(WaitHelp, { hint: st.hint, long: p.waitLong && p.command, cli: st.cli }),
-      p.command && h(CopyField, { text: p.command, onFail: p.onCopyFail }),
-      h('div', { className: 'ot-choice-foot' },
-        p.onDisconnect && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onDisconnect }, 'Disconnect'),
-        p.onChange && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onChange }, 'Change'),
-        acts.map(function (a, i) { return h(Button, { key: a.label, variant: i === acts.length - 1 ? 'primary' : 'neu', size: 'sm', icon: a.icon, onClick: a.onClick }, a.label); })));
+    var ps = p.panel || { state: 'connected' };
+    return h(AIPillPanel, { className: p.className, state: ps.state, provider: p.label, detail: ps.detail, hint: ps.hint, primary: ps.primary, tone: ps.tone,
+      code: ps.code, command: p.command, onCopy: p.onCopy, busy: p.busy, onAction: p.onAction, confirming: p.confirming,
+      onChange: p.onChange, onPermissions: p.onPermissions, onDisconnect: p.onDisconnect });
   }
 
   // On a native client, the conversation happens there: a prompt to paste.
@@ -1462,7 +2220,8 @@
       return h('div', { key: r.id, 'data-row': r.id, className: cx('ot-rrow', r.gap && 'is-gap', r.info && 'is-info', p.highlight === r.id && 'is-hit') },
         h('span', { className: 'text-mono-sm ot-muted', title: r.id }, r.label || r.id),
         h('span', { className: 'ot-rrow-main' },
-          h('span', { className: 'text-callout ot-rrow-title' }, r.title, r.isNew && h('span', { className: 'ot-tag is-new' }, 'New')),
+          h('span', { className: 'text-callout ot-rrow-title' }, r.title, r.isNew && h('span', { className: 'ot-tag is-new' }, 'New'),
+            r.research && h(ResearchTag, { verdict: r.research, className: 'ot-rrow-research' })),
           r.value && h('span', { className: 'text-callout ot-muted' }, r.value)),
         h('span', { className: 'text-mono-sm ot-muted ot-rrow-src' }, r.src, r.time && h('br'), r.time));
     }
@@ -1498,18 +2257,94 @@
             p.fixed.map(function (f) {
               return h('div', { key: f.id, className: 'ot-rrow is-fixed' }, h('span', null),
                 h('span', { className: 'text-callout ot-rrow-title' }, f.title), h('span', { className: 'text-mono-sm ot-muted ot-rrow-src' }, (CATS[f.category] || CATS.misc).label));
+            })),
+          // §6.8 (design ReportSheet `checkups`, v51): found online, never measured here, so a group of its own after the measured ones.
+          p.checkups && p.checkups.length > 0 && h('section', { className: 'ot-rgroup is-checkup' },
+            h('h3', { className: 'ot-rgroup-head text-caption' }, h(Icon, { name: 'globe', size: 14, strokeWidth: 2 }), 'AI check-up', h('span', { className: 'ot-muted' }, p.checkups.length)),
+            h('p', { className: 'text-mono-sm ot-muted ot-rgroup-note' }, 'Found online for what is on this PC. Not measured here.'),
+            p.checkups.map(function (c) {
+              var srcs = c.sources || [], first = srcs[0];
+              return h('div', { key: c.id, 'data-row': c.id, className: cx('ot-rrow is-checkup', p.highlight === c.id && 'is-hit') },
+                h('span', { className: 'text-mono-sm ot-muted' }, c.id),
+                h('span', { className: 'ot-rrow-main' },
+                  h('span', { className: 'text-callout ot-rrow-title' }, c.kind && h('span', { className: 'ot-checkup-kind text-mono-sm' }, c.kind), c.title),
+                  c.text && h('span', { className: 'text-callout ot-muted ot-rrow-clamp' }, c.text)),
+                h('span', { className: 'text-mono-sm ot-muted ot-rrow-src' },
+                  first ? (p.onOpenSource ? h('button', { type: 'button', className: 'ot-rrow-srcbtn', onClick: function () { p.onOpenSource(first.sourceId); } }, first.site) : first.site) : 'AI check-up',
+                  srcs.length > 1 ? ' +' + (srcs.length - 1) : '', h('br'), c.time));
             }))))));
+  }
+
+  /* The online check-up's five areas, as they read inside a sentence (design v55). */
+  var CHECKUP_AREAS = { hardware: 'hardware', drivers: 'drivers', windows: 'Windows', programs: 'programs', background: 'background items' };
+  function andList(a) { return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' and ' + a[a.length - 1]; }
+  // 1–2 areas missed: name them. 3–4 missed: name what was checked instead. Unknown: "some areas".
+  function checkupPartial(missed) {
+    var keys = Object.keys(CHECKUP_AREAS), m = (missed || []).map(function (k) { return CHECKUP_AREAS[k] || k; });
+    if (!m.length) return 'Checked online, except some areas. It will try those again later.';
+    if (m.length <= 2) return 'Checked online, except ' + andList(m) + '. It will try those again later.';
+    var done = keys.filter(function (k) { return m.indexOf(CHECKUP_AREAS[k]) < 0; }).map(function (k) { return CHECKUP_AREAS[k]; });
+    return 'Only checked ' + andList(done) + ' online. It will try the rest again later.';
+  }
+
+  // The toolbar's status chip (design Toolbar v55: researching / checking / newCheckups / checkupStatus / researchStatus).
+  // The app draws its own toolbar buttons, so only the chip is ported; toolbarChip (connection-state.js) picks which one.
+  function ToolbarStatus(p) {
+    if (p.researching || p.checking) return h('div', { className: 'ot-tb-status text-mono-sm', role: 'status' }, h(Logo, { size: 14, mono: true, spin: true, decorative: true }),
+      p.checking === 'setup' ? 'Getting online lookups ready…' : p.checking ? 'Checking online for known problems…' : (p.researching === true || !p.researching[1]) ? 'Researching…' : 'Researching ' + p.researching[0] + ' of ' + p.researching[1] + '…');
+    if (p.newCheckups > 0) return h('div', { className: 'ot-tb-status is-new text-mono-sm', role: 'status' }, h(Icon, { name: 'globe', size: 14 }),
+      p.newCheckups + ' new from the online check-up',
+      p.onShowNew && h('button', { type: 'button', className: 'ot-tb-status-btn', onClick: p.onShowNew }, 'Show'));
+    if (p.checkupStatus) return h('div', { className: cx('ot-tb-status text-mono-sm', p.checkupStatus !== 'none' && 'is-quiet'), role: 'status' },
+      h(Icon, { name: p.checkupStatus === 'none' ? 'check' : p.checkupStatus === 'unavailable' ? 'gap' : 'alert', size: 14 }),
+      p.checkupStatus === 'none' ? 'Checked online · nothing new found'
+        : p.checkupStatus === 'failed' ? 'Couldn’t finish the online check-up. It will try again later.'
+          : p.checkupStatus === 'unavailable' ? 'The online check-up isn’t available with ' + (p.ai || 'this AI') + '.'
+            : checkupPartial(p.missed));
+    if (p.researchStatus) return h('div', { className: 'ot-tb-status is-quiet text-mono-sm', role: 'status' }, h(Icon, { name: p.researchStatus === 'failed' ? 'alert' : 'gap', size: 14 }),
+      p.researchStatus === 'failed' ? 'Couldn’t finish looking things up. Try again later.' : 'Looking things up isn’t available with ' + (p.ai || 'this AI') + '.');
+    return null;
+  }
+
+  // Design GuideAnswer (v51): with no AI connected, a question about the app is answered from the built-in guide.
+  function GuideAnswer(p) {
+    var paras = String(p.text || '').split(/\n\n+/);
+    // App addition: data-answer and tabIndex, so the page can scroll to and focus it like any answer panel.
+    return h(GlassPanel, { className: cx('ot-guide-answer', p.className), role: 'region', 'aria-label': 'Built-in guide', 'data-answer': p.answerId, tabIndex: p.answerId ? -1 : undefined },
+      h('div', { className: 'ot-guide-head text-caption ot-muted' }, h(Icon, { name: 'report', size: 14 }), 'From the built-in guide'),
+      p.question && h('div', { className: 'text-headline' }, p.question),
+      paras.map(function (t, i) { return h('p', { key: i, className: 'text-callout' }, t); }),
+      h('div', { className: 'ot-guide-foot' },
+        h('span', { className: 'text-callout ot-muted' }, 'Connect an AI to ask about this PC.'),
+        h('span', { className: 'ot-guide-btns' },
+          p.onClose && h(Button, { variant: 'ghost', size: 'sm', onClick: p.onClose }, 'Close'),
+          h(Button, { variant: 'neu', size: 'sm', icon: 'spark', onClick: p.onConnect }, 'Connect AI'))));
+  }
+
+  // Design PickChoice (v51): which item a change is for, before its preview.
+  function PickChoice(p) {
+    var s = React.useState(p.value || null), v = s[0], setV = s[1];
+    return h('div', { className: 'ot-pick' },
+      h('div', { className: 'text-callout ot-pick-q', id: 'pick-q' }, p.question || 'Which one?'),
+      h('div', { className: 'ot-pick-chips', role: 'radiogroup', 'aria-labelledby': 'pick-q' }, (p.items || []).map(function (it) {
+        return h(CheckRow, { key: it, label: it, checked: v === it, onClick: function () { setV(it); } });
+      })),
+      h('div', { className: 'ot-insight-actions' },
+        h(Button, { variant: 'ghost', size: 'sm', icon: 'back', onClick: p.onBack }, 'Back'),
+        h(Button, { variant: 'primary', size: 'sm', disabled: !v, onClick: function () { if (p.onPick) p.onPick(v); } }, 'Preview')));
   }
 
   window.OptTool = Object.assign(window.OptTool || {}, {
     Logo: Logo, GridBackground: GridBackground, WaveBackground: WaveBackground, GlassPanel: GlassPanel, NeuCard: NeuCard, Expand: Expand,
     Button: Button, Icon: Icon, ProviderOption: ProviderOption, SegmentedControl: SegmentedControl,
     Toggle: Toggle, KeyInput: KeyInput, SeverityBadge: SeverityBadge, FindingCard: FindingCard, ScanProgress: ScanProgress,
-    ConnectionPill: ConnectionPill, PermissionGrant: PermissionGrant, AgentActivity: AgentActivity, ApprovalCard: ApprovalCard,
+    ConnectionPill: ConnectionPill, PermissionGrant: PermissionGrant, AgentActivity: AgentActivity, AgentActivityLive: AgentActivityLive, runAnswer: runAnswer, ApprovalCard: ApprovalCard, ScriptApproval: ScriptApproval,
     CheckRow: CheckRow, AskField: AskField, ChoicePanel: ChoicePanel, SpecScanPanel: SpecScanPanel, PromptBox: PromptBox,
-    StarterPrompt: StarterPrompt, ScanStatus: ScanStatus, CopyField: CopyField, PairingCard: PairingCard, GrantSheet: GrantSheet,
-    CardGrid: CardGrid, ActivityPanel: ActivityPanel, AgentAnswers: AgentAnswers, AnswerPanel: AnswerPanel, RiskNote: RiskNote, Popover: Popover, SuggestionList: SuggestionList, HistoryList: HistoryList, AiScanPanel: AiScanPanel, EvidencePeek: EvidencePeek, ContinuePanel: ContinuePanel, ConnectionDetail: ConnectionDetail, PlanCard: PlanCard, InsightCard: InsightCard, ReviewComplete: ReviewComplete, SharePreview: SharePreview, ReportSheet: ReportSheet,
-    LoginPanel: LoginPanel, LoginScreen: LoginScreen,
+    StarterPrompt: StarterPrompt, ScanStatus: ScanStatus, CopyField: CopyField, PairingCard: PairingCard, ToolbarStatus: ToolbarStatus, checkupPartial: checkupPartial, GuideAnswer: GuideAnswer, PickChoice: PickChoice,
+    CardGrid: CardGrid, ActivityPanel: ActivityPanel, AgentAnswers: AgentAnswers, AnswerPanel: AnswerPanel, RiskNote: RiskNote, Popover: Popover, SuggestionList: SuggestionList, HistoryList: HistoryList, AiScanPanel: AiScanPanel, EvidencePeek: EvidencePeek, ContinuePanel: ContinuePanel, ConnectionDetail: ConnectionDetail, AIPillPanel: AIPillPanel, InsightCard: InsightCard, CheckupCard: CheckupCard, FixButton: FixButton, FixPanel: FixPanel, AdminChecks: AdminChecks, ReviewComplete: ReviewComplete, SharePreview: SharePreview, ReportSheet: ReportSheet,
+    LoginPanel: LoginPanel, LoginScreen: LoginScreen, ProviderDetails: ProviderDetails,
+    PermissionsStep: PermissionsStep, PermissionsPanel: PermissionsPanel, PermissionsSummary: PermissionsSummary,
+    ResearchTag: ResearchTag, ResearchNote: ResearchNote, SourceList: SourceList,
     // Shared, data-free helpers for app-flow.js.
     ui: { cx: cx, CATS: CATS, SCAN_CATS: SCAN_CATS, PROVIDERS: PROVIDERS, LOGO_SVG: LOGO_SVG }
   });

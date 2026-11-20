@@ -1,6 +1,7 @@
 // node --test ui/tests/   — the fixture adapter's M3 agent gateway simulation (contracts/m3-agent.md §4).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { choose } from './choose-ai.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -25,7 +26,8 @@ async function withReport(be) {
 test('providers: list, fake key prompt, never connected before the backend says so', async () => {
   const be = adapter();
   const { providers } = await be.call('provider.list');
-  assert.deepEqual(providers.map((p) => p.kind), ['local', 'anthropic_api', 'openai_api', 'chatgpt_plan', 'claude_code_mcp', 'codex_mcp']);
+  assert.deepEqual(providers.map((p) => p.kind), ['local', 'anthropic_api', 'openai_api', 'chatgpt_plan', 'claude_code_mcp']);
+  assert.equal(providers.find((p) => p.kind === 'claude_code_mcp').label, 'Claude');
   assert.equal(providers.find((p) => p.kind === 'anthropic_api').status, 'not_configured');
   assert.equal((await be.call('provider.connect', { kind: 'anthropic_api' })).status, 'not_configured');
   assert.deepEqual(await be.call('shell.requestApiKey', { kind: 'anthropic_api' }), { status: 'connected' });
@@ -38,6 +40,7 @@ test('in-app task: grant, two-step investigation with events, citations from rea
   const reportId = await withReport(be);
   await be.call('shell.requestApiKey', { kind: 'anthropic_api' });
   const report = await be.call('report.get', { reportId });
+  await choose(be, 'anthropic_api');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'Why is it loud?', recipientKind: 'anthropic_api',
     scope: { reportId, findingIds: null }, grant: { diagnostics: ALL, share: { names: false } } });
   assert.match(t.taskId, /^task-[0-9a-f]{16}$/);
@@ -111,9 +114,10 @@ test('report review: preview shows field classes and bytes, submit consumes it o
   const reportId = await withReport(be);
   await assert.rejects(be.call('review.preview', { recipientKind: 'anthropic_api', reportId }), (e) => e.code === -32013);
   await be.call('shell.requestApiKey', { kind: 'anthropic_api' });
+  await choose(be, 'anthropic_api');
   const pv = await be.call('review.preview', { recipientKind: 'anthropic_api', reportId });
   assert.ok(pv.bytes > 0 && pv.digest.length === 16);
-  assert.equal(pv.fieldClasses.find((f) => f.id === 'findings').count, 9);
+  assert.equal(pv.fieldClasses.find((f) => f.id === 'findings').count, 16);
   assert.ok(!JSON.stringify(pv.payload).includes('14 apps start'), 'local evidence is not shared');
   const k = key();
   const out = await be.call('review.submit', { idempotencyKey: k, previewId: pv.previewId });
@@ -132,6 +136,7 @@ test('grant sheet inputs as the host: provider.list diagnostics, capabilities.to
   await be.call('shell.requestApiKey', { kind: 'anthropic_api' });
   assert.equal(list.providers.find((p) => p.kind === 'anthropic_api').capabilities.tools, true);
   assert.equal((await be.call('fixture.setTools', { kind: 'anthropic_api', tools: false })).capabilities.tools, false);
+  await choose(be, 'anthropic_api');
   await assert.rejects(be.call('agent.start', { idempotencyKey: key(), goal: 'x', recipientKind: 'anthropic_api', scope: { reportId }, grant: { diagnostics: ['process.sample'] } }),
     (e) => e.code === -32013 && e.data.reason === 'tools_unavailable');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'x', recipientKind: 'anthropic_api', scope: { reportId }, grant: { diagnostics: [] } });

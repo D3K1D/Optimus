@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/permissions.schema.json",
+  "title": "AI permissions",
+  "description": "The user's AI permissions record (m9-ai-powers §1.1, settings key ai.permissions) and the result of ai.getPermissions / ai.setPermissions (§1.2). The record is the defaults every new task's grant is built from.",
+  "$ref": "#/$defs/result",
+  "$defs": {
+    "result": {
+      "type": "object",
+      "required": ["permissions", "available"],
+      "additionalProperties": false,
+      "properties": {
+        "permissions": { "$ref": "#/$defs/record" },
+        "available": { "$ref": "#/$defs/available" }
+      }
+    },
+    "record": {
+      "type": "object",
+      "required": ["version", "revision", "set", "see", "do"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": 1 },
+        "revision": { "type": "integer", "minimum": 0, "description": "0 until the first save; ai.setPermissions must send the current value (else -32002) and bumps it." },
+        "set": { "type": "boolean", "description": "false until the user has finished the permissions page once." },
+        "see": {
+          "type": "object",
+          "required": ["specs", "history", "names"],
+          "additionalProperties": false,
+          "properties": {
+            "specs": { "type": "boolean", "description": "get_pc_specs" },
+            "history": { "type": "boolean", "description": "get_report_history, get_benchmarks (the ask's own benchRunId stays readable)" },
+            "names": { "type": "boolean", "description": "app and device names; off = aliases (share.names)" }
+          }
+        },
+        "do": {
+          "type": "object",
+          "required": ["checks", "changes", "scripts", "web"],
+          "additionalProperties": false,
+          "properties": {
+            "checks": { "type": "boolean", "description": "every read-only diagnostic available on this PC" },
+            "changes": { "enum": ["off", "ask", "fix"] },
+            "scripts": { "type": "boolean", "description": "requires changes = fix (the host refuses it otherwise, -32602)" },
+            "web": { "type": "boolean" },
+            "admin": { "type": "boolean", "description": "m9 §17.1: administrator rights. Absent reads as false (a record stored before it, and ai.setPermissions from a page without the row); never pre-selected. The host writes it on every record and keeps it whatever available.admin says." }
+          }
+        }
+      },
+      "if": { "properties": { "do": { "properties": { "scripts": { "const": true } } } } },
+      "then": { "properties": { "do": { "properties": { "changes": { "const": "fix" } } } } }
+    },
+    "available": {
+      "type": "object",
+      "required": ["tools", "web", "scripts", "admin"],
+      "additionalProperties": false,
+      "description": "What the selected provider can do with the record. tools: false for an explain-only account. web: computed by §6.4 (unknown until then). scripts: false until §5 ships. admin (m9 §17.1): the --enable-admin-actions flag; false = administrator rights are not available in this version.",
+      "properties": {
+        "tools": { "type": "boolean" },
+        "web": { "enum": ["yes", "no", "unknown"] },
+        "scripts": { "type": "boolean" },
+        "admin": { "type": "boolean" }
+      }
+    },
+    "setParams": {
+      "type": "object",
+      "required": ["idempotencyKey", "revision", "permissions"],
+      "properties": {
+        "idempotencyKey": { "type": "string" },
+        "revision": { "type": "integer", "minimum": 0 },
+        "permissions": {
+          "type": "object",
+          "required": ["see", "do"],
+          "additionalProperties": false,
+          "description": "see and do with every field. version, revision and set may be echoed back; the host owns them.",
+          "properties": {
+            "version": { "const": 1 }, "revision": {}, "set": {},
+            "see": { "$ref": "#/$defs/record/properties/see" },
+            "do": { "$ref": "#/$defs/record/properties/do" }
+          }
+        }
+      }
+    }
+  }
+}

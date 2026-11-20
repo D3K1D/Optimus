@@ -12,7 +12,7 @@
       "type": "object",
       "required": ["kind", "label", "model"],
       "properties": {
-        "kind": { "enum": ["anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"] },
+        "kind": { "enum": ["anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"], "description": "codex_mcp: legacy, read only (tasks stored before M9 dropped the Codex provider; agent.start refuses it)." },
         "label": { "type": "string" },
         "model": { "type": ["string", "null"] },
         "mode": { "const": "headless", "description": "m5-chat §3: an MCP kind asked in-app (the host runs the CLI); absent otherwise." }
@@ -27,7 +27,11 @@
       }
     },
     "grant": { "$ref": "#/$defs/grant" },
-    "clientSession": { "type": ["string", "null"], "description": "m5-chat §3, headless tasks only: the Claude Code session or Codex thread ID the next ask resumes." },
+    "everSharedNames": { "type": "boolean", "description": "m9 §1.2 sticky exposure mark: true once the task has shared names (at start or after widening); never cleared. Used wherever a writer's exposure matters (AI notes and cards)." },
+    "webTainted": { "type": "boolean", "description": "m9 §5.5 web-taint mark: true once web-derived text (a web_lookup result, a research summary through get_findings, or an AI card, note or title whose writer was tainted or unmarked) was released to this task; set in that same transaction, never cleared. Absent on tasks stored before m9 P4c (false)." },
+    "webLookups": { "type": "integer", "minimum": 0, "description": "m9 §7: web_lookup calls this task made (counted when not refused), against grant.limits.webLookups." },
+    "scriptProposals": { "type": "integer", "minimum": 0, "description": "m9 §5.1 rule 8: propose_script calls charged to this task (refused proposals included; a call that returned the pending plan is not charged), against grant.limits.scripts. Absent until the first one." },
+    "clientSession": { "type": ["string", "null"], "description": "m5-chat §3, headless tasks only: the Claude Code session ID the next ask resumes (a Codex thread ID on a legacy task, read only)." },
     "status": { "enum": ["active", "stopped", "expired", "exhausted", "failed"] },
     "used": {
       "type": "object",
@@ -47,7 +51,7 @@
           "required": ["pairingId", "client", "companionPid"],
           "properties": {
             "pairingId": { "type": "string", "pattern": "^pair-" },
-            "client": { "enum": ["claude_code", "codex", "unknown"] },
+            "client": { "enum": ["claude_code", "codex", "unknown"], "description": "codex: legacy, read only (a task paired before M9; agent.pair refuses it now)." },
             "companionPid": { "type": "integer" }
           }
         }
@@ -61,11 +65,21 @@
   "$defs": {
     "grant": {
       "type": "object",
+      "description": "m3 §2, changed by m9 §1.3. agent.start without a grant builds it from ai.permissions; fields m9 added are optional on a given grant (see on, changes from canRequestChanges, scripts and web off). The host always writes every field.",
       "required": ["diagnostics", "share", "limits", "idleExpirySeconds"],
       "properties": {
         "diagnostics": { "type": "array", "items": { "enum": ["power.inventory", "process.sample", "startup.list", "events.recent", "storage.volumes",
-                                                              "network.listeners", "display.modes", "devices.problems", "security.status"] } },
+                                                              "network.listeners", "display.modes", "devices.problems", "security.status", "sensors.snapshot",
+                                                              "security.defender_history", "storage.health", "security.encryption"] },
+          "description": "m9 §17.2: the last three are administrator checks (tier admin): usable only with admin." },
         "share": { "type": "object", "required": ["names"], "properties": { "names": { "type": "boolean" } } },
+        "see": { "type": "object", "required": ["specs", "history"],
+                 "properties": { "specs": { "type": "boolean", "description": "get_pc_specs" }, "history": { "type": "boolean", "description": "get_report_history, get_benchmarks" } } },
+        "changes": { "enum": ["off", "ask", "fix"], "description": "Wins over canRequestChanges; without it canRequestChanges:true means ask." },
+        "scripts": { "type": "boolean", "description": "Requires changes = fix." },
+        "web": { "type": "boolean" },
+        "admin": { "type": "boolean", "description": "m9 §17.1: administrator rights (do.admin). Absent = false, on a stored grant and on a given one (the pairing panel)." },
+        "permissionsRevision": { "type": "integer", "minimum": 0, "description": "The ai.permissions revision the grant was built (or last widened) from; 0 for a given grant." },
         "limits": {
           "type": "object",
           "required": ["diagnosticCalls", "resultBytes", "totalBytes", "turns", "turnSeconds", "maxSampleSeconds"],
@@ -75,12 +89,17 @@
             "totalBytes": { "type": "integer", "minimum": 1024, "maximum": 1048576 },
             "turns": { "type": "integer", "minimum": 1, "maximum": 20 },
             "turnSeconds": { "type": "integer", "minimum": 5, "maximum": 300 },
-            "maxSampleSeconds": { "type": "integer", "minimum": 5, "maximum": 120 }
+            "maxSampleSeconds": { "type": "integer", "minimum": 5, "maximum": 120 },
+            "webLookups": { "type": "integer", "minimum": 0, "maximum": 20 },
+            "fixSteps": { "type": "integer", "minimum": 1, "maximum": 20 },
+            "scripts": { "type": "integer", "minimum": 0, "maximum": 10 }
           }
         },
         "idleExpirySeconds": { "type": "integer", "minimum": 60, "maximum": 86400 },
-        "canRequestChanges": { "type": "boolean", "description": "M4: the task may ask (request_action) for catalog changes the user approves. Default false." }
-      }
+        "canRequestChanges": { "type": "boolean", "description": "Derived and read-only (changes != off), for old readers. Accepted on a given grant without changes (legacy)." }
+      },
+      "if": { "properties": { "scripts": { "const": true } }, "required": ["scripts"] },
+      "then": { "properties": { "changes": { "const": "fix" } }, "required": ["changes"] }
     }
   }
 }

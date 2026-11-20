@@ -20,6 +20,18 @@ internal sealed class SelectSchemeHandler(IPowerApi api) : IActionHandler
     public string Privilege => "none";
     public bool SupportsUndo => true;
     public string Kind => "setting";
+    public string Group => "power";
+    public string What => "Switches Windows to another installed power plan, such as Balanced.";
+    public IReadOnlyList<string> Flags => [];
+    public JsonObject? ParameterSchema => new()
+    {
+        ["type"] = "object", ["additionalProperties"] = false,
+        ["properties"] = new JsonObject { ["personality"] = new JsonObject { ["enum"] = new JsonArray("balanced", "high_performance", "power_saver") } },
+    };
+    public bool TakesLease => true;
+
+    /// <summary>The lock key for one scheme (m9 §3.1 power:&lt;scheme&gt;; power.set_value locks its settings beneath it).</summary>
+    internal static string Resource(Guid scheme) => "power:" + scheme.ToString("D").ToUpperInvariant();
 
     public Task<ActionResolution> ResolveAsync(ActionRequest request, CancellationToken ct) =>
         Task.Run(() => Resolve(request), ct);
@@ -94,7 +106,10 @@ internal sealed class SelectSchemeHandler(IPowerApi api) : IActionHandler
             Rows: [new PlanRow("Active power plan", beforeLabel, afterLabel)],
             Context: [new("Power", ContextText(source))],
             Tradeoffs: Tradeoffs(active?.Personality, target.Personality, source?.HasBattery != false),
-            UndoConditions: $"Only while {afterLabel} is still active and {beforeLabel} is still installed");
+            UndoConditions: $"You can undo this while {afterLabel} is still the active plan and {beforeLabel} is still installed.",
+            // Both plans: power.set_value locks power:<plan>:<setting> under the plan it writes and re-activates, so a
+            // switch away from that plan and a value change on it exclude each other (m9 §3.1 parent/child keys).
+            Resources: [Resource(target.Guid), Resource(activeGuid.Value)]);
     }
 
     internal ActionOutcome Execute(ActionExecution ex)
@@ -178,5 +193,9 @@ internal sealed class SelectSchemeHandler(IPowerApi api) : IActionHandler
 /// <summary>System domain's M4 handlers.</summary>
 public sealed class PowerActionModule : IActionModule
 {
-    public IEnumerable<IActionHandler> Handlers(ActionContext context) => [new SelectSchemeHandler(new WindowsPowerApi())];
+    public IEnumerable<IActionHandler> Handlers(ActionContext context)
+    {
+        var api = new WindowsPowerApi();
+        return [new SelectSchemeHandler(api), new SetValueHandler(api)];
+    }
 }

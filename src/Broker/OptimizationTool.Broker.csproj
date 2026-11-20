@@ -2,6 +2,8 @@
   <PropertyGroup>
     <!-- WinExe: no console window flashes when UAC launches the broker. -->
     <OutputType>WinExe</OutputType>
+    <!-- The broker's own confirmation window (m9 §3.5). -->
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>OptimizationTool.Broker</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>

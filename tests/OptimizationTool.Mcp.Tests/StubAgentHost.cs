@@ -29,6 +29,9 @@ public sealed class StubAgentHost : IAsyncDisposable
     public bool ForgetPairingsOnDrop { get; set; }
     /// <summary>m5: the run token this host accepts in agent.pair (approved at once); any other token is not_allowed.</summary>
     public string? RunToken { get; set; }
+    /// <summary>M9: a client this host refuses at agent.pair (-32013 client_not_supported, with <see cref="RefusalMessage"/>).</summary>
+    public string? RefusedClient { get; set; }
+    public string RefusalMessage { get; set; } = "Optimus no longer works with this client.";
     /// <summary>tool.call handler: (name, arguments) → a full JSON-RPC response body (`result` or `error` member).</summary>
     public Func<string, JsonNode?, JsonObject> ToolHandler { get; set; } = (name, args) => new JsonObject
     {
@@ -96,6 +99,8 @@ public sealed class StubAgentHost : IAsyncDisposable
                 });
             case "agent.pair":
             {
+                if (RefusedClient is not null && p?["client"]?.GetValue<string>() == RefusedClient)
+                    return Error(-32013, RefusalMessage, new JsonObject { ["reason"] = "client_not_supported" });
                 var n = Interlocked.Increment(ref _pairs);
                 var id = $"pair-{n}";
                 if (p?["runToken"]?.GetValue<string>() is { } token)

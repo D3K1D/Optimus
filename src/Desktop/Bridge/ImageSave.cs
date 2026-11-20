@@ -54,7 +54,7 @@ public sealed partial class ImageSave
         _today = today ?? (() => DateTime.Now);
     }
 
-    public async Task<string> HandleAsync(JsonNode id, JsonObject? parameters, DesktopLog log, CancellationToken ct)
+    public async Task<string> HandleAsync(JsonNode id, JsonObject? parameters, AppLog log, CancellationToken ct)
     {
         var error = TryRead(parameters, out var png, out var suggested);
         if (error is not null)

@@ -94,6 +94,14 @@ public class StorageRuleTests
         Assert.Equal("volume.c", f.Subject);
         Assert.Equal("ms-settings:storagesense", f.Card.SettingsUri);
         AssertCard(f);
+        // m9 §3.2: the card previews emptying the Recycle Bin; the handler resolves it from the card alone (no parameters).
+        Assert.Equal("preview_available", f.ActionEligibility);
+        Assert.Equal(OptimizationTool.Windows.Actions.Cleanup.EmptyRecycleBinHandler.Id, f.Card.ActionId);
+        Assert.Null(f.Card.ActionParameters);
+        var bin = new OptimizationTool.Windows.Tests.Actions.Cleanup.FakeBin();
+        var plan = new OptimizationTool.Windows.Actions.Cleanup.EmptyRecycleBinHandler(bin)
+            .Resolve(new OptimizationTool.Engine.Actions.ActionRequest(f.Card.ActionId!, null, f.Card.ActionParameters, f.Subject));
+        Assert.True(plan.Eligible, plan.IneligibleMessage);
     }
 
     [Fact]

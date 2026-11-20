@@ -1,6 +1,7 @@
 // node --test ui/tests/   — task progress: usage after every counted call/turn, running → complete for each tool call.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { choose } from './choose-ai.mjs';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -19,6 +20,7 @@ test('agent.task usage grows step by step; every tool call goes running → comp
   await be.call('scan.start', { idempotencyKey: key(), intent: 'audit.full', text: 'Begin scan' });
   const reportId = (await fin).payload.reportId;
   await be.call('shell.requestApiKey', { kind: 'anthropic_api' });
+  await choose(be, 'anthropic_api');
   const t = await be.call('agent.start', { idempotencyKey: key(), goal: 'x', recipientKind: 'anthropic_api', scope: { reportId },
     grant: { diagnostics: ['process.sample'] } });
   const seq = [];

@@ -35,6 +35,9 @@ public sealed class EngineOptions
     /// <summary>M6a benchmark seams (sensors, hardware, worker launcher) and timings. Defaults: benchmarks unsupported.</summary>
     public BenchOptions Bench { get; init; } = new();
 
+    /// <summary>Design v59: Windows' display language; settingsPath is sent only when it is English. Null sends none.</summary>
+    public IDisplayLanguage? DisplayLanguage { get; init; }
+
     public Action<string>? Log { get; init; }
 }
 
@@ -53,13 +56,20 @@ public sealed class AuditEngine : IAsyncDisposable
         "onboarding.get", "onboarding.save", "inventory.start", "inventory.get", "inventory.cancel", "starter.list",
         "scan.start", "scan.get", "scan.cancel", "scan.skipCollector", "report.get", "report.list", "report.compare",
         "evidence.get", "finding.get", "finding.setDisposition", "finding.clearDisposition",
-        "followup.get", "followup.respond", "events.read",
+        "followup.get", "followup.respond", "followup.front", "events.read",
         "provider.list", "provider.setKey", "provider.setClient", "provider.connect", "provider.disconnect",
         "agent.start", "agent.get", "agent.active", "agent.ask", "agent.stop", "agent.cancel", "agent.approvePairing",
         "review.preview", "review.submit", "review.export", "review.import",
         "action.catalog", "action.preview", "action.get", "action.decline", "action.undo", "action.challenge", "action.approve",
         "operation.get", "operation.list", "manual.recheck",
         "bench.capabilities", "bench.start", "bench.get", "bench.cancel", "bench.list", "bench.evidence",
+        "ai.getPermissions", "ai.setPermissions", "guide.get", "operation.stop", "operation.transcript",
+        // m9 §6 (contracts/m9-ai-powers.md §8). research.source is shell-only by policy: the shell asks for a stored URL to open it.
+        "research.get", "research.start", "research.cancel", "research.source",
+        // m9 §17.3 "Fix for me".
+        "action.narrow", "fix.dismiss",
+        // m9 §17.2 administrator checks.
+        "checks.approve", "checks.decline", "checks.list",
     ];
 
     private readonly OnboardingService _onboarding;
@@ -98,13 +108,15 @@ public sealed class AuditEngine : IAsyncDisposable
         Catalog = catalog;
         _onboarding = new OnboardingService(store, fixture);
         _inventory = new InventoryService(store, fixture, catalog, options.FixtureSpeed, log);
-        _scans = new ScanCoordinator(store, fixture, catalog, options.ScanDeadline, options.Time, log, Lease);
+        var paths = new SettingsPaths(options.DisplayLanguage);
+        _scans = new ScanCoordinator(store, fixture, catalog, options.ScanDeadline, options.Time, log, Lease, paths);
         _reports = new ReportService(store);
         _followups = new Followups(store, fixture);
         _events = new EventService(store);
-        Actions = new ActionService(store, catalog, options.Time, options.Actions, log) { Lease = Lease };
+        Actions = new ActionService(store, catalog, options.Time, options.Actions, log) { Lease = Lease, DataDir = options.DataDir, Paths = paths };
         Bench = new BenchService(store, Lease, options.Bench, options.DataDir, log);
         Agent = new AgentService(store, catalog, options.Time, options.Agent, log) { Actions = Actions, DataDir = options.DataDir, Bench = Bench };
+        Actions.TurnAlive = Agent.TurnAlive; // m9 §17.3: a card binding is rechecked against its turn at insert
     }
 
     public static AuditEngine Open(EngineOptions options)
@@ -123,7 +135,8 @@ public sealed class AuditEngine : IAsyncDisposable
         engine._inventory.RecoverInterrupted();
         engine.Bench.RecoverInterrupted(); // m6 §2: starting|running|stopping → interrupted
         engine.Agent.RecoverAfterRestart();
-        engine.Actions.ReconcileAsync().GetAwaiter().GetResult(); // m4 §5: never repeats a write
+        engine.Actions.ReconcileAsync().GetAwaiter().GetResult(); // m4 §5: never repeats a write (m9 §5.4: a script is never replayed)
+        engine.Actions.SweepScriptRuns(); // m9 §5.4: transcripts are kept 30 days
         log(catalog.IsFixture
             ? "source: fixture"
             : $"source: windows ({catalog.Collectors.Count} collectors, {catalog.Rules.Count} rules, {catalog.InventorySteps!.Count} inventory steps)");
@@ -141,12 +154,12 @@ public sealed class AuditEngine : IAsyncDisposable
         return method switch
         {
             "onboarding.get" => _onboarding.Get(),
-            "onboarding.save" => _onboarding.Save(p),
+            "onboarding.save" => _onboarding.Save(p, Agent.OnProfileSaved),
             "starter.list" => _onboarding.Starters(p),
             "inventory.start" => _inventory.Start(p),
             "inventory.get" => _inventory.Get(P.Req(p, "inventoryId", 64)),
             "inventory.cancel" => await _inventory.CancelAsync(P.Req(p, "inventoryId", 64)).ConfigureAwait(false),
-            "scan.start" => _scans.Start(p),
+            "scan.start" => StartScan(p),
             "scan.get" => _scans.Get(P.Req(p, "scanId", 64)),
             "scan.cancel" => await _scans.CancelAsync(P.Req(p, "scanId", 64)).ConfigureAwait(false),
             "scan.skipCollector" => await _scans.SkipAsync(p).ConfigureAwait(false),
@@ -159,6 +172,7 @@ public sealed class AuditEngine : IAsyncDisposable
             "finding.clearDisposition" => _followups.ClearDisposition(p),
             "followup.get" => _followups.Get(P.Req(p, "reportId", 64)),
             "followup.respond" => _followups.Respond(p),
+            "followup.front" => _followups.Front(p),
             "events.read" => _events.Read(p),
             "provider.list" => Agent.ListProviders(),
             "provider.setKey" => await Agent.SetKeyAsync(p).ConfigureAwait(false),
@@ -184,10 +198,17 @@ public sealed class AuditEngine : IAsyncDisposable
             "action.get" => Actions.Get(p),
             "action.decline" => Actions.Decline(p),
             "action.undo" => await Actions.UndoAsync(p).ConfigureAwait(false),
+            "action.narrow" => await Actions.NarrowAsync(p).ConfigureAwait(false),
+            "fix.dismiss" => Agent.FixDismiss(p),
+            "checks.approve" => Agent.ChecksApprove(p),
+            "checks.decline" => Agent.ChecksDecline(p),
+            "checks.list" => Agent.ChecksList(p),
             "action.challenge" => Actions.Challenge(p, ctx),
             "action.approve" => await Actions.ApproveAsync(p, ctx).ConfigureAwait(false),
             "operation.get" => Actions.OperationGet(p),
             "operation.list" => Actions.OperationList(p),
+            "operation.stop" => await Actions.OperationStopAsync(p).ConfigureAwait(false),
+            "operation.transcript" => Actions.OperationTranscript(p),
             "manual.recheck" => await Actions.ManualRecheckAsync(p).ConfigureAwait(false),
             "bench.capabilities" => await Bench.CapabilitiesAsync().ConfigureAwait(false),
             "bench.start" => await Bench.StartAsync(p).ConfigureAwait(false),
@@ -195,8 +216,23 @@ public sealed class AuditEngine : IAsyncDisposable
             "bench.cancel" => Bench.Cancel(p),
             "bench.list" => Bench.List(p),
             "bench.evidence" => Bench.Evidence(p),
+            "ai.getPermissions" => Agent.GetPermissions(),
+            "ai.setPermissions" => Agent.SetPermissions(p),
+            "guide.get" => Agent.GuideGet(p),
+            "research.get" => Agent.ResearchGet(p),
+            "research.start" => Agent.ResearchStart(p),
+            "research.cancel" => Agent.ResearchCancel(p),
+            "research.source" => Agent.ResearchSource(p),
             _ => throw new RpcError(ErrorCodes.MethodNotFound, $"Unknown method {method}."),
         };
+    }
+
+    /// <summary>scan.start; a new scan cancels a running research run (m9 §6.3: its report stops being current).</summary>
+    private JsonNode StartScan(JsonObject p)
+    {
+        var result = _scans.Start(p);
+        Agent.ResearchOnScanStarted();
+        return result;
     }
 
     public async ValueTask DisposeAsync()

@@ -20,14 +20,34 @@
      Followup.card.receipt / .done, decisions[].done   simulated-approval texts
      Followup.card.settingsUri, decisions[].findingId  (the finding's settingsUri; the decided card's finding)
      followup.respond option "simulate.approve" | "simulate.undo"   fixture-only simulated changes
-     fixture.summary {reportId}     the mock AI summary (mockAiSummary), only lines whose evidence is in the report */
+     fixture.summary {reportId}     the mock AI summary (mockAiSummary), only lines whose evidence is in the report
+     fixture.setWindowsLanguage {english}   english false simulates Windows in another display language: from then on no
+                                    settingsPath is sent (findings and cards from the next scan; plans and operations at once) */
 (function (root) {
   'use strict';
 
   var STORE_KEY = 'ot.fixture.v1';
+  var REPORT_OPERATIONS = ['crash', 'scan', 'fix', 'benchmark', 'ai', 'action', 'script', 'bench', 'ai_task', 'checkup', 'research'];
   var SETTINGS_CATALOG = ['windowsdefender://threat', 'windowsdefender://network', 'ms-settings:windowsdefender', 'ms-settings:startupapps',
     'ms-settings:powersleep', 'ms-settings:storagesense', 'ms-settings:appsfeatures', 'ms-settings:privacy-feedback',
-    'ms-settings:display-advanced', 'ms-settings:personalization-start', 'ms-settings:windowsupdate-history', 'ms-settings:troubleshoot'];
+    'ms-settings:display-advanced', 'ms-settings:display-advancedgraphics', 'ms-settings:personalization-start', 'ms-settings:windowsupdate-history', 'ms-settings:troubleshoot'];
+  // Design v59 (ReportsMore): each Windows page as Windows 11 names it in English. The host sends it as settingsPath beside
+  // every settingsUri / manualUri (findings, cards, plans, operations) only when Windows' display language is English;
+  // a page with no path here gets none. The fixture's one table (adapter-fixture-actions.js reads it through ctx).
+  var SETTINGS_PATHS = {
+    'windowsdefender://threat': 'Windows Security › Virus & threat protection',
+    'windowsdefender://network': 'Windows Security › Firewall & network protection',
+    'ms-settings:windowsdefender': 'Windows Security',
+    'ms-settings:startupapps': 'Settings › Apps › Startup',
+    'ms-settings:powersleep': 'Settings › System › Power & battery',
+    'ms-settings:storagesense': 'Settings › System › Storage › Storage Sense',
+    'ms-settings:appsfeatures': 'Settings › Apps › Installed apps',
+    'ms-settings:privacy-feedback': 'Settings › Privacy & security › Diagnostics & feedback',
+    'ms-settings:display-advanced': 'Settings › System › Display › Advanced display',
+    'ms-settings:display-advancedgraphics': 'Settings › System › Display › Graphics',
+    'ms-settings:personalization-start': 'Settings › Personalization › Start',
+    'ms-settings:windowsupdate-history': 'Settings › Windows Update › Update history',
+    'ms-settings:troubleshoot': 'Settings › System › Troubleshoot › Other troubleshooters' };
   var YEAR_MS = 366 * 24 * 3600 * 1000;
   // v1.4: rules whose cards offer "Intended" (added by the engine).
   var INTENDED_RULES = ['net.wildcard_listener_public', 'fw.public_off', 'fw.profile_off', 'startup.many_entries', 'uac.disabled', 'secureboot.off',
@@ -52,6 +72,12 @@
       return Array.prototype.map.call(new Uint8Array(buf), function (v) { return ('0' + v.toString(16)).slice(-2); }).join('').slice(0, 16);
     });
   }
+  // The host's content hashes (planHash, a fix step's contentHash): the full 64-hex SHA-256 of the canonical JSON.
+  function sha256(x) {
+    return root.crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical(x))).then(function (buf) {
+      return Array.prototype.map.call(new Uint8Array(buf), function (v) { return ('0' + v.toString(16)).slice(-2); }).join('');
+    });
+  }
   function hasWord(list, w) { return list.join(' ').toLowerCase().indexOf(w) >= 0; }
   function fetchJson(url) {
     return root.fetch(url, { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error(url + ' ' + r.status); return r.json(); });
@@ -63,6 +89,12 @@
     x = x || {};
     F.collectors = F.collectors.concat(clone(x.collectors || []));
     F.rules = F.rules.concat(clone(x.rules || []));
+    // ruleExtras {ruleId: {evidence?, card?}}: more cited evidence and card fields for an M1 rule (UI-only data).
+    F.rules.forEach(function (r) {
+      var more = (x.ruleExtras || {})[r.ruleId]; if (!more) return;
+      r.evidence = r.evidence.concat(more.evidence || []);
+      r.card = Object.assign({}, r.card, clone(more.card || {}));
+    });
     F.rules.forEach(function (r) { r.settingsUri = (x.settingsUri || {})[r.card.key] || null; });
     F.sensitivity = x.sensitivity || {};
     F.rescan = x.rescan || { skipEvidence: [] };
@@ -81,9 +113,11 @@
     var eventFns = [], stateFns = [], timers = {};   // timers: job id → [timeout]
     var samplers = {};                              // scan id → the running skippable collector
     var bench = null;                               // M6a benchmark simulation (set below)
+    var research = null;                            // M9 §6 research runs (set below)
     // The shell's backend state as the page sees it (protocol-v1 §7). Always ready unless a dev hook sets another.
     var BACKEND_STATES = ['connecting', 'ready', 'reconnecting', 'incompatible'];
     var backendState = 'ready', backendDetail = null, recoverOnRetry = false;
+    var problemReports = [], crashMarker = null;
     function setBackendState(next, detail) {
       var prev = backendState;
       if (prev === next && JSON.stringify(backendDetail) === JSON.stringify(detail)) return;
@@ -106,6 +140,11 @@
       return fresh();
     }
     function save() { try { if (storage) storage.setItem(STORE_KEY, JSON.stringify(S)); } catch (e) { /* storage unavailable */ } }
+    // The settingsPath the host sends beside a Settings page: on English Windows only (fixture.setWindowsLanguage), else null.
+    function settingsPath(uri) {
+      if (!uri || (S && S.windowsEnglish === false) || !Object.prototype.hasOwnProperty.call(SETTINGS_PATHS, uri)) return null;
+      return SETTINGS_PATHS[uri];
+    }
 
     var ready = Promise.all([
       opts.fixture ? Promise.resolve(opts.fixture) : fetchJson(opts.fixtureUrl || 'fixtures/m1-simulated-audit.json'),
@@ -117,7 +156,9 @@
       Object.keys(S.inventories).forEach(function (id) { var inv = S.inventories[id]; if (inv.status === 'running') inv.status = 'cancelled'; });
       Object.keys(S.scans).forEach(function (id) { var sc = S.scans[id]; if (sc.status === 'running' || sc.status === 'queued') jobs.push(endScan(sc, 'interrupted', false)); });
       if (agent) agent.__restart();
+      if (actions && actions.__restart) actions.__restart();
       if (bench) bench.__restart();
+      if (research) research.__restart();
       return Promise.all(jobs).then(save);
     });
 
@@ -177,7 +218,7 @@
     }
     function reportView(rep) {
       var r = clone(rep);
-      r.findings.forEach(function (f) { f.disposition = clone(dispositionFor(f)); });
+      r.findings.forEach(function (f) { f.disposition = clone(dispositionFor(f)); if (research) research.overlay(r.reportId, f); });
       return r;
     }
     function cardView(fu, cid) {
@@ -185,13 +226,15 @@
       var card = c ? Object.assign({}, c, { reply: fu.replies[cid] || null }) : null;
       if (!card) return null;
       // As the host's View: an AI card names the task that added it (sourceTaskId, null on report cards); other
-      // internal fields never leave; every card says where it came from and carries its note.
+      // internal fields (Followups.Internal, with the web-taint marks) never leave; every card says where it came from and carries its note.
       card.sourceTaskId = c.origin === 'ai' ? c.aiTaskId || null : null;
-      ['key', 'aiTaskId', 'noteTaskId', 'taskId'].forEach(function (k) { delete card[k]; });
+      ['key', 'ruleId', 'fingerprint', 'severity', 'subject', 'ruleOrder', 'noteTaskId', 'aiTaskId', 'noteTainted', 'aiTainted', 'taskId', 'checkupKey'].forEach(function (k) { delete card[k]; });
       if (card.settingsUri === undefined) card.settingsUri = null;
       card.origin = card.origin || 'report';
       card.note = typeof card.note === 'string' && card.note ? card.note : null;
       card.noteBy = card.note ? card.noteBy || null : null;
+      // m9 §17.3: the card's Fix for me state, derived on read (null: none, the card is in its normal state).
+      card.fix = actions && actions.fix ? actions.fix.derive(cid) : null;
       return card;
     }
     // v1.4: the visible card plus up to two upcoming ones.
@@ -262,7 +305,9 @@
         progress: { done: 0, total: cats.length, categories: cats.map(function (c, i) { return { id: c.id, label: c.label, status: i === 0 ? 'running' : 'queued' }; }), current: null },
         coverage: [], reportId: null, planned: planned.map(function (c) { return c.id; }), evidence: [], gaps: [], keys: {},
         waveWords: F.scanWaveWords.filter(function (w, i) { return catIds.indexOf(WORD_CATS[i]) >= 0; }) };
-      S.scans[scanId] = sc; S.onboarding.resume.scanId = scanId; save();
+      S.scans[scanId] = sc; S.onboarding.resume.scanId = scanId;
+      if (research) research.onScanStarted();   // M9 §6.3: a new scan cancels any running research
+      save();
       runScan(sc, cats, planned);
       return scanView(sc);
     }
@@ -371,6 +416,8 @@
       return buildReport(sc).then(function (rep) {
         sc.reportId = rep.reportId; S.onboarding.resume.scanId = sc.scanId; S.onboarding.resume.reportId = rep.reportId;
         if (notify !== false) emit('scan:' + sc.scanId, 'scan.finished', { status: status, reportId: rep.reportId });
+        // M9 §6.1: a finished scan with do.web on starts the report's research run by itself.
+        if (notify !== false && !endStatus && research) research.onScanFinished(rep);
         return rep;
       });
     }
@@ -397,6 +444,7 @@
               severity: f.rule.severity, confidence: f.rule.confidence, evidenceIds: f.rule.evidence.map(function (k) { return 'ev-' + sc.keys[k]; }),
               actionEligibility: f.rule.actionEligibility, subject: f.subject, counterevidence: [], settingsUri: f.rule.settingsUri, disposition: null };
           });
+          findings.forEach(function (f) { var sp = settingsPath(f.settingsUri); if (sp) f.settingsPath = sp; });
           var partial = sc.status === 'cancelled' || sc.status === 'interrupted';
           var base = sc.baseReportId ? S.reports[sc.baseReportId] : null, comparison = null;
           if (base) {
@@ -407,7 +455,7 @@
           var rep = { reportId: reportId, scanId: sc.scanId, revision: 1,
             status: partial ? 'partial' : sc.gaps.length ? 'complete_with_gaps' : 'complete',
             generatedAt: new Date().toISOString(), intent: sc.intent, counts: { findings: findings.length, gaps: sc.gaps.length },
-            evidence: sc.evidence.map(function (e) { var o = Object.assign({}, e); delete o.subject; delete o.key; return o; }),
+            evidence: sc.evidence.map(function (e) { var o = Object.assign({}, e); delete o.key; return o; }),   // subject stays, as on the host
             findings: findings, coverage: clone(sc.coverage), gaps: clone(sc.gaps),
             categories: categoryRows(sc, findings), baseReportId: base ? base.reportId : null, comparison: comparison };
           S.reports[reportId] = rep; S.reportOrder.unshift(reportId);
@@ -419,7 +467,11 @@
               cards[cid] = { id: cid, findingId: f.id, category: f.rule.category, title: f.rule.title, text: c.text,
                 evidenceIds: f.rule.evidence.map(function (k) { return 'ev-' + sc.keys[k]; }), options: c.options.concat(INTENDED_RULES.indexOf(f.rule.ruleId) >= 0 ? ['Intended'] : []),
                 guide: c.guide || null, preview: c.preview || null, actionId: c.actionId || null, receipt: c.receipt || null, done: c.done || null,
+                // As the host's CardFromDraft: the parameters the rule chose for its action (action.preview uses them).
+                actionParameters: c.actionParameters ? clone(c.actionParameters) : null,
                 settingsUri: f.rule.settingsUri, key: c.key };
+              var sp = settingsPath(f.rule.settingsUri);
+              if (sp) cards[cid].settingsPath = sp;
             });
             // A targeted scan puts its own categories first; typed text is matched by its words (prototype rules).
             var present = F.rules.map(function (r) { return r.card.key; }).filter(function (k) { return byKey[k]; });
@@ -545,15 +597,23 @@
 
     /* ---------- onboarding ---------- */
     var STEPS = ['provider', 'use', 'goal', 'specs', 'complete'];
+    // The recipient kinds each provider value may name as its exact choice (host OnboardingService.ProviderKinds).
+    var KINDS_OF = { local: [], later: [], 'claude-code': ['claude_code_mcp'], api: ['anthropic_api', 'openai_api'], chatgpt: ['chatgpt_plan'] };
     function saveOnboarding(p) {
       var o = S.onboarding, patch = p.patch || {};
       if (p.expectedRevision !== o.revision) throw rpcError(-32002, 'stale_revision', { current: onboardingView() });
       if (patch.step != null && STEPS.indexOf(patch.step) < 0) throw rpcError(-32602, 'invalid params', { field: 'step' });
       ['customUse', 'customGoal'].forEach(function (f) { if (patch[f] != null && String(patch[f]).length > 200) throw rpcError(-32602, 'invalid params', { field: f }); });
       if (patch.inventoryConsent != null && ['unset', 'granted', 'skipped'].indexOf(patch.inventoryConsent) < 0) throw rpcError(-32602, 'invalid params', { field: 'inventoryConsent' });
-      if (patch.provider && ['local', 'later', 'claude-code', 'codex', 'api', 'chatgpt'].indexOf(patch.provider.value) < 0) throw rpcError(-32602, 'invalid params', { field: 'provider' });
+      if (patch.provider && !Object.prototype.hasOwnProperty.call(KINDS_OF, patch.provider.value)) throw rpcError(-32602, 'invalid params', { field: 'provider' });
+      // As the host: provider.kind (optional) is the exact AI chosen and must match the value.
+      if (patch.provider && patch.provider.kind != null && KINDS_OF[patch.provider.value].indexOf(patch.provider.kind) < 0)
+        throw rpcError(-32602, 'invalid params', { field: 'patch.provider.kind' });
+      var before = o.profile.provider ? clone(o.profile.provider) : null;
       if (patch.step) o.step = patch.step;
       ['provider', 'uses', 'customUse', 'goals', 'customGoal', 'inventoryConsent'].forEach(function (f) { if (patch[f] !== undefined) o.profile[f] = clone(patch[f]); });
+      if (o.profile.provider && o.profile.provider.kind == null) delete o.profile.provider.kind;
+      if (patch.provider !== undefined && agent && agent.__choiceSaved) agent.__choiceSaved(before, o.profile.provider);
       o.revision += 1;
       return onboardingView();
     }
@@ -606,6 +666,7 @@
         var ids = f.evidenceIds.concat(f.counterevidence || []);
         var inputs = F.collectors.filter(function (c) { return (c.evidence || []).some(function (e) { return rule.evidence.indexOf(e.key) >= 0; }); }).map(function (c) { return c.id; });
         var fv = clone(f); fv.disposition = clone(dispositionFor(f));
+        if (research) research.overlay(rep.reportId, fv);
         return { finding: fv, evidence: rep.evidence.filter(function (e) { return ids.indexOf(e.id) >= 0; }),
           coverage: rep.coverage.filter(function (c) { return inputs.indexOf(c.collectorId) >= 0; }),
           rule: { id: rule.ruleId, version: rule.version, inputs: inputs } };
@@ -614,10 +675,54 @@
       'finding.clearDisposition': function (p) { return withIdem('finding.clearDisposition', p, clearDisposition); },
       'followup.get': function (p) { return followupView(getFollowup(p.reportId)); },
       'followup.respond': function (p) { return withIdem('followup.respond', p, respond); },
+      // Mirrors the host's Followups.Front: reportId (a string ≤ 64) then cardIds (1 to 8 strings of 1 to 64) are checked, in
+      // that order; the named cards, in this order, go to the front of the report's undecided queue; unknown, repeated and
+      // decided ids are ignored. Returns the followup.get view, no event. The revision moves only when the order changed.
+      'followup.front': function (p) {
+        p = p || {};
+        if (p.reportId == null) throw rpcError(-32602, 'invalid params', { field: 'reportId' });
+        if (typeof p.reportId !== 'string' || p.reportId.length > 64) throw rpcError(-32602, 'invalid params', { field: 'reportId' });
+        var ids = p.cardIds;
+        if (!Array.isArray(ids) || ids.length < 1 || ids.length > 8 || ids.some(function (x) { return typeof x !== 'string' || !x || x.length > 64; })) throw rpcError(-32602, 'invalid params', { field: 'cardIds' });
+        var fu = getFollowup(p.reportId);
+        var lead = ids.filter(function (x, i) { return ids.indexOf(x) === i && fu.queue.indexOf(x) >= 0; });
+        var next = lead.concat(fu.queue.filter(function (x) { return lead.indexOf(x) < 0; }));
+        if (next.join(' ') !== fu.queue.join(' ')) { fu.queue = next; fu.revision += 1; save(); }
+        return followupView(fu);
+      },
       // Shell-handled on the desktop; here it only checks the catalog (a browser cannot open Windows Settings).
       'shell.openSettings': function (p) {
         if (SETTINGS_CATALOG.indexOf(p.uri) < 0) throw rpcError(-32602, 'invalid params', { field: 'uri' });
         return { opened: false };
+      },
+      // Report a problem (protocol-v1 §9, shell-handled on the desktop). A canned report; the browser opens nothing.
+      'shell.problemReport': function (p) {
+        p = p || {};
+        var keys = Object.keys(p);
+        if (keys.some(function (k) { return k !== 'operation'; })) throw rpcError(-32602, 'invalid params', { field: 'params' });
+        if (p.operation != null && typeof p.operation !== 'string') throw rpcError(-32602, 'invalid params', { field: 'operation' });
+        var op = REPORT_OPERATIONS.indexOf(p.operation) >= 0 ? p.operation : 'other';
+        var id = 'rpt-' + randomHex(16);
+        var text = 'Optimus 0.9.0 · Windows 10.0.26200 · x64\nOperation: ' + op + '\nError: E-SCN-003 · InvalidOperationException · src/Engine/Scans.cs:142\n\n' +
+          'Last error\n  InvalidOperationException\n    at OptimizationTool.Engine.Scans.RunAsync in src/Engine/Scans.cs:142\n\n' +
+          'Recent warnings and errors\n  10:02:11 host WARN rpc: scan.start failed -32603 [E-HST-002] @src/Host/HostServer.cs:184';
+        problemReports.push(id);
+        if (problemReports.length > 5) problemReports.shift();
+        return { reportId: id, text: text, title: 'Problem: ' + op + ' E-SCN-003', trimmed: false };
+      },
+      'shell.openIssue': function (p) {
+        p = p || {};
+        if (Object.keys(p).length !== 1 || typeof p.reportId !== 'string' || !p.reportId || p.reportId.length > 64) throw rpcError(-32602, 'invalid params', { field: 'reportId' });
+        return { status: problemReports.indexOf(p.reportId) >= 0 ? 'opened' : 'unknown' };
+      },
+      'shell.crashStatus': function (p) {
+        if (p && Object.keys(p).length) throw rpcError(-32602, 'invalid params', { field: 'params' });
+        return crashMarker ? { crashed: true, version: '0.9.0', process: crashMarker.process, at: crashMarker.at } : { crashed: false, version: '0.9.0' };
+      },
+      'shell.crashDismiss': function (p) {
+        if (p && Object.keys(p).length) throw rpcError(-32602, 'invalid params', { field: 'params' });
+        crashMarker = null;
+        return { status: 'cleared' };
       },
       // Shell-handled on the desktop (protocol-v1 §7): "Try again" on the startup screen. As the shell: back to plain
       // connecting at once, then the simulated host ends the same way again (or opens, when set with recoverOnRetry).
@@ -637,6 +742,10 @@
         setBackendState(p.state, p.detail == null ? null : p.detail);
         return { state: backendState, detail: backendDetail };
       },
+      'fixture.setWindowsLanguage': function (p) {
+        S.windowsEnglish = !(p && p.english === false);
+        return { english: S.windowsEnglish };
+      },
       'fixture.summary': function (p) {
         var sc = S.scans[getReport(p.reportId).scanId];
         return { lines: F.mockAiSummary.filter(function (l) { return l.evidence.every(function (k) { return sc.keys[k]; }); })
@@ -646,8 +755,8 @@
 
     // M4: plans, approval, operations and undo (adapter-fixture-actions.js).
     var makeActions = (root.OptTool && root.OptTool.createFixtureActions) || (typeof require === 'function' ? require('./adapter-fixture-actions.js').createFixtureActions : null);
-    var actions = makeActions ? makeActions({ state: function () { return S; }, emit: emit, later: later, H: H, withIdem: withIdem, getReport: getReport,
-      rpcError: rpcError, clone: clone, randomHex: randomHex, save: save,
+    var actions = makeActions ? makeActions({ state: function () { return S; }, emit: emit, later: later, stop: stop, H: H, sha256: sha256, withIdem: withIdem, getReport: getReport,
+      rpcError: rpcError, clone: clone, randomHex: randomHex, save: save, settingsPath: settingsPath,
       ruleOf: function (findingId) {
         for (var id in S.reports) { var f = S.reports[id].findings.filter(function (x) { return x.id === findingId; })[0]; if (f) return F.rules.filter(function (r) { return r.ruleId === f.ruleId; })[0] || null; }
         return null;
@@ -659,13 +768,23 @@
     bench = makeBench ? makeBench({ state: function () { return S; }, emit: emit, later: later, stop: stop, withIdem: withIdem, rpcError: rpcError, clone: clone, randomHex: randomHex, H: H, save: save }) : null;
     if (bench) Object.keys(bench.methods).forEach(function (k) { METHODS[k] = bench.methods[k]; });
 
-    // M3: the agent gateway simulation (adapter-fixture-agent.js).
+    // M3: the agent gateway simulation (adapter-fixture-agent.js). It also brings M9's ai.getPermissions /
+    // ai.setPermissions (event ai.permissions on stream user) and the fixture.setAvailable dev hook.
     var makeAgent = (root.OptTool && root.OptTool.createFixtureAgent) || (typeof require === 'function' ? require('./adapter-fixture-agent.js').createFixtureAgent : null);
     var agent = makeAgent ? makeAgent({ state: function () { return S; }, fixture: function () { return F; }, emit: emit, later: later, stop: stop, H: H,
       withIdem: withIdem, getReport: getReport, rpcError: rpcError, clone: clone, randomHex: randomHex, save: save,
       manual: function () { return !!(S && S.agent && S.agent.manual); }, actions: actions,
+      research: function () { return research; },
       benchRun: function (runId) { var b = S && S.bench; return b && b.runs[runId] ? clone(b.runs[runId]) : null; } }) : null;
-    if (agent) Object.keys(agent).forEach(function (k) { if (k !== '__restart') METHODS[k] = agent[k]; });
+    if (agent) Object.keys(agent).forEach(function (k) { if (k.indexOf('__') !== 0) METHODS[k] = agent[k]; });
+
+    // M9 §6–§7: researched reports (adapter-fixture-research.js), reading the permissions record and provider from the agent.
+    var makeResearch = (root.OptTool && root.OptTool.createFixtureResearch) || (typeof require === 'function' ? require('./adapter-fixture-research.js').createFixtureResearch : null);
+    research = makeResearch && agent ? makeResearch({ state: function () { return S; }, emit: emit, later: later, stop: stop, H: H, withIdem: withIdem, getReport: getReport,
+      rpcError: rpcError, clone: clone, randomHex: randomHex, save: save, perms: agent.__perms, available: agent.__available, provider: agent.__provider, setWeb: agent.__setWeb, webFor: agent.__webFor, hasCredential: agent.__hasCredential,
+      // The browser demo opens a source in a new tab (the desktop shell opens the browser itself).
+      open: opts.openUrl || (root.document && typeof root.open === 'function' ? function (u) { root.open(u, '_blank', 'noopener,noreferrer'); } : null) }) : null;
+    if (research) Object.keys(research.methods).forEach(function (k) { METHODS[k] = research.methods[k]; });
 
     function call(method, params) {
       return ready.then(function () {
@@ -689,6 +808,7 @@
   }
 
   createFixtureAdapter.SETTINGS_CATALOG = SETTINGS_CATALOG;
+  createFixtureAdapter.SETTINGS_PATHS = SETTINGS_PATHS;
   if (root) { root.OptTool = root.OptTool || {}; root.OptTool.createFixtureAdapter = createFixtureAdapter; }
   if (typeof module !== 'undefined' && module.exports) module.exports = { createFixtureAdapter: createFixtureAdapter };
 })(typeof window !== 'undefined' ? window : globalThis);

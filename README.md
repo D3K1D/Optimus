@@ -1,6 +1,21 @@
 # Optimus
 
-A Windows PC audit and optimization app. It checks security, performance, storage, privacy and startup on your PC, explains what it finds in plain words, and can make approved, reversible changes. Connect an AI (Claude Code, Codex, ChatGPT or an API key) to ask questions about your PC right inside the app, or use it without one.
+A Windows PC audit and optimization app. It checks security, performance, storage, privacy and startup on your PC, explains what it finds in plain words, and can make approved, reversible changes. Connect an AI (Claude, ChatGPT or an API key) to ask questions about your PC right inside the app, or use it without one.
+
+> **This is the `dev` branch: work in progress toward 0.9.** The latest release is on [`main`](../../tree/main) and under [Releases](../../releases/latest). The screenshots below are from 0.8.
+
+## New on this branch
+
+- **AI permissions.** After you pick an AI, one page sets what it may see and do: your PC specs, past reports, real app names, read-only checks, single changes, multi-step fixes, approved scripts, online lookups and administrator rights. Every tool the AI calls is checked against it, the same way for every provider.
+- **Fix for me.** Any suggestion card can ask the connected AI for a fix. The AI investigates, then the card shows its plan in plain words, step by step, each with its trade-off and how to undo it. You can switch steps off, or ask for a change, before you approve. The plan runs as one change with a journal, a check that each step worked, and **Undo all**.
+- **Many more safe actions.** Windows settings, power plans, startup apps and services, scheduled tasks, firewall blocks, a restore point, and Windows' file repair tools. Each is a reviewed action with read-back and undo, not an AI-written command. Actions that need administrator rights go through a separate helper with its own confirmation window and a signed journal.
+- **Approved scripts.** When no action fits, the AI can propose a PowerShell script. You read the exact script before it runs, a guard rejects risky patterns, and a transcript is kept.
+- **AI-researched reports.** The AI looks up what it found online, for example whether a listening port belongs to a known app. Findings it confirms as normal are labelled "AI researched: considered safe". A weekly check-up looks for known problems with your apps, drivers and hardware, using names, makers and versions only.
+- **App guide for the AI.** The AI reads a guide generated from the app's own features and permissions, so it knows what Optimus can and can't do.
+- **Report a problem.** One click builds a scrubbed report (no names, paths, accounts or findings), shows you exactly what will be sent, and opens a prefilled GitHub issue. An optional developer log ties every error to a code location.
+- **Privacy filters.** Your user name, PC name, serial numbers and network addresses are removed before anything is stored or sent to an AI, even when they're hidden inside other words.
+
+Administrator actions and elevated scripts are built but switched off by default until they've been tested on real PCs.
 
 ![Running a scan](docs/media/scan.gif)
 
@@ -14,7 +29,7 @@ Download the `.msi` from [Releases](../../releases/latest) and open it. Windows 
 
 ## How it works
 
-**1. Pick your AI, or none.** Optimus finds Claude Code or Codex wherever they're installed and checks you're signed in. It can also sign in to ChatGPT in your browser or use an API key. It uses your existing plan, and "Local only" works fine too.
+**1. Pick your AI, or none.** Optimus finds Claude Code wherever it's installed and checks you're signed in. It can also sign in to ChatGPT in your browser or use an API key. It uses your existing plan, and "Local only" works fine too.
 
 ![Choose your AI](docs/media/choose-ai.png)
 
@@ -36,7 +51,7 @@ Download the `.msi` from [Releases](../../releases/latest) and open it. Windows 
 
 ## Why not just ask Claude or ChatGPT to fix my PC?
 
-Claude Code and Codex can already search your PC and change settings if you give them permission. The difference is how they do it.
+AI coding tools can already search your PC and change settings if you give them permission. The difference is how they do it.
 
 - **Safe actions, not made-up commands.** In a chat, the AI writes its own commands, and you approve ones you may not fully understand. In Optimus, the AI can only run read-only checks and suggest changes from a fixed list of safe actions.
 - **Every change is checked and recorded.** You see exactly what will change before you approve it. Optimus then confirms the change worked and keeps a record, with Undo where Windows allows it.

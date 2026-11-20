@@ -37,7 +37,7 @@ internal sealed class WscCollector(CollectorOptions options) : SecurityCollector
         return new WscRaw(avHr, avHealth, fwHr, fwHealth, av, avErr, fw, fwErr);
     }
 
-    private static (IReadOnlyList<WscProductRaw>?, string?) Products(int provider)
+    internal static (IReadOnlyList<WscProductRaw>?, string?) Products(int provider)
     {
         IWSCProductList? list = null;
         try

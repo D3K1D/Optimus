@@ -52,7 +52,7 @@ public sealed record CliEnvironment
 }
 
 /// <summary>
-/// Finds the Claude Code / Codex CLI (contracts/onboarding.md §2): first on PATH (fresh registry PATH, then the process
+/// Finds the Claude Code CLI (contracts/onboarding.md §2): first on PATH (fresh registry PATH, then the process
 /// PATH; absolute directories only, .exe before .cmd), then at the known install locations per client. Outside PATH a
 /// .exe must be validly signed with the client's publisher as leaf O=, and a .cmd is accepted only in %APPDATA%\npm\.
 /// For Claude, the desktop app's own claude.exe (WindowsApps, AnthropicClaude) is never a candidate. The caller then
@@ -61,9 +61,7 @@ public sealed record CliEnvironment
 public sealed class CliLocator
 {
     public const string ClaudeAppFamily = "Claude_pzs8sxrjxfjjc";
-    public const string CodexAppFamily = "OpenAI.Codex_2p2nqsd0c76g0";
     public const string ClaudePublisher = "Anthropic, PBC";
-    public const string CodexPublisher = "OpenAI OpCo, LLC";
     private const int MaxAppVersions = 4;
 
     private readonly CliEnvironment _env;
@@ -79,26 +77,24 @@ public sealed class CliLocator
     /// <summary>First PATH hit for <paramref name="baseName"/> (.exe before .cmd per directory), or null.</summary>
     public string? Find(string baseName) => PathHits(baseName).FirstOrDefault();
 
-    /// <summary>Candidates for a client id (claude_code | codex) in resolution order, deduplicated by full path.</summary>
+    /// <summary>Candidates for a client id (claude_code; any other id has none) in resolution order, deduplicated by full path.</summary>
     public IEnumerable<CliCandidate> Candidates(string clientId)
     {
-        var claude = clientId == "claude_code";
-        var exe = claude ? "claude" : "codex";
+        if (clientId != "claude_code") yield break;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var hit in PathHits(exe))
-            if (!(claude && IsClaudeDesktopApp(hit)) && seen.Add(hit))
+        foreach (var hit in PathHits("claude"))
+            if (!IsClaudeDesktopApp(hit) && seen.Add(hit))
                 yield return new CliCandidate(hit, "path");
 
-        var publisher = claude ? ClaudePublisher : CodexPublisher;
-        foreach (var (raw, source) in claude ? ClaudeLocations() : CodexLocations())
+        foreach (var (raw, source) in ClaudeLocations())
         {
             string path;
             try { path = Path.GetFullPath(raw); }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException) { continue; }
             if (!seen.Add(path) || !_env.FileExists(path)) continue;
-            if (claude && IsClaudeDesktopApp(path)) continue;
-            if (!AcceptableOutsidePath(path, publisher)) continue;
+            if (IsClaudeDesktopApp(path)) continue;
+            if (!AcceptableOutsidePath(path, ClaudePublisher)) continue;
             yield return new CliCandidate(path, source);
         }
     }
@@ -156,16 +152,6 @@ public sealed class CliLocator
                 foreach (var hash in _env.Subdirectories(dir).Order(StringComparer.OrdinalIgnoreCase))
                     yield return (Path.Combine(hash, "claude.exe"), "app");
         }
-    }
-
-    private IEnumerable<(string, string)> CodexLocations()
-    {
-        if (_env.AppData is { } roaming) yield return (Path.Combine(roaming, "npm", "codex.cmd"), "npm");
-        if (_env.LocalAppData is { } local) yield return (Path.Combine(local, "Programs", "OpenAI", "Codex", "bin", "codex.exe"), "installer");
-        foreach (var w in WinGet("codex.exe", null)) yield return (w, "winget");
-        if (_env.PackageLocation(CodexAppFamily) is { } app && Path.IsPathFullyQualified(app))
-            yield return (Path.Combine(app, "app", "resources", "codex.exe"), "app");
-        if (_env.UserProfile is { } home) yield return (Path.Combine(home, ".codex", ".sandbox-bin", "codex.exe"), "app");
     }
 
     private IEnumerable<string> WinGet(string exe, string? packagePrefix)

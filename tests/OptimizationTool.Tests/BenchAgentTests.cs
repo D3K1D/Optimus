@@ -66,7 +66,7 @@ public class BenchAgentTests
 
         // The prompt names the part; the system prompt is v8 and lists the new tools.
         var first = provider.Requests.First();
-        Assert.StartsWith("[prompt-v8]", first.System);
+        Assert.StartsWith("[prompt-v11]", first.System);
         Assert.Contains("get_benchmarks", first.System);
         Assert.Contains("Do: benchmark", first.System);
         var asked = first.Messages.OfType<UserText>().Last().Text;
@@ -195,7 +195,7 @@ public class BenchAgentTests
     [Fact]
     public void SystemPrompt_IsV8_WithTheVoltageRule()
     {
-        Assert.Equal("prompt-v8", AgentService.SystemPromptVersion);
+        Assert.Equal("prompt-v11", AgentService.SystemPromptVersion);
         Assert.Contains("never recommend them as a fix", AgentService.SystemPrompt);
         Assert.Contains("Optimus never applies them", AgentService.SystemPrompt);
         Assert.Contains("get_fan_guidance", AgentService.SystemPrompt);

@@ -34,6 +34,26 @@ internal sealed class FakePowerApi : IPowerApi
     public SourceInfo? GetSource() => Source;
     public bool PolicyForcesActiveScheme() => Policy;
     public bool ManagedActiveScheme() => Managed;
+
+    // power.set_value: (scheme, setting, ac) → value index. A missing entry reads as ERROR_FILE_NOT_FOUND.
+    public Dictionary<(Guid Scheme, Guid Setting, bool Ac), uint> Values { get; } = [];
+    public HashSet<Guid> ManagedSettings { get; } = [];
+    public int ValueWrites { get; private set; }
+    /// <summary>What a value write does: default stores it and returns 0.</summary>
+    public Func<(Guid Scheme, Guid Setting, bool Ac, uint Value), uint>? OnWrite { get; set; }
+
+    public uint ReadValue(Guid scheme, Guid subgroup, Guid setting, bool ac, out uint value) =>
+        Values.TryGetValue((scheme, setting, ac), out value) ? 0u : 2u;
+
+    public uint WriteValue(Guid scheme, Guid subgroup, Guid setting, bool ac, uint value)
+    {
+        ValueWrites++;
+        if (OnWrite?.Invoke((scheme, setting, ac, value)) is { } rc) return rc;
+        Values[(scheme, setting, ac)] = value;
+        return 0;
+    }
+
+    public bool SettingManaged(Guid setting) => Policy || ManagedSettings.Contains(setting);
 }
 
 public class SelectSchemeHandlerTests
@@ -192,8 +212,9 @@ public class SelectSchemeHandlerTests
     public void Module_registers_the_handler()
     {
         Assert.Contains(WindowsModules.Actions, m => m is PowerActionModule);
-        var h = Assert.Single(new PowerActionModule().Handlers(new ActionContext(null!, false)));
-        Assert.Equal("power.select_scheme", h.ActionId);
+        var handlers = new PowerActionModule().Handlers(new ActionContext(null!, false)).ToList();
+        Assert.Equal(["power.select_scheme", "power.set_value"], handlers.Select(x => x.ActionId));
+        var h = handlers[0];
         Assert.Equal("none", h.Privilege);
         Assert.True(h.SupportsUndo);
         Assert.Equal("setting", h.Kind);

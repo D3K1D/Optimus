@@ -6,12 +6,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using OptimizationTool.Engine.Agent;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Providers;
 
 /// <summary>
 /// Shared HTTP plumbing for the adapters: one request with a timeout, a fully read body, and the mapping of
-/// transport and HTTP failures to <see cref="ProviderException"/> codes. Nothing here logs. Exception text is
+/// transport and HTTP failures to <see cref="ProviderException"/> codes. Logs one line per call (path, status, time). Exception text is
 /// built from fixed phrases plus a scrubbed, bounded provider message; never from headers or the key.
 /// </summary>
 internal static partial class ProviderHttp
@@ -33,10 +34,14 @@ internal static partial class ProviderHttp
     /// Sends the request and reads the whole body. Caller cancellation propagates as <see cref="OperationCanceledException"/>;
     /// the adapter's own timeout becomes code "timeout"; transport failures become "network"; a body cut off mid-read "incomplete".
     /// </summary>
-    public static async Task<RawResponse> SendAsync(HttpClient http, HttpRequestMessage request, TimeSpan timeout, string provider, CancellationToken ct)
+    public static async Task<RawResponse> SendAsync(HttpClient http, HttpRequestMessage request, TimeSpan timeout, string provider, CancellationToken ct,
+        string? model = null)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
+        // Logged: provider, method, URL path (never the query), status and time. Never headers or bodies.
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
+        var call = $"provider: {provider} {request.Method} {request.RequestUri?.AbsolutePath ?? "?"}{(model is null ? "" : " model=" + model)}";
         HttpResponseMessage response;
         try
         {
@@ -44,10 +49,17 @@ internal static partial class ProviderHttp
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
+            AppLog.Current.Warn($"{call} failed reason=timeout ms={Ms(started)}", ErrorSites.ProviderTimeout);
             throw new ProviderException("timeout", $"{provider} did not respond within {timeout.TotalSeconds:0} s.", retryable: false);
         }
-        catch (HttpRequestException)
+        catch (OperationCanceledException)
         {
+            AppLog.Current.Debug($"{call} cancelled ms={Ms(started)}");
+            throw;
+        }
+        catch (HttpRequestException e)
+        {
+            AppLog.Current.Warn($"{call} failed reason=network {e.HttpRequestError} ms={Ms(started)}", ErrorSites.ProviderNetwork);
             throw new ProviderException("network", $"Could not reach {provider}. Check the internet connection.", retryable: false);
         }
 
@@ -60,15 +72,24 @@ internal static partial class ProviderHttp
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
+                AppLog.Current.Warn($"{call} failed reason=timeout_mid_answer status={(int)response.StatusCode} ms={Ms(started)}", ErrorSites.ProviderTimeout);
                 throw new ProviderException("timeout", $"{provider} stopped responding mid-answer.", retryable: false);
             }
             catch (Exception e) when (e is HttpRequestException or IOException)
             {
+                AppLog.Current.Warn($"{call} failed reason=incomplete status={(int)response.StatusCode} ms={Ms(started)}", ErrorSites.ProviderIncomplete);
                 throw new ProviderException("incomplete", $"The answer from {provider} was cut off.", retryable: false);
             }
+            var status = (int)response.StatusCode;
+            if (status >= 400)
+                AppLog.Current.Warn($"{call} status={status} bytes={body.Length} ms={Ms(started)}", ErrorSites.ProviderHttpStatus);
+            else if (AppLog.Current.DevEnabled)
+                AppLog.Current.Debug($"{call} status={status} bytes={body.Length} ms={Ms(started)}");
             return new RawResponse(response.StatusCode, body, response.Headers);
         }
     }
+
+    internal static long Ms(long started) => (long)System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalMilliseconds;
 
     /// <summary>Parses a success body as a JSON object; anything else is a truncated or partial answer.</summary>
     public static JsonObject ParseObject(string body, string provider)

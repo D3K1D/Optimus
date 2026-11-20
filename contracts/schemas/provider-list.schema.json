@@ -10,8 +10,9 @@
     "diagnostics": {
       "description": "The §3.3 diagnostics available on this machine, for the grant sheet.",
       "type": "array",
-      "items": { "type": "object", "required": ["id", "description", "arguments"],
-        "properties": { "id": { "type": "string" }, "description": { "type": "string" }, "arguments": { "type": "object" } } }
+      "items": { "type": "object", "required": ["id", "description", "arguments", "tier"],
+        "properties": { "id": { "type": "string" }, "description": { "type": "string" }, "arguments": { "type": "object" },
+          "tier": { "enum": ["user", "admin"], "description": "m9 §17.2: admin = an administrator check, listed only with --enable-admin-actions and an elevation path." } } }
     }
   },
   "$defs": {
@@ -22,7 +23,7 @@
       "type": "object",
       "required": ["kind", "label", "mode", "status", "models", "defaultModel", "detail", "since"],
       "properties": {
-        "kind": { "enum": ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"] },
+        "kind": { "enum": ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp"] },
         "label": { "type": "string" },
         "mode": { "enum": ["api_key", "browser_sign_in", "native_mcp", "local"] },
         "status": { "$ref": "#/$defs/status" },
@@ -32,9 +33,10 @@
         "since": { "$ref": "scan.schema.json#/$defs/timestamp" },
         "code": { "type": "string", "pattern": "^[0-9]{4}$", "description": "pending only: the pairing code." },
         "pairingId": { "type": "string", "pattern": "^pair-", "description": "Native clients: the pending pairing (status pending) or the approved one (paired, active, client_closed), for agent.approvePairing / agent.start." },
+        "web": { "enum": ["yes", "no", "unknown"], "description": "m9 §6.4: research availability for this kind and its model (no: research is not available with it)." },
         "capabilities": { "type": "object", "required": ["tools"], "properties": { "tools": { "type": "boolean", "description": "false: explain-only (Report review available)." } } },
-        "registration": { "type": "object", "required": ["claude", "codex"],
-          "properties": { "claude": { "type": "string" }, "codex": { "type": "string" } } }
+        "registration": { "type": "object", "required": ["claude"], "additionalProperties": false,
+          "properties": { "claude": { "type": "string" } } }
       }
     }
   }

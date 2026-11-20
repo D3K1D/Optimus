@@ -6,10 +6,15 @@
   var WaveBackground = OT.WaveBackground, GlassPanel = OT.GlassPanel, Button = OT.Button, Logo = OT.Logo, LoginPanel = OT.LoginPanel,
     ChoicePanel = OT.ChoicePanel, SpecScanPanel = OT.SpecScanPanel, PromptBox = OT.PromptBox, StarterPrompt = OT.StarterPrompt,
     ScanStatus = OT.ScanStatus, InsightCard = OT.InsightCard, ReviewComplete = OT.ReviewComplete, SharePreview = OT.SharePreview,
-    ReportSheet = OT.ReportSheet, ConnectionPill = OT.ConnectionPill, PairingCard = OT.PairingCard, GrantSheet = OT.GrantSheet,
-    PlanCard = OT.PlanCard, ActivityPanel = OT.ActivityPanel, AgentAnswers = OT.AgentAnswers, ContinuePanel = OT.ContinuePanel, ConnectionDetail = OT.ConnectionDetail;
+    ReportSheet = OT.ReportSheet, ConnectionPill = OT.ConnectionPill, PairingCard = OT.PairingCard,
+    ApprovalCard = OT.ApprovalCard, ScriptApproval = OT.ScriptApproval, ActivityPanel = OT.ActivityPanel, AgentAnswers = OT.AgentAnswers, ContinuePanel = OT.ContinuePanel, ConnectionDetail = OT.ConnectionDetail,
+    PermissionsPanel = OT.PermissionsPanel, PermissionGrant = OT.PermissionGrant, PermissionsSummary = OT.PermissionsSummary;
   var connectionState = OT.connectionState, routeAsk = OT.routeAsk, taskEnded = OT.taskEnded, reconcileAnswers = OT.reconcileAnswers, runningTurn = OT.runningTurn,
     answerKey = OT.answerKey, answerPanels = OT.answerPanels;
+  // M9 §1: the permissions record, its page, the chat line and the pairing panel (contracts/m9-ai-powers.md §1.4).
+  var permDefaults = OT.permDefaults, permToggles = OT.permToggles, permRecord = OT.permRecord, permissionLine = OT.permissionLine,
+    grantFromToggles = OT.grantFromToggles, permissionsGate = OT.permissionsGate, nextAfterProvider = OT.nextAfterProvider;
+  var PERM_STAGE = 'permissions';
   var KEEP_ANSWERS = 40;                 // answers kept in memory (History), as reconcileAnswers keeps
   var DELETED_KEY = 'ot.hist.del';       // History rows the user deleted (task:turn keys), per window
   var TASKS_KEY = 'ot.tasks';            // recent tasks, so History comes back after a restart
@@ -51,28 +56,22 @@
   // m2-collectors §5: the only destinations the UI offers (the desktop shell checks again).
   var SETTINGS_CATALOG = ['windowsdefender://threat', 'windowsdefender://network', 'ms-settings:windowsdefender', 'ms-settings:startupapps',
     'ms-settings:powersleep', 'ms-settings:storagesense', 'ms-settings:appsfeatures', 'ms-settings:privacy-feedback',
-    'ms-settings:display-advanced', 'ms-settings:personalization-start', 'ms-settings:windowsupdate-history', 'ms-settings:troubleshoot'];
+    'ms-settings:display-advanced', 'ms-settings:display-advancedgraphics', 'ms-settings:personalization-start', 'ms-settings:windowsupdate-history', 'ms-settings:troubleshoot'];
   var COVERAGE_WORD = { complete: 'Checked', partial: 'Partly checked', denied: 'No access', unsupported: 'Not supported', timed_out: 'Timed out',
     failed: 'Failed', skipped: 'Skipped', cancelled: 'Stopped' };
   function notSupported(err) { return err && err.code === -32601; }
 
   /* ---------- M3: providers, tasks, grants (contracts/m3-agent.md) ---------- */
-  // §3.3 diagnostics, in plain words; used when the backend does not list them itself.
-  var DIAG_LABELS = { 'power.inventory': 'Power plans', 'process.sample': 'CPU sample', 'startup.list': 'Startup apps', 'events.recent': 'Event logs',
-    'storage.volumes': 'Drives', 'network.listeners': 'Open ports', 'display.modes': 'Displays', 'devices.problems': 'Devices', 'security.status': 'Security status',
-    'sensors.snapshot': 'Sensors' };
-  var DIAG_WORDS = { 'process.sample': ['Measuring CPU', 'Measured CPU'], 'power.inventory': ['Reading power plans', 'Read power plans'],
-    'startup.list': ['Reading startup apps', 'Read startup apps'], 'events.recent': ['Reading event logs', 'Read event logs'],
-    'storage.volumes': ['Reading drives', 'Read drives'], 'network.listeners': ['Reading open ports', 'Read open ports'],
-    'display.modes': ['Reading displays', 'Read displays'], 'devices.problems': ['Reading devices', 'Read devices'],
-    'security.status': ['Reading security status', 'Read security status'], 'sensors.snapshot': ['Reading sensors', 'Read sensors'] };
-  var DEFAULT_LIMITS = { diagnosticCalls: 10, totalBytes: 131072, turns: 8 };
-  var NATIVE_KIND = { 'claude-code': 'claude_code_mcp', codex: 'codex_mcp' };
-  var TILE_OF = { claude_code_mcp: 'claude-code', codex_mcp: 'codex', anthropic_api: 'api-key', openai_api: 'api-key', chatgpt_plan: 'chatgpt' };
-  var CLIENT_KIND = { claude_code: 'claude_code_mcp', codex: 'codex_mcp' };
-  var CLIENT_OF_KIND = { claude_code_mcp: 'claude_code', codex_mcp: 'codex' };
+  // Picker tile → provider kind for the CLI-backed AI (the picker's ids and the stored values: connection-state.js).
+  var NATIVE_KIND = { claude: 'claude_code_mcp' };
+  var CLIENT_KIND = { claude_code: 'claude_code_mcp' };
+  var CLIENT_OF_KIND = { claude_code_mcp: 'claude_code' };
   var READY_ROWS = { paired: 1, active: 1, client_closed: 1 };
-  var ORIGIN_LABEL = { in_app: 'In app', claude_code: 'Claude Code', codex: 'Codex' };
+  // Users see "Claude"; the program's own name only where they act on it (install, update, its own window, pairing).
+  var ORIGIN_LABEL = { in_app: 'In app', claude_code: 'Claude' };
+  var WINDOW_NAME = 'Claude Code';
+  function tileOfKind(kind) { return OT.kindTile(kind); }
+  function aiName(kind, label) { return OT.aiName(kind, label); }
   var WAIT_HELP_MS = 60000;
   var ACTION_WORD = { addKey: 'Add key', updateKey: 'Update key', retry: 'Retry', signIn: 'Sign in', install: 'Set up', start: 'Start', approve: 'Approve', activity: 'Activity', showCommand: 'Show command' };
   /* ---------- M5: chat with every AI in the app (contracts/m5-chat.md) ---------- */
@@ -85,74 +84,42 @@
   /* ---------- M4: plans, approval, receipts (contracts/m4-actions.md) ---------- */
   // Card options that start a Defender operation, offered only when action.catalog enables them.
   var DEFENDER_OPTIONS = { 'Update definitions': 'defender.update_signatures', 'Quick scan': 'defender.quick_scan' };
-  var FAIL_WORD = { failed: 'Not changed', indeterminate: 'Unclear', rolled_back_failed: 'Unclear' };
-  var REQUESTER = { claude_code: 'Claude Code', codex: 'Codex', in_app: 'Assistant' };
-  var PROGRESS = { 'defender.quick_scan': 'Scanning · quick', 'defender.full_scan': 'Scanning · full', 'defender.update_signatures': 'Updating definitions' };
-  // The preview block from a plan: before → after rows, context, trade-offs, Undo line, Needs admin.
-  function planPreview(plan) {
-    var d = (plan.context || []).map(function (c) { return [c[0], c[1]]; });
-    if ((plan.tradeoffs || []).length) d.push(['Trade-off', plan.tradeoffs.join(' · ')]);
-    if (plan.privilege === 'admin') d.push(['Admin', 'Needs admin']);
-    d.push(['Undo', plan.undo && plan.undo.supported ? plan.undo.conditions || 'Yes' : 'No']);
-    return { rows: plan.rows || [], details: d };
-  }
+  var FIX = window.OptTool.fixPlan;
+  // Operation states that ended without the change (the approval card shows which step and why).
+  var FAILED_OP = { failed: 1, indeterminate: 1, rolled_back_failed: 1 };
   function opPhase(op) {
     if (!op) return null;
-    if (op.state === 'verified') return 'verified';
-    if (FAIL_WORD[op.state]) return 'failed';
+    if (op.state === 'verified' || op.state === 'completed') return 'verified';
+    if (FAILED_OP[op.state] || FIX.isTerminal(op.state)) return 'failed';
     return 'running';
   }
   /* ---------- One-click connect (contracts/onboarding.md §2–3) ---------- */
-  var CLIENT_OF_TILE = { 'claude-code': 'claude_code', codex: 'codex' };
-  // Not installed: the official app download (Claude's app includes Claude Code), or the official PowerShell installer.
-  var CLIENT_PAGE = { claude_code: 'https://claude.com/download', codex: 'https://chatgpt.com/codex' };
-  var INSTALL_CMD = { claude_code: 'irm https://claude.ai/install.ps1 | iex', codex: 'irm https://chatgpt.com/codex/install.ps1 | iex' };
+  var CLIENT_OF_TILE = { claude: 'claude_code' };
+  // Not installed: the official PowerShell installer (shell.installClient); its command can be copied if it can't start.
+  var INSTALL_CMD = { claude_code: 'irm https://claude.ai/install.ps1 | iex' };
   var INSTALL_POLL_MS = 4000, INSTALL_POLL_FOR_MS = 5 * 60 * 1000;
   // shell.requestApiKey errors (m3 §9 codes, or the shell's own): a short word for the flash.
   var KEY_FAIL = { auth: 'Key not accepted', quota: 'No credit left', network: 'Offline', offline: 'Offline', backend_unavailable: 'Offline',
     unavailable: 'Busy · try again', not_eligible: 'Not available', storage: 'Key not saved', busy: 'Already open' };
   // What a CLI's sign-in pays with (shell.clientStatus auth).
-  var BILLING = { claude_code: { subscription: 'Uses your Claude plan', api_key: 'Billed to your Anthropic API key' },
-    codex: { subscription: 'Uses your ChatGPT plan', api_key: 'Billed to your OpenAI API key' } };
-  // A CLI that is there but cannot run (shell.clientStatus blocked + reason).
-  // blockedReason: policy | access_denied | node_missing | unsupported_path | launch_failed.
-  var BLOCKED = {
-    policy: { word: 'Blocked on this PC', note: 'A rule on this PC stops it. Ask whoever manages this PC.' },
-    access_denied: { word: 'Blocked on this PC', note: 'Windows won’t let the app run it. Ask whoever manages this PC.' },
-    node_missing: { word: 'Needs a reinstall', note: 'This copy needs Node.js. The installer below doesn’t.', reinstall: true },
-    unsupported_path: { word: 'Needs a reinstall', note: 'This copy is in a folder the app can’t use. Install it again below.', reinstall: true },
-    launch_failed: { word: 'Couldn’t start', note: 'It didn’t start. Close other windows using it, then check again.' } };
-  // shell.openUrl opens the allowlisted client pages in the system browser.
-  var DESKTOP_OPEN_URL = true;
+  var BILLING = { claude_code: { subscription: 'Uses your Claude plan', api_key: 'Billed to your Anthropic API key' } };
   // card.reply is {question, text, evidenceIds} (followup.schema.json); older fixture state saved a bare string.
   function replyText(r) { return r == null ? null : typeof r === 'string' ? r : typeof r.text === 'string' ? r.text : null; }
   var CONTINUE_PROMPT = 'Use optimization-tool to review my latest report and explain what matters most.';
   function isApiKind(k) { return k === 'anthropic_api' || k === 'openai_api' || k === 'chatgpt_plan'; }
-  function isMcpKind(k) { return k === 'claude_code_mcp' || k === 'codex_mcp'; }
+  function isMcpKind(k) { return k === 'claude_code_mcp'; }
   function kindForProfile(pr) {
     if (!pr) return null;
+    if (pr.kind) return pr.kind;   // the exact AI chosen; older profiles fall back to the value (and the label for API keys)
     if (pr.value === 'api') return /openai/i.test(pr.label || '') ? 'openai_api' : 'anthropic_api';
     if (pr.value === 'chatgpt') return 'chatgpt_plan';
-    return NATIVE_KIND[pr.value] || null;
+    return pr.value === 'claude-code' ? 'claude_code_mcp' : null;
   }
   function kib(b) { return b < 1024 ? b + ' B' : (b / 1024).toFixed(1) + ' KiB'; }
-  // A tool call in plain words: "Measured CPU · 15 s", "Read findings".
+  // A tool call in plain words (design AgentActivity wording rule, fix-plan.js): 'Measuring CPU use…', 'Read the report'.
   function toolWords(t) {
-    var a = t.arguments || {}, done = t.status !== 'running';
-    if (t.tool === 'get_findings') return done ? 'Read findings' : 'Reading findings';
-    if (t.tool === 'request_action') return done ? 'Requested a change' : 'Requesting a change';
-    if (t.tool === 'list_capabilities') return done ? 'Listed checks' : 'Listing checks';
-    if (t.tool === 'get_operation') return 'Checked progress';
-    if (t.tool === 'get_cards') return done ? 'Read suggestions' : 'Reading suggestions';
-    if (t.tool === 'get_pc_specs') return done ? 'Read PC specs' : 'Reading PC specs';
-    if (t.tool === 'get_report_history') return done ? 'Read past reports' : 'Reading past reports';
-    if (t.tool === 'note_card') return done ? 'Noted a suggestion' : 'Noting a suggestion';
-    if (t.tool === 'add_card') return done ? 'Added a suggestion' : 'Adding a suggestion';
-    if (t.tool === 'run_diagnostic') {
-      var w = DIAG_WORDS[a.diagnosticId] || ['Checking ' + a.diagnosticId, 'Checked ' + a.diagnosticId];
-      return w[done ? 1 : 0] + (a.diagnosticId === 'process.sample' ? ' · ' + (a.window || 15) + ' s' : '');
-    }
-    return t.tool || 'Check';
+    var a = t.arguments || {};
+    return FIX.activityWords(t.tool, t.status !== 'running', t.label, 0, a.diagnosticId).title;
   }
   // Assistant text is plain text; its [ev-…] markers become citation chips.
   function stripCites(text) { return String(text || '').replace(/\s*\[ev-[0-9a-z-]+\]/gi, ''); }
@@ -203,7 +170,7 @@
       var e = ev[f.evidenceIds[0]]; if (!e || used[e.id]) return; used[e.id] = true;
       f.evidenceIds.forEach(function (id) { used[id] = true; });
       rows.push({ id: e.id, label: labels[e.id], cat: f.category, title: f.title, value: e.display, src: e.source, time: observedLabel(e),
-        isNew: fresh.indexOf(f.fingerprint) >= 0 });
+        isNew: fresh.indexOf(f.fingerprint) >= 0, fid: f.id });
     });
     r.evidence.forEach(function (e) {
       if (used[e.id]) return;
@@ -235,6 +202,7 @@
     var sc = React.useState([]), scanCats = sc[0], setScanCats = sc[1];
     var sd = React.useState(0), scanDone = sd[0], setScanDone = sd[1];
     var rp = React.useState(null), report = rp[0], setReport = rp[1];
+    var reportRef = React.useRef(null); reportRef.current = report;
     var fq = React.useState(null), fu = fq[0], setFuState = fq[1];
     var cs = React.useState({}), cardState = cs[0], setCardState = cs[1];   // card id → { mode } (UI only)
     var lv = React.useState(null), cardLeaving = lv[0], setCardLeaving = lv[1];   // id of the card sinking
@@ -251,7 +219,11 @@
     var sm = React.useState(null), summary = sm[0], setSummary = sm[1];     // null | connect | preview | loading | lines[]
     var tt = React.useState(null), toast = tt[0], setToast = tt[1];
     var dr = React.useState(false), draft = dr[0], setDraft = dr[1];
-    var ai = React.useState({ value: 'local', label: 'Local only' }), conn = ai[0], setConn = ai[1];
+    var ai = React.useState({ value: 'local', label: 'Local only' }), conn = ai[0], setConnState = ai[1];
+    // The chosen AI, one source of truth: set together with the render state, read by every callback that can run after
+    // a change of AI (promise replies, events, timers), never the `conn` an older render's closure holds.
+    var connRef = React.useRef(conn);
+    function setConn(c) { connRef.current = c; setConnState(c); }
     var rt = React.useState(null), returnTo = rt[0], setReturnTo = rt[1];
     var bs = React.useState(backend.state()), bstate = bs[0], setBstate = bs[1];
     var bd = React.useState(backend.detail ? backend.detail() : null), bdetail = bd[0], setBdetail = bd[1];   // the shell's detail code
@@ -264,8 +236,31 @@
     var pv = React.useState({}), providers = pv[0], setProviders = pv[1];             // kind → provider.list entry
     var cn = React.useState(null), connect = cn[0], setConnect = cn[1];               // connection in progress on the chooser
     var pg = React.useState(null), pairing = pg[0], setPairing = pg[1];               // pending agent.pairing
-    var gs = React.useState(null), grant = gs[0], setGrant = gs[1];                   // grant sheet: { kind, pairingId?, pending? }
+    var gs = React.useState(null), grant = gs[0], setGrant = gs[1];                   // pairing panel: { kind, pairingId?, busy? }
+    var rsr = React.useState(null), research = rsr[0], setResearch = rsr[1];      // M9 §6: research.get for the current report (null: none or not offered)
+    var researchRef = React.useRef(null); researchRef.current = research;
+    var pms = React.useState(null), perm = pms[0], setPermState = pms[1];            // ai.getPermissions: { permissions, available } (null: not offered)
+    var permRef = React.useRef(null);
+    function setPerm(r) { permRef.current = r; setPermState(r); return r; }
+    var pmb = React.useState(false), permBusy = pmb[0], setPermBusy = pmb[1];       // the page's choice is being saved
+    var permLater = React.useRef(false);       // Back on the page: not asked again in this window until the AI changes
+    var permAfter = React.useRef(null);        // a newly connected kind whose first look waits for the page
+    var permFocus = React.useRef(false);       // the page was opened from the pill or Change: its title takes focus
+    var permSeen = React.useRef(null);         // the permissions revision the open page (or pairing panel) started from
+    var grantSeen = React.useRef(null);
+    var ckCards = React.useRef({ reportId: null, byId: {} });   // check-up cards seen in the deck, by id (for the report)
+    var ckSeen = React.useRef(null);                            // check-up card ids already seen (null: not read yet)
+    var ckt = React.useState(0), setCkTick = ckt[1];
+    // The New tag (design isNew): ids there when the check-up was first read here (never new), and new cards that have
+    // been on screen and left it again (their tag is gone). ckFront: the new cards moved to the front of the deck (they
+    // stay there for the report, so nothing jumps back once seen).
+    var ckBase = React.useRef({}), ckOnScreen = React.useRef({}), ckTagGone = React.useRef({}), ckFront = React.useRef([]);
+    // The card whose preview Back just closed: its Preview change gets focus after the render.
+    var backFocus = React.useRef(null);
+    var starting = React.useRef(null);         // agent.start on its way: { kind } (one at a time per AI)
+    var choiceSave = React.useRef(null);       // the chosen AI's onboarding.save on its way (settles either way); starts wait for it
     var tk = React.useState(null), task = tk[0], setTask = tk[1];
+    var liveTask = React.useRef(null); liveTask.current = task;   // the current task for callbacks (attachTask sets it at once)
     var acs = React.useState([]), activity = acs[0], setActivity = acs[1];            // agent.tool events (optimizer calls only)
     var ans = React.useState([]), answers = ans[0], setAnswers = ans[1];              // { id, q, cardId, turnId, text, citations, followUps, busy }
     var answersRef = React.useRef(answers); answersRef.current = answers;
@@ -293,7 +288,9 @@
     var regs = React.useRef({});                                                    // kind → registration command
 
     // M6a: the benchmark panel's state (bench.js); flash is defined below and only called later.
-    var bench = OT.useBench(backend, { flash: function (w) { flash(w); } });
+    // Report a problem (report-problem.js): the logo's menu, the preview and the prompt after a crash or a failed operation.
+    var problems = OT.useProblemReport(backend, { flash: function (w) { flash(w); }, version: OT.appVersion || null }), PF = OT.problemReport.failed;
+    var bench = OT.useBench(backend, { flash: function (w) { flash(w); }, onFailed: function (x) { problems.raise('benchmark', 'bench:' + x.runId); } });
     var timers = React.useRef([]);
     var onbRef = React.useRef(null), fuRef = React.useRef(null), stageRef = React.useRef(stage);
     var scanRef = React.useRef(null);          // { scanId, stream, cursor, handled }
@@ -308,8 +305,29 @@
     function putClient(tile, patch) { setClients(function (m) { var n = Object.assign({}, m); n[tile] = Object.assign({}, m[tile] || {}, patch); return n; }); }
     var ct = React.useState({}), catalog = ct[0], setCatalog = ct[1];             // actionId → catalog entry
     var pls = React.useState({}), plans = pls[0], setPlans = pls[1];            // planId → { plan, op, progress, cardId, kind }
+    // m9 §17.2: administrator-check requests as agent.checks last showed them (requestId → request view, + hidden once the
+    // user asked something new beside the chat); a card's latest request (cardId → requestId), for "Checks skipped" in working.
+    var ckq = React.useState({}), checkReqs = ckq[0], setCheckReqs = ckq[1];
+    var checkReqsRef = React.useRef(checkReqs); checkReqsRef.current = checkReqs;
+    var cardChecks = React.useRef({});
+    // Review 2: per request, how many agent.checks events arrived (a reply to a call that began before the latest event is
+    // older than it and is ignored), and the calls in flight (the request's buttons do nothing meanwhile).
+    var ckEvents = React.useRef({}), ckBusy = React.useRef({});
+    // Review 1: the open requests are read again (checks.list) at start and after a reconnect.
+    // Review 3: the latest card.fix event per card ({seq, fix, reportId}); a deck snapshot asked for before it keeps it.
+    var fixEvents = React.useRef({}), fixSeq = React.useRef(0);
+    var fixGen = React.useRef({});   // re-check 5: per card, the count of its latest card.fix event (never retired)
+    var ptk = React.useState(0), planTick = ptk[0], setPlanTick = ptk[1];   // review 7: retry card plans not read yet
+    var rck = React.useState({}), rechecks = rck[0], setRechecks = rck[1];  // design v82: needs you's Check again (cardId → {checking, recheck})
+    var switchedTasks = React.useRef({});      // tasks the app stopped because the user chose another AI
+    var planLoads = React.useRef({});          // planId → action.get on its way (a card's fix plan not seen yet)
+    var nt = React.useState(0), setTick = nt[1];   // re-renders once a second while a checks request counts down
+    // The plans as last set, at once (plansRef): several operation.state events, or an approval's reply, before the next render
+    // build on each other instead of on the last render's copy (a fix's step states were lost that way).
     function putPlan(planId, patch) {
-      setPlans(function (m) { var n = Object.assign({}, m); n[planId] = Object.assign({}, m[planId] || {}, patch); return n; });
+      var m = plansRef.current || {}, n = Object.assign({}, m);
+      n[planId] = Object.assign({}, m[planId] || {}, patch);
+      plansRef.current = n; setPlans(n);
     }
     var startedAt = React.useRef({});          // invocation id → when it started (event time, else first seen)
     var wk = React.useState(0), workedAt = wk[0], setWorkedAt = wk[1];
@@ -321,22 +339,120 @@
       return function () { clearTimeout(t); };
     }, [workedAt]);
     stageRef.current = stage;
+    // A retired AI (Codex) whose user resumed into a running scan or inventory: after that view, the picker (retiredRedirect).
+    var retiredHold = React.useRef(null);
+    React.useEffect(function () {
+      var r = OT.retiredRedirect(retiredHold.current, stage);
+      if (!r) return;
+      retiredHold.current = null;
+      if (r.clear) return;
+      setReturnTo(r.returnTo); setWave({ speed: 0.7, words: [] }); go('login');
+    }, [stage.id, stage.leaving]);
     function later(fn, ms) { var t = setTimeout(fn, ms); timers.current.push(t); return t; }
     React.useEffect(function () { return function () { timers.current.forEach(clearTimeout); }; }, []);
+    // M9 §6: the current report's research (labels, run state); re-read when the report changes.
+    var reportKey = report ? report.reportId : null;
+    React.useEffect(function () { setResearch(null); loadResearch(reportKey); }, [reportKey]);
 
     function setOnb(o) { onbRef.current = o; setOnbState(o); return o; }
-    function setFu(f) {
+    // A deck snapshot from the host (re-check 4): since = the card.fix event count when it was asked for. Events after it
+    // still win; events up to it are superseded by the snapshot and retired. Every asynchronous deck request captures it
+    // (deckSince) before it is sent; a local patch (patchCardFix) is not a snapshot (setDeck).
+    function setFu(f, since) {
+      var s = typeof since === 'number' ? since : -1;
+      f = overlayFix(f, s);
+      Object.keys(fixEvents.current).forEach(function (k) { if (fixEvents.current[k].seq <= s) delete fixEvents.current[k]; });
+      return setDeck(f);
+    }
+    function deckSince() { return fixSeq.current; }
+    function setDeck(f) {
       fuRef.current = f; setFuState(f);
       if (f && f.card) cardFinding.current[f.card.id] = f.card.findingId;
       if (f) (f.decisions || []).forEach(function (d) { if (d.findingId) cardFinding.current[d.cardId] = d.findingId; });
       return f;
+    }
+    function overlayFix(f, since) {
+      if (!f) return f;
+      var ev = fixEvents.current;
+      var put = function (c) { var e = c && ev[c.id]; return e && e.seq > since && (!e.reportId || e.reportId === f.reportId) ? Object.assign({}, c, { fix: e.fix }) : c; };
+      return Object.assign({}, f, { card: put(f.card), upcoming: (f.upcoming || []).map(put) });
     }
     function flash(msg) { setToast(msg); later(function () { setToast(null); }, 2000); }
 
     // Everything on screen sinks into the sea first; the next step rises once it has gone.
     function go(next) {
       setStage(function (s) { return { id: s.id, leaving: true, next: next }; });
-      later(function () { if (next === 'login') setSheet(null); setStage({ id: next, leaving: false }); }, FADE);
+      later(function () { if (next === 'login' || next === PERM_STAGE) setSheet(null); setStage({ id: next, leaving: false }); }, FADE);
+    }
+    /* ---------- M9 §1: permissions ---------- */
+    // An older host without ai.getPermissions: no page, no line (null never blocks routing).
+    function loadPermissions() {
+      return backend.call('ai.getPermissions').then(setPerm, function (err) { if (notSupported(err)) setPerm(null); return permRef.current; });
+    }
+    /* ---------- M9 §6: researched reports ---------- */
+    // An older host without research.get shows no labels and no chip.
+    function loadResearch(reportId) {
+      if (!reportId) { setResearch(null); return Promise.resolve(null); }
+      return backend.call('research.get', { reportId: reportId }).then(function (r) {
+        if (reportRef.current && reportRef.current.reportId === reportId) setResearch(Object.assign({ reportId: reportId }, r));
+        return r;
+      }, function () { return null; });
+    }
+    function onResearchState(pl) {
+      var cur = reportRef.current;
+      if (!cur || pl.reportId !== cur.reportId) return;
+      var was = researchRef.current;
+      setResearch(function (r) { return OT.researchFromState(r, pl); });
+      loadResearch(pl.reportId);
+      // §6.8: each checked area may add or replace check-up cards (after the report's own cards).
+      if (pl.phase === 'checkup') { refreshDeck(); return; }
+      // §6.4: the trial's outcome changes what the provider offers (web yes / no).
+      if (was && was.trial && !pl.trial) loadPermissions();
+    }
+    // A source opens through the shell by its id; the page never holds the URL.
+    // A second click within 1 s is refused by the shell (rate_limited): the first one is already opening, so say nothing.
+    function openSource(sourceId) {
+      backend.call('shell.openSource', { sourceId: sourceId }).then(function (r) { if (!r || r.status !== 'opened') flash('Not available'); },
+        function (e) { if (!(e && e.code === -32013 && e.data && e.data.reason === 'rate_limited')) flash('Not available'); });
+    }
+    // Where to land instead of `next`: the page first when an AI is selected and its permissions were never set.
+    function gateTo(kind, next) {
+      if (permLater.current) return { stage: next, returnTo: null };
+      return permissionsGate({ kind: kind, permissions: permRef.current && permRef.current.permissions, next: next });
+    }
+    // focus: opened by the user (the pill's Permissions, the summary's Change): the page's title takes focus.
+    function openPermissions(from, focus) {
+      setDetailOpen(false); setReturnTo(from); setWave({ speed: 0.7, words: [] }); go(PERM_STAGE);
+      permFocus.current = !!focus;
+      // The revision the page opened with is the one read now (an older copy in memory must not read as "Updated").
+      permSeen.current = 'loading';
+      loadPermissions().then(function (r) { permSeen.current = r && r.permissions ? r.permissions.revision : null; });
+    }
+    // Back and Continue both return to where the page was opened from (or the stage the user resumes).
+    function leavePermissions(back) {
+      var r = returnTo || 'main', kind = permAfter.current;
+      if (back) permLater.current = true;
+      permAfter.current = null;
+      setReturnTo(null);
+      go(r);
+      if (kind && r === 'main') offerFirstScan(kind);
+    }
+    function savePermissions(v) {
+      var cur = permRef.current;
+      if (!cur) { leavePermissions(false); return; }
+      if (permBusy) return;
+      var rec = permRecord(v, cur.permissions);
+      setPermBusy(true);
+      backend.call('ai.setPermissions', { idempotencyKey: uuid(), revision: cur.permissions.revision, permissions: rec }).then(function (r) {
+        setPermBusy(false); setPerm(r); permLater.current = false; leavePermissions(false);
+      }, function (err) {
+        setPermBusy(false);
+        // Saved elsewhere first: show the newer record (the page re-fills); the user decides again.
+        var c = err && err.code === -32002 && err.data && err.data.current;
+        if (c) { setPerm(c.permissions ? c : { permissions: c, available: cur.available }); return; }   // the page shows "Updated"
+        if (notSupported(err)) { setPerm(null); leavePermissions(false); return; }
+        flash('Not saved');
+      });
     }
 
     /* ---------- onboarding ---------- */
@@ -344,7 +460,9 @@
       var pr = o.profile;
       setUsage(profileList(pr.uses, pr.customUse));
       setGoals(profileList(pr.goals, pr.customGoal));
-      if (pr.provider) setConn({ value: pr.provider.value, label: pr.provider.label, kind: kindForProfile(pr.provider) });
+      // A saved AI that no longer exists (retired): nothing selected; the picker comes first (resumeFrom).
+      if (OT.retiredProvider(pr.provider)) setConn({ value: 'local', label: 'Local only', kind: null, retired: true });
+      else if (pr.provider) setConn({ value: pr.provider.value, label: aiName(kindForProfile(pr.provider), pr.provider.label), kind: kindForProfile(pr.provider) });
     }
     function mergeProvider(e) { if (e && e.kind) setProviders(function (m) { var n = Object.assign({}, m); n[e.kind] = e; return n; }); return e; }
     function loadProviders() {
@@ -395,7 +513,7 @@
       var prev = taskRef.current;
       taskRef.current = { taskId: t.taskId, stream: 'task:' + t.taskId, seq: prev && prev.taskId === t.taskId ? prev.seq : null, reportId: t.scope && t.scope.reportId };
       storeSet('ot.task', t.taskId); rememberTask(t.taskId);
-      setTask(t); setActivity(activityFromHistory(activityList));
+      liveTask.current = t; setTask(t); setActivity(activityFromHistory(activityList));
       // Another task's run is not this one's: its unanswered questions go (they would hold the next ask).
       if (!prev || prev.taskId !== t.taskId) setLiveTurn(null);
       // After a reload the answers come back from the task's history, a run still going included (Stop and all).
@@ -411,14 +529,28 @@
         flash('Not saved'); throw err;
       });
     }
+    // The chosen AI's save (c: {value, label, kind}): the host only starts and asks the AI saved as chosen, so every
+    // in-app start waits for this save. One at a time, in order, so a quick back-and-forth ends on the last choice.
+    function saveChoice(c, step) {
+      var provider = { value: c.value, label: c.label };
+      if (c.kind) provider.kind = c.kind;
+      var patch = { provider: provider };
+      if (step) patch.step = step;
+      var noop = function () {};
+      var p = (choiceSave.current || Promise.resolve()).then(function () { return saveOnb(patch); });
+      var mine = choiceSave.current = p.then(noop, noop);
+      mine.then(function () { if (choiceSave.current === mine) choiceSave.current = null; });
+      return p;
+    }
     function loadStarters() {
       var o = onbRef.current;
       return backend.call('starter.list', { profileRevision: o ? o.revision : 0 }).then(function (r) { setStarters(r.starters || []); }, function () { setStarters([]); });
     }
     function loadReport(reportId) {
+      var since = deckSince();
       return Promise.all([backend.call('report.get', { reportId: reportId }), backend.call('followup.get', { reportId: reportId })]).then(function (res) {
         var r = res[0];
-        setReport(r); setFu(res[1]); setDetails({}); setFixed(null);
+        setReport(r); setFu(res[1], since); setDetails({}); setFixed(null);
         // A rescan's comparison: list what was fixed since the base report.
         if (r.baseReportId && r.comparison && (r.comparison.resolved || []).length) {
           backend.call('report.compare', { reportId: r.reportId, baseReportId: r.baseReportId }).then(function (c) { setFixed(c.resolved || []); }, function () {});
@@ -430,14 +562,15 @@
     function boot() {
       setFailed(false);
       loadProviders();
-      // Claude Code / Codex are usable only once the shell has checked them (installed, signed in): check at start.
-      ['claude-code', 'codex'].forEach(function (t) { checkClient(t); });
+      // Claude is usable only once the shell has checked Claude Code (installed, signed in): check at start.
+      checkClient('claude');
       // Receipts survive a reload: re-read recent operations and their plans.
       backend.call('operation.list', { limit: 50 }).then(function (r) {
         (r.operations || []).forEach(function (op) {
           backend.call('action.get', { planId: op.planId }).then(function (plan) { putPlan(op.planId, { plan: plan, op: op, kind: plan.undoOf ? 'undo-done' : 'card' }); }, function () {});
         });
       }, function () {});
+      loadChecks();
       backend.call('action.catalog').then(function (r) { var m = {}; (r.actions || []).forEach(function (a) { m[a.actionId] = a; }); setCatalog(m); }, function () {});
       var lastTask = storeGet('ot.task');
       // The last task this window used; without one (another window, cleared storage), the newest active task (agent.active).
@@ -464,7 +597,8 @@
       backend.call('onboarding.get').then(function (o) {
         // Past this point the backend answered: a later failure (one report call, a bug) lands on a screen with a short
         // word instead of "Backend unavailable".
-        return Promise.resolve().then(function () { return resumeFrom(o); }).catch(function (err) {
+        // M9: the permissions record first, so the page can come before the stage the user resumes.
+        return loadPermissions().then(function () { return resumeFrom(o); }).catch(function (err) {
           if (typeof console !== 'undefined') console.error('boot', err);
           if (stageRef.current.id === 'boot') {
             var done = o && o.step === 'complete';
@@ -478,9 +612,20 @@
     function resumeFrom(o) {
       {
         setOnb(o); adoptProfile(o);
+        // M9 §1.4: an AI that never had its permissions set shows the page before the stage the user resumes.
+        var kind = kindForProfile(o.profile && o.profile.provider);
+        // A retired AI: its users land on the picker (nothing selected, no message), then go on where they were.
+        var retired = OT.retiredLanding(o);
+        retiredHold.current = retired;   // cleared on the picker; kept while a running scan or inventory is shown first
+        var land = function (next) {
+          if (retired) { setReturnTo(o.step === 'complete' ? next : retired.returnTo); setStage({ id: 'login', leaving: false }); return; }
+          var g = next === 'login' ? { stage: next } : gateTo(kind, next);
+          if (g.stage === PERM_STAGE) setReturnTo(next);
+          setStage({ id: g.stage, leaving: false });
+        };
         if (o.step !== 'complete') {
           if (o.step === 'specs' && o.resume && o.resume.inventoryId) return resumeInventory(o.resume.inventoryId);
-          setStage({ id: STEP_STAGE[o.step] || 'login', leaving: false }); return;
+          land(STEP_STAGE[o.step] || 'login'); return;
         }
         var r = o.resume || {};
         // Resume: never replay onboarding. A running scan reattaches; a report opens with its saved review state.
@@ -492,9 +637,9 @@
           if (rid) return Promise.all([loadReport(rid), loadStarters(), backend.call('report.list', { limit: 1 }).catch(function () { return null; })]).then(function (res) {
             var latest = res[2] && res[2].reports && res[2].reports[0];
             setWelcome({ generatedAt: (latest && latest.generatedAt) || res[0].generatedAt, pending: fuRef.current ? fuRef.current.pendingCount : 0 });
-            setStage({ id: 'main', leaving: false });
+            land('main');
           });
-          return loadStarters().then(function () { setStage({ id: 'main', leaving: false }); });
+          return loadStarters().then(function () { land('main'); });
         });
       }
     }
@@ -527,7 +672,7 @@
       if (kind && pl.status === 'approved') pairedIds.current[kind] = pl.pairingId;
       else if (kind && pairedIds.current[kind] === pl.pairingId) delete pairedIds.current[kind];
       setPairing(function (cur) { return cur && cur.pairingId === pl.pairingId ? null : cur; });
-      // Decided: an approved pairing leaves the chooser's connect step (the grant sheet follows); any other outcome waits again.
+      // Decided: an approved pairing leaves the chooser's connect step (the permissions panel follows); any other outcome waits again.
       setConnect(function (c) {
         if (!c || c.pairingId !== pl.pairingId) return c;
         return pl.status === 'approved' ? null : Object.assign({}, c, { phase: 'register', code: null, pairingId: null });
@@ -564,15 +709,18 @@
       };
       if (ev.type === 'agent.question') {
         // m5 §9: an ask from here already has its entry (it takes the turn); one from elsewhere gets its panel.
-        ensureAnswer(pl.turnId, ev.seq, { q: pl.text || null, cardId: pl.cardId || null, text: null, busy: 'Thinking…', failedTurn: false });
+        // m9 §17.3: a fix ask (or its continuation after administrator checks): the card's FixPanel shows the work, not a reply.
+        ensureAnswer(pl.turnId, ev.seq, { q: pl.text || null, cardId: pl.cardId || null, text: null, busy: 'Thinking…', failedTurn: false, fix: pl.intent === 'fix' || !!pl.checks });
         setAnswers(function (list) {
           var i = answerIndex(list, pl.turnId, tid); if (i < 0) return list;
           var n = list.slice(); n[i] = Object.assign({}, n[i], { turnId: pl.turnId, q: n[i].q || pl.text || null }); return n;
         });
       }
       else if (ev.type === 'agent.task') {
-        setTask(function (t) { return t && t.taskId === tid ? Object.assign({}, t, { status: pl.status, used: pl.used || t.used }) : t; });
+        // M9 §1.2: a save that only widens updates the grant in place (the event carries it).
+        setTask(function (t) { return t && t.taskId === tid ? Object.assign({}, t, { status: pl.status, used: pl.used || t.used, grant: pl.grant || t.grant }) : t; });
         if (pl.status && pl.status !== 'active') setLiveTurn(null);
+        if (PF.aiTask(pl)) problems.raise('ai', 'ai:' + tid);
       }
       else if (ev.type === 'agent.tool') {
         if (!startedAt.current[pl.invocationId]) startedAt.current[pl.invocationId] = Date.parse(pl.at || '') || Date.now();
@@ -587,7 +735,8 @@
       } else if (ev.type === 'agent.message') {
         // A turn started before a reload or a reconnect has no entry yet: it gets one (the answer lands somewhere).
         var mtext = { text: stripCites(pl.text), citations: pl.citations || [], followUps: pl.followUps || [], busy: null, failedTurn: false,
-          warnings: pl.warnings || [], suggest: pl.suggest || null };   // M6a §8: voltage note, Run benchmark
+          warnings: pl.warnings || [], suggest: pl.suggest || null,   // M6a §8: voltage note, Run benchmark
+          sources: (pl.sources || []).slice(0, 8) };                   // M9 §7: that turn's web sources (UI-only)
         ensureAnswer(pl.turnId || null, ev.seq, mtext);
         patch(pl.turnId, mtext);
         setLiveTurn(function (cur) { return cur && (!pl.turnId || cur === pl.turnId || cur === 'turn') ? null : cur; });
@@ -602,23 +751,187 @@
         // Stopped by the user (agent.cancel): the question simply goes away; any other failure says so.
         else if (pl.status === 'failed' && pl.code === 'cancelled') dropAnswer(pl.turnId, tid);
         else if (pl.status === 'failed') patch(pl.turnId, { failedTurn: true, failCode: pl.code || null, busy: null });
+        if (PF.aiTurn(pl)) problems.raise('ai', 'ai:' + tid);
       }
     }
     function refreshDeck() {
       var f = fuRef.current; if (!f) return;
-      var run = function () { return backend.call('followup.get', { reportId: f.reportId }).then(function (cur) { if (fuRef.current && fuRef.current.reportId === cur.reportId) setFu(cur); }, function () {}); };
+      var run = function () {
+        var since = fixSeq.current;
+        return backend.call('followup.get', { reportId: f.reportId }).then(function (cur) {
+          if (fuRef.current && fuRef.current.reportId === cur.reportId) setFu(cur, since);
+          setPlanTick(function (n) { return n + 1; });   // review 7: card plans not read yet are tried again
+        }, function () {});
+      };
       fuChain.current = fuChain.current.then(run, run);
+    }
+    /* ---------- m9 §17 Fix for me and administrator checks ---------- */
+    // card.fix {cardId, reportId, fix} into the deck the user sees (followup.get carries it on load).
+    // The event is recorded first (review 3), so a deck snapshot asked for earlier can't bring the older fix back, and two
+    // events before a render both apply (fuRef is the latest deck at once).
+    function patchCardFix(cardId, reportId, fix, fromReply) {
+      if (!cardId) return;
+      if (!fromReply) { fixEvents.current[cardId] = { seq: ++fixSeq.current, fix: fix, reportId: reportId || null }; fixGen.current[cardId] = fixSeq.current; }
+      var f = fuRef.current; if (!f || (reportId && f.reportId !== reportId)) return;
+      if (!(f.card && f.card.id === cardId) && !(f.upcoming || []).some(function (c) { return c && c.id === cardId; })) return;
+      var put = function (c) { return c && c.id === cardId ? Object.assign({}, c, { fix: fix }) : c; };
+      setDeck(overlayFix(Object.assign({}, f, { card: put(f.card), upcoming: (f.upcoming || []).map(put) }), -1));
+    }
+    // agent.checks: events always win (review 2); an older revision never replaces a newer one.
+    function onChecksEvent(q) {
+      if (!q || !q.requestId) return;
+      ckEvents.current[q.requestId] = (ckEvents.current[q.requestId] || 0) + 1;
+      putCheck(q);
+    }
+    // checks.list: the open requests as the host has them now. A request with an agent.checks event since the call began keeps
+    // what the event said; an older host without the method shows what events bring.
+    function loadChecks() {
+      var seen = Object.assign({}, ckEvents.current);
+      backend.call('checks.list', {}).then(function (r) {
+        var listed = {};
+        ((r && r.requests) || []).forEach(function (q) { if (q && q.requestId) listed[q.requestId] = true; if (q && q.requestId && (ckEvents.current[q.requestId] || 0) === (seen[q.requestId] || 0)) putCheck(q); });
+        // Re-check 1: a request open here that the host no longer lists ended while we were away: it goes (its card is read
+        // again, which says how it went on), unless an event for it came after the call began.
+        var gone = Object.keys(checkReqsRef.current).filter(function (id) {
+          return !listed[id] && FIX.checksOpen(checkReqsRef.current[id]) && (ckEvents.current[id] || 0) === (seen[id] || 0);
+        });
+        if (!gone.length) return;
+        setCheckReqs(function (m) { var n = Object.assign({}, m); gone.forEach(function (id) { if (FIX.checksOpen(n[id])) delete n[id]; }); return n; });
+        refreshDeck();
+      }, function () {});
+    }
+    function putCheck(q) {
+      if (!q || !q.requestId) return;
+      if (q.cardId) cardChecks.current[q.cardId] = q.requestId;
+      setCheckReqs(function (m) {
+        var old = m[q.requestId];
+        if (old && typeof old.revision === 'number' && typeof q.revision === 'number' && q.revision < old.revision) return m;
+        var n = Object.assign({}, m); n[q.requestId] = Object.assign({}, q, { hidden: !!(old && old.hidden), switchedAi: !!switchedTasks.current[q.taskId] }); return n;
+      });
+    }
+    // A call's reply (or its error's request view) counts only when no agent.checks event for the request came after the
+    // call began; running and an end state share a revision, so the revision alone can't tell.
+    function checksCall(requestId, method, params, onError) {
+      if (ckBusy.current[requestId]) return;
+      ckBusy.current[requestId] = true;
+      var seen = ckEvents.current[requestId] || 0;
+      var fresh = function () { return (ckEvents.current[requestId] || 0) === seen; };
+      backend.call(method, params).then(function (r) { ckBusy.current[requestId] = false; if (fresh()) putCheck(r); }, function (err) {
+        ckBusy.current[requestId] = false;
+        onError(err, fresh());
+      });
+    }
+    // Run checks → checks.approve with the request's revision; Windows asks next. A stale revision shows the request as it
+    // is now (the user clicks again); in the cooldown the request waits with its retryAt.
+    function approveChecks(requestId) {
+      var q = checkReqsRef.current[requestId]; if (!q || !(q.checks || []).length) return;
+      checksCall(requestId, 'checks.approve', { idempotencyKey: uuid(), requestId: requestId, revision: q.revision }, function (err, fresh) {
+        var d = err && err.data;
+        if (err && err.code === -32002 && d && d.current) { if (fresh) putCheck(d.current); }
+        else if (err && err.code === -32013 && d && d.reason === 'cooldown') { if (fresh) putCheck(Object.assign({}, checkReqsRef.current[requestId] || q, { retryAt: d.retryAt || null })); }
+        else if (!(err && err.code === -32013)) flash(notSupported(err) ? 'Not available' : 'Not saved');
+      });
+    }
+    function declineChecks(requestId) {
+      if (!checkReqsRef.current[requestId]) return;
+      checksCall(requestId, 'checks.decline', { requestId: requestId }, function (err) { if (!(err && err.code === -32013)) flash(notSupported(err) ? 'Not available' : 'Not saved'); });
+    }
+    // Fix for me (and its Try again / Fix for me retries, and "Change something…" with revise): agent.ask with intent fix
+    // in the app's chat task (a task is started for the chosen AI when there is none).
+    function fixAsk(cid, text, revise) {
+      var extra = { intent: 'fix' };
+      if (revise) extra.revise = revise;
+      agentAsk(text || '', cid, null, extra);
+    }
+    // [Close] on an ended fix: fix.dismiss; the card is back to normal.
+    function dismissFix(cid) {
+      // Re-check 5: the reply counts only when no card.fix event for the card came after the dismissal began.
+      var f = fuRef.current, gen = fixGen.current[cid] || 0;
+      backend.call('fix.dismiss', { cardId: cid }).then(function (r) {
+        if ((fixGen.current[cid] || 0) === gen) patchCardFix(cid, f && f.reportId, r ? r.fix || null : null, true);
+      }, function () { refreshDeck(); });
+    }
+    // needs you, on a report card: Check again re-reads the card's finding (the card closes when the issue is gone).
+    // Design v82: Checking… while it runs; still there → the line under the note; gone → the green line for about 2 seconds,
+    // then the deck is read again (the host closed the card).
+    function recheckCard(cid, findingId) {
+      var put = function (v) { setRechecks(function (m) { var n = Object.assign({}, m); if (v) n[cid] = v; else delete n[cid]; return n; }); };
+      put({ checking: true, recheck: (rechecks[cid] || {}).recheck || null });
+      backend.call('manual.recheck', { findingId: findingId }).then(function (r) {
+        var word = FIX.recheckWord(r && r.status);
+        put({ checking: false, recheck: word });
+        if (word === 'gone') later(function () { put(null); refreshDeck(); }, 2000);
+      }, function () { put(null); flash('Not available'); });
+    }
+    // Design v82: Show script brings the script waiting beside the chat into view and focuses it.
+    function showScript(planId) {
+      var el = document.querySelector('.ot-plan-' + planId);
+      if (!el) return;
+      if (el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+      // The script's text first (reading it is the first thing to do there), never Decline or Approve.
+      var f = el.querySelector('[tabindex="0"]');
+      if (f && f.focus) f.focus({ preventScroll: true });
+    }
+    // Approve… in a card: with a step switched off, action.narrow first, then the native approval of the new plan.
+    function approveInCard(planId, kept) {
+      var e = plansRef.current[planId] || {}, keep = FIX.narrowKeep(kept, (e.plan && e.plan.steps) || []);
+      if (e.approving) return;   // review 6: one submit at a time
+      if (!keep) { approvePlan(planId, null); return; }
+      putPlan(planId, { approving: true });
+      backend.call('action.narrow', { idempotencyKey: uuid(), planId: planId, keep: keep }).then(function (np) {
+        putPlan(planId, { approving: false });
+        putPlan(np.planId, { plan: np, op: null, kind: 'agent' });
+        approvePlan(np.planId, null);
+      }, function () {
+        // Review 8: any refusal (drifted, no longer awaiting, cancelled …): the plan and the card are read again and show
+        // what is true now.
+        putPlan(planId, { approving: false });
+        backend.call('action.get', { planId: planId }).then(function (plan) { putPlan(planId, { plan: plan, op: plan.operation || null }); }, function () {});
+        refreshDeck();
+      });
     }
     function handleEvent(ev) {
       var s = scanRef.current, i = invRef.current, tr = taskRef.current;
       if (ev.type === 'agent.pairing') { onPairing(ev.payload || {}); return true; }
+      // M9 §1.2: saved here or in another window; `available` stays as last read.
+      if (ev.type === 'ai.permissions') {
+        var np = (ev.payload || {}).permissions;
+        if (np) setPerm({ permissions: np, available: (permRef.current && permRef.current.available) || { tools: true, web: 'unknown', scripts: false } });
+        return true;
+      }
+      // m9 §17.3: a card's fix changed (stream user): the card shows it at once.
+      if (ev.type === 'card.fix') { var cf = ev.payload || {}; patchCardFix(cf.cardId, cf.reportId, cf.fix || null); return true; }
+      // m9 §17.2: an administrator-checks request changed (stream user).
+      if (ev.type === 'agent.checks') { onChecksEvent(ev.payload || {}); return true; }
+      // M9 §6.2: research progress for a report; the current report's labels are re-read as they land.
+      if (ev.type === 'research.state') { onResearchState(ev.payload || {}); return true; }
       if (typeof ev.stream === 'string' && ev.stream.indexOf('bench:') === 0) { bench.onEvent(ev); return true; }
       if (ev.type === 'action.plan') { onPlanEvent(ev.payload || {}); return true; }
       if (ev.type === 'operation.state') {
         var os = ev.payload || {};
-        putPlan(os.planId, { op: Object.assign({}, (plansRef.current[os.planId] || {}).op, { operationId: os.operationId, planId: os.planId, state: os.state, receipt: os.receipt || null, manualUri: os.manualUri || null }),
+        // M9 §4: a fix's step states merge into its operation; once it ends it is re-read for receipts and Undo.
+        var prevOp = (plansRef.current[os.planId] || {}).op || {}, osteps = prevOp.steps;
+        if (os.step) {
+          osteps = (osteps || []).filter(function (x) { return x.n !== os.step.n; }).concat([Object.assign({}, (osteps || []).filter(function (x) { return x.n === os.step.n; })[0], os.step)])
+            .sort(function (a, b) { return a.n - b.n; });
+        }
+        putPlan(os.planId, { op: Object.assign({}, prevOp, { operationId: os.operationId, planId: os.planId, state: os.state, receipt: os.receipt || null, manualUri: os.manualUri || null, steps: osteps }),
           progress: os.progress || null });
-        if (os.state === 'verified') backend.call('operation.get', { operationId: os.operationId }).then(function (op) { putPlan(os.planId, { op: op }); }, function () {});
+        var fixDone = !os.step && !!osteps && FIX.isTerminal(os.state);
+        // M9 §5.4: a script's end state is re-read too (receipt, what was sent to the AI); it never becomes verified.
+        var scriptDone = ((plansRef.current[os.planId] || {}).plan || {}).kind === 'script' && FIX.scriptEnded(os.state);
+        // A single change that ended otherwise is re-read too: the event has no error (why it failed, or that it was stopped).
+        var opKind = ((plansRef.current[os.planId] || {}).plan || {}).kind;
+        var singleDone = !os.step && opKind !== 'fix' && opKind !== 'script' && FIX.isTerminal(os.state);
+        if (os.state === 'verified' || fixDone || scriptDone || singleDone) backend.call('operation.get', { operationId: os.operationId }).then(function (op) {
+          putPlan(os.planId, { op: op, stopping: false });
+          // A change that ended in an error (not a stop, not an action's own reported result): the Report it prompt.
+          var fp = (plansRef.current[os.planId] || {}).plan || {};
+          if (PF.fix(op, fp.kind) && !FIX.isReported(fp.actionId, op) && !FIX.failKey(fp.actionId, op)) problems.raise('fix', 'fix:' + op.operationId);
+          // An undo of fix steps: the original's steps now read Undone.
+          var up = (plansRef.current[os.planId] || {}).plan;
+          if (up && up.kind === 'fix' && up.undoOf) refreshOperation(up.undoOf);
+        }, function () {});
         return true;
       }
       if (ev.type === 'provider.status') {
@@ -688,6 +1001,7 @@
     resyncRef.current = function () {
       backend.call('onboarding.get').then(setOnb).catch(function () {});
       bench.resync();
+      if (reportRef.current) loadResearch(reportRef.current.reportId);
       var s = scanRef.current;
       if (s && !s.handled) backend.call('scan.get', { scanId: s.scanId }).then(function (snap) {
         if (snap.status === 'running' || snap.status === 'queued') setScanDone(function (x) { return Math.max(x, snap.progress.done); });
@@ -701,14 +1015,16 @@
         setInv({ current: cur, rows: rows });
       }).catch(function () {});
       var f = fuRef.current;
-      if (f) backend.call('followup.get', { reportId: f.reportId }).then(setFu).catch(function () {});
+      loadChecks();
+      var since = fixSeq.current;
+      if (f) backend.call('followup.get', { reportId: f.reportId }).then(function (cur) { setFu(cur, since); setPlanTick(function (n) { return n + 1; }); }).catch(function () {});
       loadProviders();
       // A restarted host forgot which CLI the shell found: check both again, whatever the last answer said.
-      ['claude-code', 'codex'].forEach(function (t) { checkClient(t); });
+      checkClient('claude');
       // A change that was applying: its final state may have been missed.
       Object.keys(plansRef.current).forEach(function (k) {
         var e = plansRef.current[k];
-        if (e.op && e.op.operationId && e.op.state !== 'verified' && !FAIL_WORD[e.op.state])
+        if (e.op && e.op.operationId && !FIX.isTerminal(e.op.state))
           backend.call('operation.get', { operationId: e.op.operationId }).then(function (op) { putPlan(k, { op: op }); }, function () {});
       });
       var tr = taskRef.current;
@@ -765,6 +1081,7 @@
         setStage({ id: from, leaving: false });
         var benchBusy = err && err.code === -32013 && err.data && err.data.reason === 'bench_active';
         flash(err && err.code === -32004 ? 'A scan is running' : benchBusy ? 'After the benchmark' : 'Scan failed');
+        if (PF.scanStart(err)) problems.raise('scan', 'scan:' + params.idempotencyKey);
       });
     }
     // Scan (toolbar): every check, compared with the current report; PC specs are re-read alongside when the user
@@ -789,6 +1106,7 @@
     function finishScan(s, payload) {
       if (!s || s.handled) return; s.handled = true;
       setScanCurrent(null);
+      if (PF.scan(payload)) problems.raise('scan', 'scan:' + s.scanId);
       var done = function (stageId) {
         setCardState({}); setSummary(null); setSheet(null); closePanels();
         setWave({ speed: 0.7, words: [] });
@@ -815,11 +1133,13 @@
     function respond(params, revision) {
       var f = fuRef.current;
       var run = function () {
+        var since = deckSince();
         return backend.call('followup.respond', Object.assign({ idempotencyKey: uuid(), reportId: f.reportId, expectedRevision: revision == null ? f.revision : revision }, params))
-          .then(function (res) { setFu(res); return { ok: true, fu: res }; }, function (err) {
-            if (err && err.code === -32002 && err.data && err.data.current) { setFu(err.data.current); flash('Updated'); return { ok: false, stale: true }; }
+          .then(function (res) { setFu(res, since); return { ok: true, fu: res }; }, function (err) {
+            if (err && err.code === -32002 && err.data && err.data.current) { setFu(err.data.current, since); flash('Updated'); return { ok: false, stale: true }; }
             if (err && (err.code === -32013 || err.code === -32001)) {
-              return backend.call('followup.get', { reportId: f.reportId }).then(function (cur) { setFu(cur); flash('Updated'); return { ok: false }; }, function () { return { ok: false }; });
+              var since2 = deckSince();
+              return backend.call('followup.get', { reportId: f.reportId }).then(function (cur) { setFu(cur, since2); flash('Updated'); return { ok: false }; }, function () { return { ok: false }; });
             }
             flash('Not saved'); return { ok: false };
           });
@@ -850,7 +1170,8 @@
       if (choice === 'snooze') params.expiresAt = new Date(Date.now() + SNOOZE_DAYS * 864e5).toISOString();
       setCardLeaving(cid); unfocus(cid);
       var run = function () {
-        return backend.call('finding.setDisposition', params).then(function (res) { setFu(res); return { ok: true }; }, function (err) {
+        var since = deckSince();
+        return backend.call('finding.setDisposition', params).then(function (res) { setFu(res, since); return { ok: true }; }, function (err) {
           if (notSupported(err)) return null;
           flash('Not saved'); return { ok: false };
         });
@@ -873,8 +1194,9 @@
       var legacy = function () { return respond({ scope: 'card', cardId: cid, option: 'restore' }).then(function (r) { if (r.ok) clearMode(cid); markBusy(cid, false); }); };
       if (!fid) { legacy(); return; }
       var run = function () {
+        var since = deckSince();
         return backend.call('finding.clearDisposition', { idempotencyKey: uuid(), reportId: fuRef.current.reportId, findingId: fid })
-          .then(function (res) { setFu(res); clearMode(cid); return true; }, function (err) { if (notSupported(err)) return false; flash('Not saved'); return true; });
+          .then(function (res) { setFu(res, since); clearMode(cid); return true; }, function (err) { if (notSupported(err)) return false; flash('Not saved'); return true; });
       };
       var call = fuChain.current.then(run, run);
       fuChain.current = call;
@@ -896,16 +1218,27 @@
     function onPlanEvent(pl) {
       var known = plansRef.current[pl.planId];
       if (known) { putPlan(pl.planId, { plan: Object.assign({}, known.plan, { status: pl.status }) }); return; }
-      if (pl.requestedBy && pl.requestedBy.kind && pl.requestedBy.kind !== 'user' && pl.status === 'awaiting_user') {
-        backend.call('action.get', { planId: pl.planId }).then(function (plan) { putPlan(pl.planId, { plan: plan, op: plan.operation || null, kind: 'agent' }); }, function () {});
+      // A fix the host refused is shown too (which step and why).
+      if (pl.requestedBy && pl.requestedBy.kind && pl.requestedBy.kind !== 'user' && (pl.status === 'awaiting_user' || pl.status === 'ineligible')) {
+        backend.call('action.get', { planId: pl.planId }).then(function (plan) {
+          if (plan.status === 'awaiting_user' || plan.kind === 'fix') putPlan(pl.planId, { plan: plan, op: plan.operation || null, kind: 'agent' });
+        }, function () {});
       }
     }
     // Preview change (and Defender options): the backend builds the plan from live state; the card shows it.
-    function previewAction(card, actionId) {
+    // M9 §3.6: a handler that needs a target (a startup entry, a process) gets targetRef {evidenceId} of evidence the card's
+    // finding cites; several candidates → the card asks which one first. evidenceId: the one already chosen.
+    function previewAction(card, actionId, evidenceId) {
       // A card action that isn't a catalog handler (privacy, display, Start…) is a manual task: Settings, then Check again.
       if (Object.keys(catalog).length && !catalog[actionId]) actionId = 'manual.open';
-      var cid = card.id, params = { idempotencyKey: uuid(), actionId: actionId, findingId: card.findingId };
-      if (actionId === 'power.select_scheme') params.parameters = { personality: 'balanced' };
+      var cid = card.id;
+      if (!evidenceId && FIX.needsTarget(actionId, catalog[actionId])) {
+        var choices = FIX.targetChoices(actionId, card.evidenceIds, evById, catalog[actionId]);
+        if (choices.length > 1) { setMode(cid, 'pick', { pick: { actionId: actionId, choices: choices } }); return; }
+        if (choices.length === 1) evidenceId = choices[0].evidenceId;
+        else actionId = 'manual.open';   // nothing here it can name: the manual route
+      }
+      var params = FIX.previewParams(uuid(), actionId, card.findingId, report && report.reportId, actionId === 'manual.open' ? null : evidenceId);
       setMode(cid, 'loading');
       backend.call('action.preview', params).then(function (plan) {
         putPlan(plan.planId, { plan: plan, op: null, cardId: cid, kind: 'card' });
@@ -913,41 +1246,48 @@
       }, function () { setMode(cid, null); flash('Not available'); });
     }
     // Approve goes to the desktop shell's native dialog (shell.approvePlan); the page never approves by itself.
-    function approvePlan(planId, cid) {
+    function approvePlan(planId, cid, choice) {
       if (cid) setMode(cid, 'running', { planId: planId });
       putPlan(planId, { approving: true });
-      putPlan(planId, { approveError: null });
+      putPlan(planId, { approveError: null, approveCause: null });
+      // M9 §5.2: a script's restore-point and output choices are made in the native dialog; only the browser demo's
+      // simulated dialog takes them (and the read-to-the-end and tick) from the card.
+      var params = { planId: planId };
+      if (choice && isFixture) { params.options = { restorePoint: !!choice.restorePoint, shareOutput: !!choice.shareOutput }; params.ticked = true; params.readToEnd = true; }
       // §8: approved | declined | expired | stale | unavailable | error.
-      backend.call('shell.approvePlan', { planId: planId }).then(function (r) { onApproval(planId, cid, r || {}); }, function () { onApproval(planId, cid, { status: 'error' }); });
+      backend.call('shell.approvePlan', params).then(function (r) { onApproval(planId, cid, r || {}); }, function () { onApproval(planId, cid, { status: 'error' }); });
     }
     function onApproval(planId, cid, r) {
       var entry = plansRef.current[planId] || {}, plan = entry.plan || {};
       putPlan(planId, { approving: false });
       if (r.status === 'approved') { if (r.operationId) putPlan(planId, { op: Object.assign({ operationId: r.operationId, planId: planId, state: 'prepared' }, entry.op) }); return; }
-      if (r.status === 'declined') {
-        putPlan(planId, { plan: Object.assign({}, plan, { status: 'declined' }) });
-        if (cid) setMode(cid, 'preview', { planId: planId });
-        flash(r.error === 'uac_cancelled' ? 'Cancelled' : 'Declined');
-        return;
-      }
       if (r.status === 'stale' || r.status === 'expired') {
-        // The plan changed or lapsed: preview again from live state.
+        // The plan changed or lapsed. A single change previews again from live state; a fix cannot (only the AI proposes
+        // one), so it stays on screen as expired until dismissed.
+        var card = cid ? cardById(cid) : null, next = FIX.afterStale(plan, !!card);
+        if (next === 'expire') {
+          putPlan(planId, { plan: Object.assign({}, plan, { status: 'expired' }) });
+          if (cid) setMode(cid, 'preview', { planId: planId });
+          return;
+        }
         flash(r.status === 'expired' ? 'Expired' : 'Updated');
-        var card = cid ? cardById(cid) : null;
-        if (card) previewAction(card, plan.actionId);
-        else if (plan.undoOf) { putPlan(planId, { closed: true }); undoOperation({ operationId: plan.undoOf }); }
+        if (next === 'repreview') previewAction(card, plan.actionId, plan.targetRef && plan.targetRef.evidenceId);
+        else if (next === 'undo') { putPlan(planId, { closed: true }); undoOperation({ operationId: plan.undoOf }); }
         else putPlan(planId, { closed: true });
         return;
       }
-      // unavailable / error: a short word and Retry.
-      putPlan(planId, { approveError: r.status === 'unavailable' ? 'Unavailable' : 'Not approved' });
+      // Why it couldn't start, on the card (design errorCause; fix-plan.js approvalError): declined or the Windows window
+      // closed, another change, a scan or a benchmark running (Retry), or the plan no longer waits (Close only).
+      var why = FIX.approvalError(r) || FIX.approvalError({ status: 'error' });
+      putPlan(planId, { approveError: why.error, approveCause: why.errorCause });
       if (cid) setMode(cid, 'preview', { planId: planId });
     }
     function declinePlan(planId) {
-      putPlan(planId, { plan: Object.assign({}, (plansRef.current[planId] || {}).plan, { status: 'declined' }) });
+      putPlan(planId, { plan: Object.assign({}, (plansRef.current[planId] || {}).plan, { status: 'declined' }), approveCause: null, approveError: null });
       return backend.call('action.decline', { planId: planId }).catch(function () {});
     }
-    function undoOperation(op) {
+    // steps: [n] undoes those steps of a fix; without it, every undoable step (Undo all), or the single change.
+    function undoOperation(op, steps) {
       if (!op || undoing.current[op.operationId]) return;
       // One Undo per change: a second click while its Undo is open (or on its way) does nothing.
       var open = Object.keys(plansRef.current).some(function (k) {
@@ -956,19 +1296,119 @@
       });
       if (open) return;
       undoing.current[op.operationId] = true;
-      backend.call('action.undo', { idempotencyKey: uuid(), operationId: op.operationId }).then(function (plan) {
+      var up = { idempotencyKey: uuid(), operationId: op.operationId };
+      if (steps) up.steps = steps;
+      backend.call('action.undo', up).then(function (plan) {
         delete undoing.current[op.operationId];
         putPlan(plan.planId, { plan: plan, op: null, kind: 'undo' });
       }, function () { delete undoing.current[op.operationId]; flash('Not available'); });
+    }
+    function refreshOperation(operationId) {
+      backend.call('operation.get', { operationId: operationId }).then(function (op) { if (plansRef.current[op.planId]) putPlan(op.planId, { op: op }); }, function () {});
+    }
+    // Stop after this step (m9 §4): the step in flight finishes; the rest are skipped. A single long operation (a Defender
+    // scan, a repair): Stop ends it now (design v54); what it already did stays.
+    function stopOperation(planId, op) {
+      if (!op || !op.operationId) return;
+      putPlan(planId, { stopping: true });
+      backend.call('operation.stop', { operationId: op.operationId }).catch(function () { putPlan(planId, { stopping: false }); flash('Not available'); });
+    }
+    // The approval card for any change (entry: { planId, plan, op, approving, approveError, approveCause, stopping }).
+    // design ApprovalCard (v53): a fix with its steps, a single change as one step (fix-plan.js planView); waiting while
+    // the Windows approval is open, why it couldn't start (errorCause) with Retry or Close, Check again on an unclear step,
+    // Open settings on a step Optimus can't undo or a plan that can't run. extra.onClose is Close (Dismiss when expired);
+    // extra.onNext is Next; extra.manualUri: the Settings page that changes a single change back; extra.onPlanSettings(uri).
+    // design v54: the running step's progress (a long single change), Stop on a single long operation, the undo line
+    // before approval, Check again / Open settings on a failed step, Back (extra.onBack: card previews only, no decision
+    // recorded), and a guided task (a manual.open plan: Open settings, Check again = manual.recheck; extra.guide: the
+    // card's own steps; extra.settingsPath: the card's Settings path, design v59, when the plan carries none).
+    function planCardProps(e, extra) {
+      extra = extra || {};
+      var pl = e.plan, single = pl.kind !== 'fix';
+      var v = FIX.planView(pl, e.op, extra.manualUri || null, { progress: e.progress, guide: extra.guide || null, recheck: e.recheck || null, title: extra.guideTitle || null,
+        settingsPath: extra.settingsPath || null, task: task });
+      // A long single operation reports progress and can be stopped (the host's provider tools and long flags).
+      var long = single && (pl.kind === 'provider' || (pl.flags || []).indexOf('long') >= 0);
+      var why = pl.why && typeof pl.why === 'object' ? pl.why : pl.why ? { text: String(pl.why) } : null;
+      // An approval that couldn't start keeps the card waiting, whatever the plan's status says meanwhile.
+      var state = (e.approveCause || e.approveError) && !e.op ? 'awaiting' : v.state;
+      var planSettings = extra.onPlanSettings || openSettings;
+      var props = Object.assign({ title: pl.undoOf ? 'Undo' : pl.title || (v.steps[0] && v.steps[0].label) || 'Change',
+        requestedBy: FIX.requesterName(pl, task),
+        reason: why && why.text, from: why && why.by, steps: v.steps, state: state, blockedWhy: v.blockedWhy,
+        onOpenPlanSettings: v.planSettingsUri ? function () { planSettings(v.planSettingsUri); } : null,
+        waiting: !!e.approving, error: e.approveError || null, errorCause: e.approveCause || null, stopping: !!e.stopping,
+        onApprove: function () { approvePlan(e.planId, null); },
+        onDecline: function () { declinePlan(e.planId); },
+        // A single change stops only when it is a long operation; a fix stops after the step in flight.
+        onStop: single && !long ? null : function () { stopOperation(e.planId, e.op); },
+        onUndoStep: single ? function () { undoOperation(e.op); } : function (i) { undoOperation(e.op, [v.steps[i].n]); },
+        onUndoAll: function () { undoOperation(e.op); },
+        onCheckStep: function () { checkOperation(e); },
+        onOpenSettings: v.settingsUri || extra.manualUri ? function () { openSettings(v.settingsUri || extra.manualUri); } : null }, extra);
+      delete props.manualUri; delete props.onPlanSettings; delete props.guide; delete props.guideTitle; delete props.settingsPath;
+      if (v.guided) {
+        // The user makes this change in Windows Settings (normal, not an error): the page, then Check again (design v56:
+        // Checking… while it runs, and the guided note's line when nothing has changed yet).
+        props.onOpenPlanSettings = v.planSettingsUri ? function () { openSettings(v.planSettingsUri); } : null;
+        props.onCheckAgain = v.state === 'guided' && pl.findingId ? function () { recheckPlan(e); } : null;
+        props.checking = !!e.checking; props.stillSame = v.state === 'guided' && !!e.stillSame;
+        if (v.state !== 'guided') delete props.onBack;
+        if (v.title && !pl.title) props.title = v.title;
+      }
+      // A report-only result (design v56 'reported'): the tool's result, Close and Check again (the finding's own check;
+      // none without a finding: Close alone). Design v59: what Check again found is a line in the result note (recheck).
+      if (v.state === 'reported') {
+        props.result = v.result;
+        props.onCheckAgain = pl.findingId ? function () { recheckPlan(e); } : null;
+        props.checking = !!e.checking;
+        props.recheck = !e.checking && e.reportRecheck ? e.reportRecheck : null;
+        delete props.onBack;
+      }
+      // A plan that no longer waits: its one button reads Close and closes the card.
+      if (e.approveCause === 'cancelled') props.onDecline = props.onClose || null;
+      return props;
+    }
+    // M9 §5: the script approval card (entry: { planId, plan, op, progress, approving, approveError, stopping, view, transcript }).
+    function scriptCardProps(e, extra) {
+      var pl = e.plan, v = FIX.scriptView(pl, e.op, e.progress), who = FIX.requesterName(pl, task);
+      // An approval that couldn't start keeps the card waiting; a plan that no longer waits closes on Decline.
+      if ((e.approveCause || e.approveError) && !e.op) v.state = 'awaiting';
+      var close = e.approveCause === 'cancelled' && extra && extra.onClose;
+      return Object.assign(v, { title: pl.title || 'Script', requestedBy: who, from: who, reason: pl.why && pl.why.text,
+        waiting: !!e.approving, error: e.approveError || null, errorCause: e.approveCause || null, stopping: !!e.stopping,
+        transcript: e.transcript ? e.transcript.text : '', transcriptCut: !!(e.transcript && e.transcript.truncated),
+        view: e.view || null, onView: function (x) { putPlan(e.planId, { view: x }); if (x === 'transcript') loadTranscript(e.planId, e.op); },
+        onApprove: function (choice) { approvePlan(e.planId, null, choice); },
+        onDecline: close || function () { declinePlan(e.planId); }, onStop: function () { stopOperation(e.planId, e.op); } }, extra || {});
+    }
+    // operation.transcript (desktop): the captured output, read-only; read again each time it is opened.
+    function loadTranscript(planId, op) {
+      if (!op || !op.operationId) return;
+      backend.call('operation.transcript', { operationId: op.operationId }).then(function (r) { putPlan(planId, { transcript: r || { text: '', truncated: false } }); },
+        function () { flash('Not available'); });
+    }
+    // Activity's Transcript on a run row: the script's card comes back with its transcript open.
+    function showTranscript(planId) {
+      var e = plansRef.current[planId]; if (!e) return;
+      putPlan(planId, { closed: false, view: 'transcript' }); loadTranscript(planId, e.op);
     }
     function checkOperation(entry) {
       if (!entry || !entry.op) return;
       backend.call('operation.get', { operationId: entry.op.operationId }).then(function (op) { putPlan(op.planId, { op: op }); }, function () { flash('Not available'); });
     }
-    function recheckManual(cid, findingId) {
-      backend.call('manual.recheck', { findingId: findingId }).then(function (r) {
-        setMode(cid, (cardState[cid] || {}).mode || 'guide', { recheck: r.status === 'verified_by_rescan' ? 'Verified' : 'Still the same' });
-      }, function () { flash('Not available'); });
+    // Check again (a guided task, or a report-only result): manual.recheck rereads the finding, the button reads Checking…
+    // meanwhile. A guided task that is fixed → the Verified card with its steps done; not yet → the guided note's "Checked
+    // again. Nothing has changed yet." (design v56, no toast). A report-only result stays a Finished card with the line
+    // gone | still in its note (design v59 recheck).
+    function recheckPlan(e) {
+      if ((plansRef.current[e.planId] || {}).checking) return;
+      putPlan(e.planId, { checking: true, stillSame: false });
+      backend.call('manual.recheck', { findingId: e.plan.findingId }).then(function (r) {
+        var status = r && r.status;
+        if (!FIX.isGuided(e.plan)) { putPlan(e.planId, { checking: false, reportRecheck: FIX.recheckWord(status) }); return; }
+        putPlan(e.planId, status === 'verified_by_rescan' ? { checking: false, recheck: status } : { checking: false, stillSame: true });
+      }, function () { putPlan(e.planId, { checking: false }); flash('Not available'); });
     }
     // One card at a time opens full width (Why, steps, preview, ask); closing returns to the grid.
     function setFocusPart(cid, part, on) {
@@ -993,32 +1433,41 @@
       if (!curCard) return;
       if (o === 'Intended') { ignoreAs(curCard, 'intended'); return; }
       if (o !== 'Ask about this') setFocus(function (f) { return { cid: cid, main: f.cid === cid && f.main, why: f.why, ask: f.ask }; });
-      if (o === 'Open settings') { openSettings(curSettings); setMode(cid, (cardState[cid] || {}).mode || 'guide', { opened: true }); return; }
-      if (o === 'Check again') { recheckManual(cid, curCard.findingId); return; }
+      if (o === 'Open settings') { openSettings(curSettings); return; }
       if (DEFENDER_OPTIONS[o]) { previewAction(curCard, DEFENDER_OPTIONS[o]); return; }
-      if (o === 'View steps') setMode(cid, 'guide');
+      // Design v59: a guided finding's steps are the guided approval card (the host's manual.open plan), never a mode of
+      // the card itself.
+      if (o === 'View steps') previewAction(curCard, 'manual.open');
       // A preview is always built by the backend (a plan); without an action there is nothing to preview.
-      else if (o === 'Preview change') { if (curCard.actionId) previewAction(curCard, curCard.actionId); else if (curCard.guide) setMode(cid, 'guide'); else flash('Not available'); }
+      else if (o === 'Preview change') { if (curCard.actionId) previewAction(curCard, curCard.actionId); else if (curCard.guide) previewAction(curCard, 'manual.open'); else flash('Not available'); }
       else if (o === 'Ask about this') { setFocusPart(cid, 'ask', true); setAskToken(function (t) { return { cid: cid, n: t.n + 1 }; }); }
       else if (OPTION_IDS[o]) leave(cid, OPTION_IDS[o]);
     }
-    // With an in-app provider connected, questions go to the assistant (agent.ask). The first one opens the grant sheet.
+    // With an in-app provider connected, questions go to the assistant (agent.ask). The first one starts a task with the
+    // permissions the user set (M9 §1.4: no grant sheet; the host builds the grant).
     // The box, a card's "Ask about this" and the summary all use the same active task (m5 §6).
+    // The chosen AI (connRef) decides: a task handed in is asked as it is (its recipient is the one it was started for);
+    // otherwise the current task only when it is the chosen AI's, else a new task for the chosen AI (OT.askTarget).
     function agentAsk(text, cardId, t, extra) {
-      t = t || task;
-      // A task is bound to the report it was started on; a newer report gets its own (the grant sheet again).
-      // Claude Code / Codex are asked in the app only through a headless task (a user-window task is asked in their window).
-      var sameReport = t && report && t.scope && t.scope.reportId === report.reportId;
-      var askable = t && (!isMcpKind(t.recipient.kind) || t.recipient.mode === 'headless');
-      if (!t || t.status !== 'active' || t.recipient.kind !== conn.kind || !sameReport || !askable) { setGrant({ kind: conn.kind, pending: Object.assign({ text: text, cardId: cardId }, extra) }); return; }
+      var rep = reportRef.current, pending = Object.assign({ text: text, cardId: cardId }, extra);
+      var isFix = !!(extra && extra.intent === 'fix');
+      var target = OT.askTarget({ given: t || null, current: liveTask.current, chosenKind: connRef.current.kind, reportId: rep && rep.reportId });
+      if (target.start) { startTask({ kind: target.start, pending: pending }); return; }
+      if (!target.task) return;
+      t = target.task;
       // Only an answer still on its way holds the next question; a failed one doesn't.
       // Only this task's unanswered question holds the next one (another task's never does).
-      if (answers.some(function (a) { return a.taskId === t.taskId && a.text == null && !a.failedTurn; })) { flash('One moment'); return; }
-      var id = uuid(), kind = conn.kind;
+      if (answersRef.current.some(function (a) { return a.taskId === t.taskId && a.text == null && !a.failedTurn; })) { flash('One moment'); return; }
+      var id = uuid();
       // m5 §9: every question from the box is a panel of its own, newest on top.
-      setAnswers(function (list) { return list.concat([Object.assign({ id: id, q: text, cardId: cardId || null, taskId: t.taskId, turnId: null, text: null, busy: 'Thinking…', reportId: report.reportId, at: new Date().toISOString() }, extra)]).slice(-KEEP_ANSWERS); });
-      var params = { idempotencyKey: uuid(), taskId: t.taskId, text: text };
+      setAnswers(function (list) { return list.concat([Object.assign({ id: id, q: text || null, cardId: cardId || null, taskId: t.taskId, turnId: null, text: null, busy: 'Thinking…', reportId: rep ? rep.reportId : null, at: new Date().toISOString() }, extra, isFix ? { fix: true } : null)]).slice(-KEEP_ANSWERS); });
+      var params = { idempotencyKey: uuid(), taskId: t.taskId };
+      if (text || !isFix) params.text = text;
       if (cardId) params.cardId = cardId;
+      // m9 §17.3: Fix for me (intent fix; text optional), "Change something…" (revise: the plan it replaces).
+      if (isFix) { params.intent = 'fix'; if (extra.revise) params.revise = extra.revise; }
+      // A new question beside the chat: ended checks requests there step aside.
+      if (!cardId && !(extra && extra.scan)) setCheckReqs(function (m) { var n = {}; Object.keys(m).forEach(function (k) { n[k] = !FIX.checksOpen(m[k]) && !m[k].cardId ? Object.assign({}, m[k], { hidden: true }) : m[k]; }); return n; });
       // M6a §8: Investigate with AI names the benchmark run and part it is about.
       if (extra && extra.context) params.context = extra.context;
       backend.call('agent.ask', params).then(function (r) {
@@ -1027,31 +1476,73 @@
         var drop = function () { setAnswers(function (list) { return list.filter(function (a) { return a.id !== id; }); }); };
         // The answer to a task that is no longer the current one: nothing to show or offer.
         if (!isCurrentTask(t.taskId)) { drop(); return; }
-        // The task ended (expired, stopped, budget used, failed): a fresh one, through the grant sheet, with the same question.
+        // m9 §17.3: a refused fix ask changes nothing: busy says so; anything else re-reads the cards (their fix as it is).
+        if (isFix && !taskEnded(err)) {
+          drop();
+          if (err && err.code === -32013 && err.data && err.data.reason === 'busy') flash('One moment'); else refreshDeck();
+          return;
+        }
+        // The task ended (expired, stopped, budget used, failed): a fresh one with the same question.
         if (taskEnded(err)) {
           drop();
           var reason = err.data && err.data.reason ? String(err.data.reason).replace(/^task_/, '') : 'stopped';
           setTask(function (x) { return x && x.taskId === t.taskId ? Object.assign({}, x, { status: x.status === 'active' ? (TASK_WORD_KEYS[reason] ? reason : 'stopped') : x.status }) : x; });
-          setGrant({ kind: kind, pending: Object.assign({ text: text, cardId: cardId }, extra) });
+          // Asked again of the AI chosen now (never of one the user has switched away from).
+          if (connRef.current.kind) startTask({ kind: connRef.current.kind, pending: pending });
         } else setAnswers(function (list) { return list.map(function (a) { return a.id === id ? Object.assign({}, a, { failedTurn: true, busy: null }) : a; }); });
       });
     }
-    function startTask(sel) {
-      var g = grant; if (!g || !report || g.busy) return;
+    // g: { kind, pending?, pairingId?, grant? }. In-app and headless asks start without a grant (the host builds it from
+    // the permissions record); only the pairing panel sends one, for that task alone.
+    function startTask(g) {
+      var rep = reportRef.current;
+      if (!g || !rep) return;
+      // A typed question that can't go now goes back in the box, so nothing typed is lost.
+      var giveBack = function () { if (g.pending && !g.pending.cardId && !g.pending.scan) setRestore({ text: g.pending.text, token: Date.now() }); };
+      // One start at a time for an AI; a start for an AI the user has switched away from doesn't hold the new one's.
+      if (starting.current && starting.current.kind === g.kind) { giveBack(); flash('One moment'); return; }
       var params = { idempotencyKey: uuid(), goal: (g.pending && g.pending.text) || 'Review my report', recipientKind: g.kind,
-        scope: { reportId: report.reportId, findingIds: null }, grant: { diagnostics: sel.diagnostics, share: sel.share, canRequestChanges: !!sel.canRequestChanges } };
-      // A user-window task needs its approved pairing, whichever way the sheet was opened; a connected
-      // Claude Code / Codex without one runs headless in the app (m5 §3).
+        scope: { reportId: rep.reportId, findingIds: null } };
+      if (g.grant) params.grant = g.grant;
+      // A user-window task needs its approved pairing, whichever way the panel was opened; a connected
+      // Claude without one runs headless in the app (m5 §3).
       var headless = isMcpKind(g.kind) && !g.pairingId && stateOf(g.kind).row === 'connected';
       var pid = headless ? null : g.pairingId || (isMcpKind(g.kind) ? pairingFor(g.kind) : null);
       if (pid) params.pairingId = pid;
-      setGrant(function (x) { return x && Object.assign({}, x, { busy: true }); });
-      backend.call('agent.start', params).then(function (t) {
-        attachTask(t, []); setGrant(null);
-        if (g.pending && g.pending.scan) firstScan(t);
-        else if (g.pending) agentAsk(g.pending.text, g.pending.cardId, t, g.pending.context ? { context: g.pending.context } : undefined);
-        else if (isMcpKind(g.kind) && !headless) setShowActivity(true);
-      }, function () { setGrant(function (x) { return x && Object.assign({}, x, { busy: false }); }); flash('Not started'); });
+      var mine = { kind: g.kind };
+      starting.current = mine;
+      var done = function () { if (starting.current === mine) starting.current = null; };
+      if (g.grant) setGrant(function (x) { return x && Object.assign({}, x, { busy: true }); });
+      var send = function () {
+        // The choice changed while it was being saved: nothing is started for the AI left behind.
+        if (!pid && g.kind !== connRef.current.kind) { done(); giveBack(); return; }
+        backend.call('agent.start', params).then(function (t) {
+          done();
+          // Started for an AI that is no longer the chosen one: it ends at once and nothing is asked of it.
+          if (OT.staleStart(g, t, connRef.current.kind)) { backend.call('agent.stop', { taskId: t.taskId }).catch(function () {}); giveBack(); return; }
+          attachTask(t, []);
+          if (g.grant) setGrant(null);
+          if (g.pending && g.pending.scan) firstScan(t);
+          else if (g.pending) agentAsk(g.pending.text, g.pending.cardId, t, g.pending.context ? { context: g.pending.context }
+            : g.pending.intent ? { intent: g.pending.intent, revise: g.pending.revise || undefined } : undefined);
+          else if (isMcpKind(g.kind) && !headless) setShowActivity(true);
+        }, function (err) {
+          done();
+          // The host has another AI saved as chosen: read the saved choice again and try once more (never an error shown).
+          if (OT.notChosen(err)) {
+            if (g.rechecked) { giveBack(); return; }
+            backend.call('onboarding.get').then(setOnb, function () {}).then(function () {
+              if (g.kind === connRef.current.kind) startTask(Object.assign({}, g, { rechecked: true })); else giveBack();
+            });
+            return;
+          }
+          if (g.grant) setGrant(function (x) { return x && Object.assign({}, x, { busy: false }); });
+          giveBack();
+          flash('Not started');
+        });
+      };
+      // An in-app or headless start waits for the chosen AI's save (the host refuses an AI not saved as chosen).
+      if (!pid && choiceSave.current) choiceSave.current.then(send); else send();
     }
     // First-connect scan (m5 §6, stage aiscan): once per newly connected kind, right after its grant; Skip leaves it running.
     var scanBack = React.useRef('main');
@@ -1064,15 +1555,16 @@
       go('aiscan');
     }
     function offerFirstScan(kind) {
-      if (!kind || !fuRef.current || scannedKinds().indexOf(kind) >= 0) return;
-      var t = task, live = t && t.status === 'active' && t.recipient.kind === kind && t.scope && t.scope.reportId === fuRef.current.reportId &&
-        (!isMcpKind(kind) || t.recipient.mode === 'headless');
-      if (live) { firstScan(t); return; }
-      setGrant({ kind: kind, pending: { text: SCAN_PROMPT, cardId: null, scan: true } });
+      // Only ever for the AI chosen now (a first look offered before a later switch is not run).
+      if (!kind || kind !== connRef.current.kind || !fuRef.current || scannedKinds().indexOf(kind) >= 0) return;
+      var live = OT.askTarget({ current: liveTask.current, chosenKind: kind, reportId: fuRef.current.reportId }).task;
+      if (live) { firstScan(live); return; }
+      startTask({ kind: kind, pending: { text: SCAN_PROMPT, cardId: null, scan: true } });
     }
     // m5 §8: Stop ends only the running answer (turn or headless run); the task and its permissions stay.
-    function cancelRun() {
-      var t = task; if (!t) return;
+    // forTask: the task whose run to stop (a card's fix names its own, card.fix.taskId); else the current task.
+    function cancelRun(forTask) {
+      var t = typeof forTask === 'string' ? { taskId: forTask } : task; if (!t) return;
       // Late replies for a task that is no longer current change nothing on screen.
       var clear = function () {
         if (!isCurrentTask(t.taskId)) return;
@@ -1102,13 +1594,13 @@
       setAnswers(function (list) { return list.filter(function (a) { return answerKey(a) !== row.key; }); });
     }
     // A follow-up asks in its panel's conversation and opens a new panel: the panel's task when it is the current one
-    // (agentAsk opens the grant sheet if it ended), or an earlier task that is still active; otherwise the usual way.
+    // (agentAsk starts a fresh one if it ended), or an earlier task that is still active; otherwise the usual way.
     function followUp(a, q) {
       if (!task || a.taskId === task.taskId) { agentAsk(q, null); return; }
       if (runInProgress) { flash('One moment'); return; }
       backend.call('agent.get', { taskId: a.taskId }).then(function (t) {
-        var fits = t.status === 'active' && t.recipient && t.recipient.kind === conn.kind && report && t.scope && t.scope.reportId === report.reportId &&
-          (!isMcpKind(t.recipient.kind) || t.recipient.mode === 'headless');
+        var rep = reportRef.current;
+        var fits = !!OT.askTarget({ current: t, chosenKind: connRef.current.kind, reportId: rep && rep.reportId }).task;
         if (!fits) { agentAsk(q, null); return; }
         attachTask(t, t.activity || []); agentAsk(q, null, t);
       }, function () { agentAsk(q, null); });
@@ -1130,11 +1622,11 @@
         if (r.status !== 'approved') { flash('Denied'); setConnect(function (c) { return c ? Object.assign({}, c, { phase: 'register', code: null, pairingId: null }) : c; }); return; }
         if (kind) pairedIds.current[kind] = r.pairingId;
         setGrant({ kind: kind, pairingId: r.pairingId });
-        var label = (providers[kind] && providers[kind].label) || ORIGIN_LABEL[pr.client] || (kind === 'codex_mcp' ? 'Codex' : 'Claude Code');
-        if (stageRef.current.id === 'login') { commitProvider({ value: TILE_OF[kind], label: label, kind: kind }); return; }
+        var label = aiName(kind, providers[kind] && providers[kind].label) || 'Claude';
+        if (stageRef.current.id === 'login') { commitProvider({ value: tileOfKind(kind), label: label, kind: kind }); return; }
         // Approved from the card or the pill: this client is now the chosen AI (the chooser's connect step is over).
         setConnect(null);
-        if (kind && conn.kind !== kind) { setConn({ value: TILE_OF[kind], label: label, kind: kind }); saveOnb({ provider: { value: TILE_OF[kind], label: label } }).catch(function () {}); }
+        if (kind && connRef.current.kind !== kind) { var v = OT.storedValue(tileOfKind(kind)); setConn({ value: v, label: label, kind: kind }); stopOtherAi(kind); saveChoice({ value: v, label: label, kind: kind }).catch(function () {}); }
       }, function (err) {
         setPairBusy(false);
         var reason = (err && err.data && err.data.reason) || '';
@@ -1183,7 +1675,7 @@
         if (want.length) setTevN(function (n) { return n + 1; });
       });
     }
-    // The selected AI isn't usable: offer its action (grant sheet on paired, the pill detail otherwise).
+    // The selected AI isn't usable: offer its action (the pairing panel on paired, the pill detail otherwise).
     function openChooser() { setDetailOpen(false); setReturnTo(stageRef.current.id); setWave({ speed: 0.7, words: [] }); go('login'); }
     function offerAction(st) {
       if (st.action === 'start') { setGrant({ kind: conn.kind }); return; }
@@ -1196,7 +1688,18 @@
       if (route !== 'local') offerAction(askState);
       respond({ scope: 'card', cardId: cid, text: text }).then(function (res) { if (res.stale) setAskRestore({ text: text, token: Date.now(), cid: cid }); });
     }
-    function submitMain(text) {
+    // M9 §2: with no AI connected, "what can this app do?" is answered here from the app guide (guide.get), not
+    // routed to "connect an AI". An older host without guide.get takes the usual path.
+    function guideAnswer(text) {
+      backend.call('guide.get', { topic: 'overview' }).then(function (g) {
+        var id = 'guide-' + Date.now();
+        setAnswers(function (list) { return list.concat([{ id: id, q: text, cardId: null, taskId: null, turnId: null, text: String(g.text || ''), citations: [], followUps: [], busy: null,
+          local: true, reportId: reportRef.current ? reportRef.current.reportId : null, at: new Date().toISOString() }]).slice(-KEEP_ANSWERS); });
+        showPanel(id);
+      }, function () { submitMain(text, true); });
+    }
+    function submitMain(text, noGuide) {
+      if (!noGuide && isLocal && OT.isAppQuestion(text)) { guideAnswer(text); return; }
       // With a report, free text is a reply or a question about it. Starters, "scan…", and anything before a report scan.
       if (stage.id !== 'main' || !report || FULL_AUDIT.test(text) || starterHit(text)) { runAudit(text, routeIntent(text)); return; }
       var card = fu && fu.card;
@@ -1204,7 +1707,7 @@
       if (DO_THAT.test(text)) {
         // The exact preview is a plan the backend builds from live state, never the card's own sketch.
         if (card && card.actionId) { previewAction(card, card.actionId); flash('Here’s exactly what would change'); }
-        else if (card && card.guide) { setMode(card.id, 'guide'); flash('This one is manual: here are the steps'); }
+        else if (card && card.guide) { previewAction(card, 'manual.open'); flash('This one is manual: here are the steps'); }
         else flash('Which change do you mean?');
         return;
       }
@@ -1226,7 +1729,7 @@
       var k = conn.kind, st = askState;
       setShowActivity(false); // the share preview shows in the same place; Activity would cover it
       if (st.row === 'local' || !report) { setSummary('connect'); return; }
-      // Claude Code / Codex in the app: the summary is one more question to the same task, answered under the box.
+      // Claude in the app: the summary is one more question to the same task, answered under the box.
       if (isMcpKind(k) && st.usable) { agentAsk(SUMMARY_PROMPT, null); return; }
       if (isMcpKind(k)) { if (READY_ROWS[st.row] || st.row === 'waiting') setSummary('continue'); else offerAction(st); return; }
       if (!st.usable) { offerAction(st); return; }
@@ -1241,31 +1744,59 @@
     React.useEffect(function () {
       if (pendingSummary.current && stage.id === 'main' && !stage.leaving && report) { pendingSummary.current = false; requestSummary(); }
     }, [stage.id, stage.leaving, conn.kind, providers]);
+    // M9 §1.4, the catch-all: on the main page with an AI whose permissions were never set (e.g. after a scan the
+    // user resumed, or a pairing approved from a card), the page comes first.
+    React.useEffect(function () {
+      if (stage.id !== 'main' || stage.leaving || conn.value === 'local' || conn.value === 'later') return;
+      if (gateTo(conn.kind, 'main').stage === PERM_STAGE) openPermissions('main');
+    }, [stage.id, stage.leaving, conn.kind, perm]);
 
     /* ---------- login and setup ---------- */
-    function afterProvider() {
-      var o = onbRef.current;
-      if (!o || o.step === 'provider') return 'use';
-      if (o.step !== 'complete') return STEP_STAGE[o.step];
-      return 'main';
-    }
     // Committing a connection: a different recipient revokes the current task; drafts and the report stay.
     // usable: the kind is connected right now, so a first connect offers its first look (m5 §6).
+    // Switching stops the old AI's in-app task first (its running answer and any approval it asked for end with it, on
+    // the host); an outside Claude Code window that is paired is left as it is.
+    function stopOtherAi(kind) {
+      var cur = liveTask.current;
+      if (!OT.switchStops(cur, kind)) return;
+      var old = cur.taskId;
+      // m9 §17.2: its open administrator checks end task_ended; on screen that is "you changed the AI".
+      switchedTasks.current[old] = true;
+      setCheckReqs(function (m) { var n = Object.assign({}, m); Object.keys(n).forEach(function (k) { if (n[k].taskId === old) n[k] = Object.assign({}, n[k], { switchedAi: true }); }); return n; });
+      liveTask.current = Object.assign({}, cur, { status: 'stopped' });
+      setTask(function (x) { return x && x.taskId === old ? Object.assign({}, x, { status: 'stopped' }) : x; });
+      setLiveTurn(null); setShowActivity(false);
+      // The old task's unanswered questions go with it; its answered ones close (they stay in History).
+      setOpen(answersRef.current.filter(function (a) { return a.taskId === old; }).map(function (a) { return a.id; }), false);
+      setAnswers(function (list) { return list.filter(function (a) { return a.taskId !== old || a.text != null || a.failedTurn; }); });
+      backend.call('agent.stop', { taskId: old }).then(mergeTask, function () {});
+    }
     function commitProvider(c, usable) {
-      var next = returnTo || afterProvider();
-      if (task && task.status === 'active' && task.recipient.kind !== c.kind) {
-        // The old task's unanswered questions go with it; its stop reply only updates it while it is still the current one.
-        var old = task.taskId;
-        setLiveTurn(null);
-        setAnswers(function (list) { return list.filter(function (a) { return a.taskId !== old || a.text != null || a.failedTurn; }); });
-        backend.call('agent.stop', { taskId: old }).then(mergeTask, function () {});
-      }
+      // The picker's tile ids (claude, api-key) are stored as the onboarding values (claude-code, api); labels as users see them.
+      c = Object.assign({}, c, { value: OT.storedValue(c.value) || c.value, label: aiName(c.kind, c.label) || c.label });
+      var next = nextAfterProvider(onbRef.current && onbRef.current.step, returnTo);
+      var prevKind = connRef.current.kind;
+      // The choice first, before anything else runs: every later reply and event reads it (connRef).
       setConn(c); setConnect(null);
-      saveOnb({ provider: { value: c.value, label: c.label }, step: 'use' }).catch(function () { flash('Not saved'); });
+      stopOtherAi(c.kind);
+      // A summary preview made for the previous AI is not sent to the new one.
+      if (c.kind !== prevKind && summary && summary.preview) setSummary(null);
+      // The save goes first; the new AI's first look starts only once the host has it as the chosen one.
+      var saved = saveChoice(c, 'use');
+      saved.then(function () { if (c.kind) loadPermissions(); }, function () { flash('Not saved'); });
       if (summary === 'connect' && c.kind) { pendingSummary.current = true; setSummary(null); }
       if (next === 'main') loadStarters();
+      // M9 §1.4: an AI whose permissions were never set shows the page first; Back and Continue lead on to `next`.
+      // A different AI asks again even after a Back. The provider's `available` is read again once it is saved.
+      if (c.kind !== prevKind) permLater.current = false;
+      var gate = gateTo(c.kind, next);
+      if (gate.stage === PERM_STAGE) {
+        permAfter.current = usable && next === 'main' ? c.kind : null;
+        setReturnTo(next); go(PERM_STAGE);
+        return;
+      }
       setReturnTo(null); go(next);
-      if (usable && next === 'main') offerFirstScan(c.kind);
+      if (usable && next === 'main') saved.then(function () { offerFirstScan(c.kind); }, function () {});
     }
     // API keys are entered in the desktop shell's own Windows dialog (shell.requestApiKey); the page never sees one.
     // Cancel says nothing; a failed check or save comes back as { failed: code } so the chooser can say why.
@@ -1316,16 +1847,17 @@
     function connectApi(kind) { apiAction(kind, true); }
     function disconnectKind(kind) {
       if (!kind) return;
-      backend.call('provider.disconnect', { kind: kind }).then(function (e) {
+      return backend.call('provider.disconnect', { kind: kind }).then(function (e) {
         mergeProvider(e); setDetailOpen(false); setConnect(null);
         if (isMcpKind(kind)) { delete pairedIds.current[kind]; setPairing(function (cur) { return cur && cur.client === CLIENT_OF_KIND[kind] ? null : cur; }); }
-        if (task && task.status === 'active' && task.recipient.kind === kind) {
-          var old = task.taskId;
+        var cur = liveTask.current;
+        if (cur && cur.status === 'active' && cur.recipient.kind === kind) {
+          var old = cur.taskId;
           setTask(function (x) { return x && x.taskId === old ? Object.assign({}, x, { status: 'stopped' }) : x; });
           setLiveTurn(null);
           setAnswers(function (list) { return list.filter(function (a) { return a.taskId !== old || a.text != null || a.failedTurn; }); });
         }
-        if (conn.kind === kind) { setConn({ value: 'local', label: 'Local only', kind: null }); saveOnb({ provider: { value: 'local', label: 'Local only' } }).catch(function () {}); }
+        if (connRef.current.kind === kind) { setConn({ value: 'local', label: 'Local only', kind: null }); saveChoice({ value: 'local', label: 'Local only' }).catch(function () {}); }
       }, function () { flash('Not saved'); });
     }
     function showCommandFor(kind) {
@@ -1333,8 +1865,8 @@
       if (regs.current[kind]) return;
       backend.call('provider.connect', { kind: kind }).then(function (e) { mergeProvider(e); rememberReg(kind, e); }, function () {});
     }
-    function rememberReg(kind, e) { var reg = e && e.registration; if (reg) regs.current[kind] = kind === 'codex_mcp' ? reg.codex : reg.claude; }
-    // Claude Code / Codex: show the registration command, then wait for the bridge's pairing request.
+    function rememberReg(kind, e) { var reg = e && e.registration; if (reg) regs.current[kind] = reg.claude; }
+    // Claude Code in its own window: show the registration command, then wait for the bridge's pairing request.
     function connectNative(tile, kind, label) {
       backend.call('provider.connect', { kind: kind }).then(function (e) {
         mergeProvider(e); rememberReg(kind, e);
@@ -1342,7 +1874,7 @@
         if (e.status === 'active' || e.status === 'client_closed') { commitProvider({ value: tile, label: e.label || label, kind: kind }); return; }
         var reg = e.registration || {};
         // The choice is only made on Continue (or an approved pairing); Back leaves the previous AI as it was.
-        setConnect({ tile: tile, kind: kind, label: e.label || label, phase: 'register', command: kind === 'codex_mcp' ? reg.codex : reg.claude });
+        setConnect({ tile: tile, kind: kind, label: e.label || label, phase: 'register', command: reg.claude });
         if (pairing && CLIENT_KIND[pairing.client] === kind) setConnect(function (c) { return Object.assign({}, c, { phase: 'pairing', code: pairing.code, pairingId: pairing.pairingId }); });
       }, function () { flash('Not connected'); });
     }
@@ -1377,9 +1909,9 @@
         putClient(tile, { known: false });
       });
     }
-    // The chooser's bottom button for Claude Code / Codex (m5 §6): Get / Install, then Sign in; Continue is chooseProvider.
+    // Claude's next step in the picker (m5 §6): Install (or Update), then Sign in; Connect once connected is chooseProvider.
     function clientAction(tile) {
-      var cs = clients[tile], client = CLIENT_OF_TILE[tile];
+      var cs = clients[tile];
       if (!cs || !cs.known) { checkClient(tile); return; }
       // Blocked on this PC: nothing to click through; check again after the user changed something.
       // (node_missing / unsupported_path: the official installer needs neither, so it installs.)
@@ -1388,12 +1920,7 @@
       if (cs.outdated) { installClient(tile); return; }
       // Installed, but the sign-in check gave no answer: ask again instead of opening another sign-in.
       if (cs.installed && cs.signedIn == null && !cs.signing) { checkClient(tile); return; }
-      if (!cs.installed) {
-        if (cs.app) { checkClient(tile); return; }   // Claude's app is here; its Code tab brings Claude Code on first open.
-        if (isFixture) { try { window.open(CLIENT_PAGE[client], '_blank', 'noopener'); } catch (e) { /* popup blocked */ } return; }
-        if (DESKTOP_OPEN_URL) backend.call('shell.openUrl', { url: CLIENT_PAGE[client] }).catch(function () { flash('Not available'); });
-        return;
-      }
+      if (!cs.installed) { installClient(tile); return; }
       signInClient(tile);
     }
     // Optional: also add the connector to the client's own window (m3 pairing path), after the shell's native confirm.
@@ -1420,7 +1947,7 @@
       function next() {
         job.timer = setTimeout(function () {
           if (job.stopped) return;
-          if (Date.now() > until) { stopInstallPoll(key); var off = {}; off[flag] = false; putClient(tile, off); return; }
+          if (Date.now() > until) { stopInstallPoll(key); var off = {}; off[flag] = false; if (flag === 'installing') off.failed = 'Not finished'; putClient(tile, off); return; }
           checkClient(tile).then(function () { if (!job.stopped) next(); });
         }, every);
       }
@@ -1515,12 +2042,18 @@
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, [canFold, peek, detailOpen, showActivity, sheet, menu]);
+    // m9 §17.3: a plan bound to a card on screen is shown inside that card (a script stays here: the card has no script view).
+    var deckIds = {}; cards.forEach(function (c) { deckIds[c.id] = true; });
+    var inCard = function (e) { return !!(e.plan && e.plan.cardId && deckIds[e.plan.cardId] && e.plan.kind !== 'script'); };
     var sidePlans = Object.keys(plans).map(function (k) { return Object.assign({ planId: k }, plans[k]); }).filter(function (e) {
-      return (e.kind === 'agent' || e.kind === 'undo') && e.plan && !e.closed && e.plan.status !== 'declined' && e.plan.status !== 'expired' && e.plan.status !== 'cancelled';
+      return (e.kind === 'agent' || e.kind === 'undo') && e.plan && !e.closed && !inCard(e) && ((e.plan.status !== 'declined' && e.plan.status !== 'cancelled') || !!e.approveCause) &&
+        // An expired fix stays until dismissed (it says so and offers Dismiss); other expired plans just go.
+        (e.plan.status !== 'expired' || (e.plan.kind === 'fix' && !e.plan.undoOf && !e.op));
     });
     var cls = function (base) { return cx(base, stage.leaving ? 'ot-sink' : 'ot-enter'); };
-    var id = stage.id, signedIn = id !== 'login' && id !== 'boot';
-    var toLogin = stage.leaving && stage.next === 'login';
+    var id = stage.id, signedIn = id !== 'login' && id !== 'boot' && id !== PERM_STAGE;
+    // The chooser and the permissions page are full pages on the sea: the main page sinks away before either.
+    var toLogin = stage.leaving && (stage.next === 'login' || stage.next === PERM_STAGE);
     var summaryLines = Array.isArray(summary) ? summary : null;
     var isLocal = conn.value === 'local' || conn.value === 'later';
     var curProvider = !isLocal && conn.kind ? providers[conn.kind] : null;
@@ -1534,56 +2067,47 @@
     var pillState = stateOf(pillKind);
     var askState = stateOf(isLocal ? null : conn.kind);
     var inApp = routeAsk(askState) === 'agent';
-    // Chooser view of each native client (m5 §6): Install → Sign in → Connected, and the optional window connector.
+    // The picker's view of Claude Code (m5 §6): Install → Sign in → Connected, and the optional window connector.
     var clientViews = {};
     Object.keys(CLIENT_OF_TILE).forEach(function (tile) {
       var cs = clients[tile]; if (!cs || !cs.known) return;
-      var client = CLIENT_OF_TILE[tile], name = tile === 'codex' ? 'Codex' : 'Claude Code';
-      var installing = { installCmd: INSTALL_CMD[client], installing: !!cs.installing, failed: cs.failed,
+      var client = CLIENT_OF_TILE[tile];
+      // note: the design's one grey line (claudeNote), from the same status.
+      var installing = { installCmd: INSTALL_CMD[client], installing: !!cs.installing, failed: cs.failed, note: OT.claudeNote(cs),
         onInstall: function () { installClient(tile); }, onCheck: function () { checkClient(tile); } };
-      // The CLI is there but this PC won't let it run, or only an old one is: both stay on the install step.
-      if (cs.blocked) {
-        var b = BLOCKED[cs.blockedReason] || BLOCKED.launch_failed;
-        // reinstall: the official installer works where this copy can't (no Node needed, a normal folder).
-        clientViews[tile] = Object.assign({ notInstalled: true, blocked: true, reinstall: !!b.reinstall, hint: cs.installing ? 'Installing…' : b.word,
-          note: b.note, title: b.reinstall ? 'Install ' + name : b.word, primary: b.reinstall ? 'Install ' + name : 'Check again', external: false }, installing);
+      // The CLI is there but this PC won't let it run, or only an old one is: both stay on the install step
+      // (the note says which: blocked, repair, updating …).
+      if (cs.blocked || cs.outdated || !cs.installed) {
+        clientViews[tile] = Object.assign({ notInstalled: true, blocked: !!cs.blocked, outdated: !cs.blocked && !!cs.outdated, app: !!cs.app }, installing);
         return;
       }
-      if (cs.outdated) {
-        clientViews[tile] = Object.assign({ notInstalled: true, outdated: true, hint: cs.installing ? 'Updating…' : 'Update needed',
-          note: 'This version is too old for the app.', primary: 'Update ' + name, external: false }, installing);
-        return;
-      }
-      clientViews[tile] = !cs.installed
-        ? { notInstalled: true, app: !!cs.app, hint: cs.installing ? 'Installing…' : cs.app ? 'Open Claude once' : 'Not installed',
-            primary: cs.app ? 'Check again' : tile === 'codex' ? 'Get Codex' : 'Get Claude', external: !cs.app,
-            disabled: !cs.app && !isFixture && !DESKTOP_OPEN_URL, installCmd: INSTALL_CMD[client], installing: !!cs.installing, failed: cs.failed,
-            onInstall: function () { installClient(tile); }, onCheck: function () { checkClient(tile); } }
-        : { installed: true, signedIn: cs.signedIn, signing: !!cs.signing, failed: cs.failed,
-            // signedIn null: the sign-in check gave no answer (slow PC, antivirus): check again rather than sign in again.
-            unknown: cs.signedIn == null && !cs.signing,
-            hint: cs.signedIn === true ? null : cs.signing ? 'Signing in…' : cs.signedIn == null ? 'Couldn’t check' : 'Not signed in',
-            billing: cs.signedIn === true && BILLING[client] ? BILLING[client][cs.auth] || null : null,
-            onSignIn: function () { signInClient(tile); },
-            registered: cs.registered, adding: cs.busy, onRegister: function () { registerClient(tile); }, onCheck: function () { checkClient(tile); } };
+      clientViews[tile] = { installed: true, signedIn: cs.signedIn, signing: !!cs.signing, failed: cs.failed, note: OT.claudeNote(cs), installCmd: INSTALL_CMD[client],
+        billing: cs.signedIn === true && BILLING[client] ? BILLING[client][cs.auth] || null : null,
+        onSignIn: function () { signInClient(tile); }, onInstall: function () { installClient(tile); },
+        registered: cs.registered, adding: cs.busy, onRegister: function () { registerClient(tile); }, onCheck: function () { checkClient(tile); } };
     });
     var tileStates = {};
-    ['anthropic_api', 'openai_api', 'chatgpt_plan', 'claude_code_mcp', 'codex_mcp'].forEach(function (k) { if (providers[k]) tileStates[k] = stateOf(k); });
-    // The row's actions, for the pill detail.
-    function rowActions(st, kind) {
-      var a = [];
-      if (st.action === 'signIn' && isMcpKind(kind)) a.push({ label: ACTION_WORD.signIn, onClick: function () { signInClient(TILE_OF[kind]); } });
-      else if (st.action === 'install') a.push({ label: ACTION_WORD.install, onClick: openChooser });
-      else if (st.action === 'addKey' || st.action === 'updateKey' || st.action === 'retry' || st.action === 'signIn') a.push({ label: ACTION_WORD[st.action], onClick: function () { apiAction(kind, false); } });
-      else if (st.action === 'approve' && pairing) {
-        a.push({ label: 'Deny', onClick: function () { decidePairing(false); } });
-        a.push({ label: 'Approve', icon: 'check', onClick: function () { decidePairing(true); } });
-      } else if (st.action === 'start') a.push({ label: 'Start', onClick: function () { if (report) { setGrant({ kind: kind }); setDetailOpen(false); } else flash('Scan first'); } });
-      else if (st.action === 'activity' || st.action === 'askAgain') {
-        if (task) a.push({ label: 'Activity', onClick: function () { setShowActivity(true); setDetailOpen(false); } });
-        if (st.action === 'activity' && taskActive) a.push({ label: 'Stop', icon: 'stop', onClick: stopTask });
-      } else if (st.action === 'showCommand' && !(showCmd || waitLong)) a.push({ label: 'Show command', onClick: function () { showCommandFor(kind); } });
-      return a;
+    ['anthropic_api', 'openai_api', 'chatgpt_plan', 'claude_code_mcp'].forEach(function (k) { if (providers[k]) tileStates[k] = stateOf(k); });
+    // The mono word under each picker tile (design tileStatus): connection-state.js tileStatus.
+    var apiState = tileStates.anthropic_api && tileStates.anthropic_api.row === 'connected' ? tileStates.anthropic_api : tileStates.openai_api || tileStates.anthropic_api;
+    var tileStatus = { claude: OT.tileStatus('claude', clients.claude, tileStates.claude_code_mcp), chatgpt: OT.tileStatus('chatgpt', null, tileStates.chatgpt_plan),
+      'api-key': OT.tileStatus('api-key', null, apiState) };
+    // design v73: the pill panel's buttons by name (AIPillPanel onAction), for the connection `kind` and its state.
+    function pillAction(name, kind) {
+      if (name === 'Activity') { if (task) { setShowActivity(true); setDetailOpen(false); } }
+      // Stop: a native client's task ends (as before); an in-app run is cancelled (agent.cancel), the task stays.
+      else if (name === 'Stop') { if (nativeLive || !runInProgress) stopTask(); else cancelRun(); }
+      else if (name === 'Approve' || name === 'Deny') { if (pairing) decidePairing(name === 'Approve'); }
+      else if (name === 'Start') { if (report) { setGrant({ kind: kind }); setDetailOpen(false); } else flash('Scan first'); }
+      else if (name === 'Set up') openChooser();
+      else if (name === 'Check again') { loadProviders(); if (isMcpKind(kind)) checkClient(tileOfKind(kind)); }
+      else if (name === 'Sign in' && isMcpKind(kind)) signInClient(tileOfKind(kind));
+      else if (name === 'Sign in' || name === 'Add key' || name === 'Update key' || name === 'Retry') apiAction(kind, false);
+    }
+    // The manual layout's Copy: the command to the clipboard (Copied once it is there).
+    function copyCommand(text) {
+      var fail = function () { flash('Copy failed'); throw new Error('copy'); };
+      try { return navigator.clipboard.writeText(text || '').then(null, fail); } catch (e) { flash('Copy failed'); return Promise.reject(e); }
     }
     var waitKind = id === 'login' ? (connect && connect.kind) : detailOpen ? pillKind : null;
     var waitEntry = waitKind ? providers[waitKind] : null;
@@ -1596,6 +2120,9 @@
       return function () { clearTimeout(t); };
     }, [waitKind, waitEntry && waitEntry.status, waitEntry && waitEntry.since]);
     React.useEffect(function () { setShowCmd(false); }, [pillKind, pillState.row]);
+    // design v73: the pill panel's manual layout (waiting, bridge_rejected) shows the command at once: fetch it when opened.
+    var pillCmd = !!(detailOpen && pillKind && pillState.command);
+    React.useEffect(function () { if (pillCmd) showCommandFor(pillKind); }, [pillCmd, pillKind]);
     // Report evidence keeps its e-label; evidence from this task's own checks is named by its kind as it is cited
     // ("Ports", "CPU 2"), or numbered m1, m2 … while its kind is not known.
     function citeChip(id) {
@@ -1612,12 +2139,13 @@
     // A failed in-app turn shows the connection's state word and its action (or "No answer").
     var failWord = askState.tone === 'expired' && askState.word ? askState.word : 'No answer';
     var failAction = ACTION_WORD[askState.action] && isApiKind(conn.kind) ? { label: ACTION_WORD[askState.action], onClick: function () { apiAction(conn.kind, false); } }
-      : askState.action === 'signIn' && isMcpKind(conn.kind) ? { label: ACTION_WORD.signIn, onClick: function () { signInClient(TILE_OF[conn.kind]); } } : null;
+      : askState.action === 'signIn' && isMcpKind(conn.kind) ? { label: ACTION_WORD.signIn, onClick: function () { signInClient(tileOfKind(conn.kind)); } } : null;
     // M6.0: a turn the host stopped because the AI tried a blocked tool says so (no connection action).
     var BLOCKED_WORD = 'Stopped · the AI tried a blocked tool';
     function failOf(a) { return !a.failedTurn ? null : a.failCode === 'tool_blocked' ? BLOCKED_WORD : failWord; }
     function failActionOf(a) { return a.failedTurn && a.failCode !== 'tool_blocked' ? failAction : null; }
-    var aiLabel = (task && task.recipient && task.recipient.label) || (curProvider && curProvider.label) || (isLocal ? null : conn.label);
+    var aiLabel = (task && task.recipient && aiName(task.recipient.kind, task.recipient.label)) || (curProvider && aiName(curProvider.kind, curProvider.label)) || (isLocal ? null : conn.label);
+    problems.ai.current = aiLabel;
     var reportAnswers = answers.filter(function (a) { return !a.cardId && (!a.reportId || !report || a.reportId === report.reportId); }).map(function (a) {
       return Object.assign({}, a, { cites: (a.citations || []).map(citeChip), failed: failOf(a), action: failActionOf(a) });
     });
@@ -1657,45 +2185,229 @@
       later(function () { var el = document.querySelector('[data-bench]'); if (el) { if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: reduce ? 'auto' : 'smooth' }); if (el.focus) el.focus({ preventScroll: true }); } }, ms || 30);
     }
     function openBench() { setMenu(null); bench.openPanel(); focusBench(); }
-    var actItems = activity.map(function (a) {
-      var args = a.arguments || {};
-      return { id: a.invocationId, title: toolWords(a).replace(/ · \d+ s$/, ''), origin: a.origin, originLabel: ORIGIN_LABEL[a.origin] || a.origin, size: a.bytes ? kib(a.bytes) : null,
+    // design AgentActivity rows: the words (fix-plan.js activityWords), the tool id as the mono line, where it ran and its size.
+    var actItems = [].concat.apply([], activity.map(function (a) {
+      var args = a.arguments || {}, pe = a.planId ? plans[a.planId] : null;
+      var w = FIX.activityWords(a.tool, a.status !== 'running', a.label, pe && pe.plan && pe.plan.steps ? pe.plan.steps.length : 0, args.diagnosticId);
+      var it = { id: a.invocationId, title: w.title, detail: w.detail, tool: w.tool, origin: a.origin, originLabel: ORIGIN_LABEL[a.origin] || a.origin, size: a.bytes ? kib(a.bytes) : null,
         status: a.status, evidenceIds: a.evidenceIds, startedAt: startedAt.current[a.invocationId],
         window: a.status === 'running' && a.tool === 'run_diagnostic' && args.diagnosticId === 'process.sample' ? (args.window || 15) : null };
-    }).map(function (it, i, all) { return it.status === 'running' || it.window ? it : Object.assign({}, it, { title: toolWords(activity[i]) }); });
+      var e = a.tool === 'propose_script' && pe ? pe : null;
+      if (!e || !e.op || !e.plan || e.plan.kind !== 'script') return [it];
+      var ended = FIX.scriptEnded(e.op.state), pid = a.planId, run = FIX.activityWords('script.run', ended);
+      return [it, { id: 'run:' + e.op.operationId, title: run.title, tool: run.tool, detail: ended ? FIX.scriptRunWords(e.op) : null, origin: it.origin, originLabel: it.originLabel,
+        status: ended ? 'complete' : 'running', startedAt: e.op.startedAt ? Date.parse(e.op.startedAt) : null,
+        action: FIX.scriptHasTranscript(e.op) ? { label: 'Transcript', onClick: function () { showTranscript(pid); } } : null }];
+    }));
     // While the assistant or a native client works and Activity is closed, the pill says so.
     var working = taskActive && !showActivity && (!!workedAt || activity.some(function (a) { return a.status === 'running'; }) || taskWaiting);
     var TASK_WORD = { stopped: 'Stopped', expired: 'Expired', exhausted: 'Budget used', failed: 'Failed' };
+    // M9 §6: labels by finding (design ResearchNote props) and the toolbar chip, for the current report only.
+    var curResearch = research && report && research.reportId === report.reportId ? research : null;
+    var researchNotes = OT.researchNotes(curResearch);
+    if (id !== PERM_STAGE && permSeen.current !== 'loading') permSeen.current = null;
+    // §6.8 check-up cards: the deck only ever holds three, so each check-up card seen in it is kept here for the
+    // report's "AI check-up" group (a hidden card stays listed); ids in the check-up's own order.
+    var ckIds = (curResearch && curResearch.checkup && curResearch.checkup.cards) || [];
+    if (report && ckCards.current.reportId !== report.reportId) { ckCards.current = { reportId: report.reportId, byId: {} }; ckSeen.current = null; ckOnScreen.current = {}; ckTagGone.current = {}; ckFront.current = []; }
+    if (fu && report && fu.reportId === report.reportId) [fu.card].concat(fu.upcoming || []).forEach(function (c) { if (c && c.checkup) ckCards.current.byId[c.id] = c; });
+    var sheetCheckups = ckIds.map(function (cid, i) { var c = ckCards.current.byId[cid]; return c ? OT.checkupRow(c, i, hhmm) : null; }).filter(Boolean);
+    // "New from the online check-up": cards added since the report's check-up cards were first read here, until each has
+    // been on screen (or Show is used).
+    if (curResearch && ckSeen.current === null) { ckSeen.current = {}; ckBase.current = {}; ckIds.forEach(function (cid) { ckSeen.current[cid] = true; ckBase.current[cid] = true; }); }
+    // A check-up card added since then wears the New tag until it has been on screen (and left it).
+    function isNewCard(cid) { return ckIds.indexOf(cid) >= 0 && !!ckSeen.current && !ckBase.current[cid] && !ckTagGone.current[cid]; }
+    var ckNew = OT.newCheckupIds(ckIds, ckSeen.current || {});
+    // Watched: the deck's cards that still wear the tag (seen when half on screen; the tag goes once it has left it).
+    var ckWatch = cards.map(function (c) { return c.id; }).filter(isNewCard), ckWatchKey = ckWatch.join(',');
+    React.useEffect(function () {
+      if (!ckWatchKey || typeof IntersectionObserver === 'undefined') return;
+      var io = new IntersectionObserver(function (es) {
+        var hit = false;
+        es.forEach(function (e) {
+          var cid = e.target.getAttribute('data-card');
+          if (e.isIntersecting) {
+            ckOnScreen.current[cid] = true;
+            if (ckSeen.current && !ckSeen.current[cid]) { ckSeen.current[cid] = true; hit = true; }
+          } else if (ckOnScreen.current[cid] && !ckTagGone.current[cid]) { ckTagGone.current[cid] = true; hit = true; }
+        });
+        if (hit) setCkTick(function (n) { return n + 1; });
+      }, { threshold: 0.5 });
+      ckWatchKey.split(',').forEach(function (cid) { var el = document.querySelector('[data-card="' + cid + '"]'); if (el) io.observe(el); });
+      return function () { io.disconnect(); };
+    }, [ckWatchKey, fu]);
+    // Back on a card's preview (or its Which one?): focus returns to that card's Preview change (else its first action),
+    // not to the page or the ask box.
+    React.useEffect(function () {
+      var cid = backFocus.current; if (!cid) return;
+      backFocus.current = null;
+      var el = [].slice.call(document.querySelectorAll('[data-card]')).filter(function (x) { return x.getAttribute('data-card') === cid; })[0];
+      var bs = el ? [].slice.call(el.querySelectorAll('.ot-insight-actions button:not(:disabled)')) : [];
+      var b = bs.filter(function (x) { return x.textContent.trim() === 'Preview change'; })[0] || bs[0];
+      if (b) b.focus();
+    });
+    // The deck in its display order (design v54): new check-up cards not seen yet come first, the rest as the host's
+    // queue has them (each keeps its own number; the stored order is never changed). connection-state.js deckOrder.
+    var shownIds = cards.map(function (c) { return c.id; });
+    var ordered = OT.deckOrder(shownIds, ckFront.current, ckNew);
+    ckFront.current = ordered.front;
+    var deck = ordered.order.map(function (cid) { var i = shownIds.indexOf(cid); return { card: cards[i], i: i }; });
+    // Show: the new cards are at the front of the deck; the first is scrolled to. Their New tags stay until each has been
+    // on screen.
+    // design v56 / host followup.front: the new cards are first moved to the front of the host's queue (so ones beyond the
+    // three on screen come forward); an older host without it keeps the local order of the cards already on screen.
+    function showNewCheckups() {
+      var fresh = ckNew.slice(), f = fuRef.current;
+      var run = function () {
+        var since = deckSince();
+        return OT.frontCards(function (m, prm) { return backend.call(m, prm); }, f && f.reportId, fresh).then(function (view) {
+          if (view && fuRef.current && fuRef.current.reportId === view.reportId) setFu(view, since);
+          fresh.forEach(function (cid) { if (ckSeen.current) ckSeen.current[cid] = true; });
+          setCkTick(function (n) { return n + 1; });
+          later(function () {
+            // The first new card on screen, in the deck's order.
+            var el = [].slice.call(document.querySelectorAll('[data-card]')).filter(function (x) { return fresh.indexOf(x.getAttribute('data-card')) >= 0; })[0];
+            if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+          }, 30);
+        });
+      };
+      fuChain.current = fuChain.current.then(run, run);
+    }
+    var chipAi = (curProvider && aiName(curProvider.kind, curProvider.label)) || null;
+    var toolbarChip = OT.toolbarChip(curResearch, { newCheckups: ckNew.length, ai: chipAi });
+    var sheetRows = rows.map(function (r) { return r.fid && researchNotes[r.fid] ? Object.assign({}, r, { research: researchNotes[r.fid].verdict }) : r; });
     var grantFor = grant && report && grant.kind ? grant : null;
-    // What the grant sheet offers: the diagnostics this build has (provider.list), none for an explain-only account.
-    var grantEntry = grantFor ? providers[grantFor.kind] : null;
-    var grantToolsOff = !!(grantEntry && grantEntry.capabilities && grantEntry.capabilities.tools === false);
-    var grantDiagnostics = grantToolsOff ? [] : availDiag || Object.keys(DIAG_LABELS);
+    // The pairing panel: "Updated" when the choices changed elsewhere while it is open.
+    var grantKey = grantFor ? grantFor.kind + ':' + (grantFor.pairingId || '') : null;
+    if (!grantKey) grantSeen.current = null;
+    else if (!grantSeen.current || grantSeen.current.key !== grantKey) grantSeen.current = { key: grantKey, rev: perm ? perm.permissions.revision : null };
+    var grantUpdated = !!(grantSeen.current && grantSeen.current.rev != null && perm && perm.permissions.revision !== grantSeen.current.rev);
+    // The pairing panel (m3 §6, M9 §1.4): what a paired outside window may see and do, pre-filled from the record.
+    // Checks on = every diagnostic this build has (provider.list); the choice applies to that task only.
+    // Only Claude Code pairs from an outside window, so the panel names the program.
+    var grantName = grantFor ? WINDOW_NAME : null;
+    var grantAvail = grantFor && perm && conn.kind === grantFor.kind ? perm.available || {} : {};
+    function allowPairing(v) {
+      startTask({ kind: grantFor.kind, pairingId: grantFor.pairingId, grant: grantFromToggles(v, availDiag || FIX.DIAGNOSTICS) });
+    }
+    // The line under the ask box (in-app asks only), and Change to the page.
+    var permLine = perm && inApp ? permissionLine(perm.permissions, perm.available) : null;
     var classes = summary && summary.preview ? (summary.preview.fieldClasses || []).map(function (c) { return typeof c === 'string' ? { id: c, label: c, shared: true } : c; }) : null;
+    // The task's latest question, when it has its answer (the Activity panel's finished view).
+    var lastAsk = task ? answers.filter(function (a) { return a.taskId === task.taskId; }).pop() || null : null;
+    var lastDone = lastAsk && typeof lastAsk.text === 'string' && lastAsk.text && !lastAsk.failedTurn ? lastAsk : null;
+    /* ---------- m9 §17: Fix for me on the cards, administrator checks ---------- */
+    // A card's fix plan not seen yet (after a reload, or bound before its event came): read it once.
+    var fixPlanIds = cards.map(function (c) { return c.fix && c.fix.planId; }).filter(function (x) { return x && !plans[x]; });
+    React.useEffect(function () {
+      fixPlanIds.forEach(function (pid) {
+        if (planLoads.current[pid]) return;
+        planLoads.current[pid] = true;
+        // Review 7: a failed read is tried again at the next reconciliation (deck re-read, reconnect).
+        backend.call('action.get', { planId: pid }).then(function (plan) { putPlan(pid, { plan: plan, op: plan.operation || null, kind: 'agent' }); }, function () { delete planLoads.current[pid]; });
+      });
+    }, [fixPlanIds.join(','), planTick]);
+    // The wait after a no counts down once a second (design AdminChecks wait), and goes back to ask at 0.
+    var ckWaiting = Object.keys(checkReqs).some(function (k) { var q = checkReqs[k]; return q.state === 'awaiting_user' && q.retryAt && Date.parse(q.retryAt) > Date.now(); });
+    React.useEffect(function () {
+      if (!ckWaiting) return;
+      var t = setInterval(function () { setTick(function (n) { return n + 1; }); }, 1000);
+      return function () { clearInterval(t); };
+    }, [ckWaiting]);
+    // Fix for me is offered (design FixForMe) only with an AI that has tools, on the open cards of the deck.
+    var fixTools = inApp && !!report && !!perm && !!perm.available && perm.available.tools !== false;
+    var fixChanges = perm && perm.permissions && perm.permissions['do'] ? perm.permissions['do'].changes : 'off';
+    function checksProps(requestId) {
+      var v = FIX.checksView(checkReqs[requestId], Date.now()) || { state: 'ask', cause: null, secondsLeft: null, checks: [] };
+      return { checks: v.checks, checksState: v.state, checksCause: v.cause || undefined, secondsLeft: v.secondsLeft || undefined, unread: v.unread,
+        onRunChecks: function () { approveChecks(requestId); }, onDeclineChecks: function () { declineChecks(requestId); } };
+    }
+    // card.fix → the card's FixPanel props (fix-plan.js fixPanelState), or null: nothing to show (no fix, or its plan not read
+    // yet, or a script, which stays beside the chat).
+    function cardFixProps(card, opts) {
+      var cf = card.fix, ps = FIX.fixPanelState(cf);
+      if (!ps) return null;
+      var cid = card.id, ai = cf.by || aiLabel || 'Claude';
+      var base = { state: ps.state, ai: ai };
+      if (ps.state === 'working') {
+        // Design v82/v83: how the card's checks ended, under the working line, while the AI goes on.
+        var cr = FIX.checksResult(checkReqs[cardChecks.current[cid]]);
+        // Review 5: Stop stops the run of the task that owns this fix (card.fix.taskId); off until that is known.
+        var owner = cf.taskId || null;
+        return Object.assign(base, { checksResult: cr ? cr.result : undefined, checksCause: cr && cr.cause ? cr.cause : undefined, onStop: owner ? function () { cancelRun(owner); } : null });
+      }
+      // Review 1: a request not read yet (after a reload, before checks.list answers) is not shown as an empty one.
+      if (ps.state === 'checks' || ps.state === 'checksRunning') return checkReqs[cf.requestId] ? Object.assign(base, checksProps(cf.requestId)) : null;
+      if (ps.state === 'blocked') {
+        // Design v82: the cause sets the sentence; only adminOff offers Permissions; every cause keeps Fix for me.
+        var cause = FIX.blockedCause(cf.code);
+        return Object.assign(base, { cause: cause, onPermissions: cause === 'adminOff' ? function () { openPermissions(id, true); } : null, onRetry: function () { fixAsk(cid); } });
+      }
+      if (ps.state === 'needsYou') {
+        var rc = rechecks[cid] || {};
+        return Object.assign(base, { note: opts.note, checking: !!rc.checking, recheck: rc.recheck || undefined,
+          onCheckAgain: opts.findingId ? function () { if (!(rechecks[cid] || {}).checking) recheckCard(cid, opts.findingId); } : null, onClose: function () { dismissFix(cid); } });
+      }
+      if (ps.state === 'nothing') return Object.assign(base, { note: opts.note, onClose: function () { dismissFix(cid); } });
+      if (ps.state === 'noFix') return Object.assign(base, { onRetry: function () { fixAsk(cid); } });
+      var e = cf.planId ? plans[cf.planId] : null;
+      if (!e || !e.plan) return null;
+      var pid = cf.planId;
+      // Design v82/v84 (re-check 3): a card-bound script lives beside the chat in every state (it says truthfully how it went);
+      // the card only points to it: waiting, running or ended. Never the generic plan card ("Nothing changed" is not known).
+      if (e.plan.kind === 'script') return Object.assign(base, { state: 'script', scriptState: FIX.scriptPointer(e.plan, e.op), onShowScript: function () { showScript(pid); } });
+      var plan = planCardProps(Object.assign({ planId: pid }, e), {
+        leftOut: FIX.leftOutView(e.plan), removed: FIX.removedLabels(e.plan),
+        onPermissions: function () { openPermissions(id, true); },
+        onApprove: function (kept) { approveInCard(pid, kept); },
+        onDecline: function () { declinePlan(pid); },
+        // "Change something…": this plan is withdrawn and the card goes back to working (never while Windows asks).
+        onChangeRequest: function (text) { if (!(plansRef.current[pid] || {}).approving) fixAsk(cid, text, pid); },
+        // A verified fix closes the card (the host); Next goes on as a card's own change does.
+        onNext: ps.state === 'verified' ? function () { leave(cid, 'done'); } : null,
+        onClose: ps.state === 'verified' ? null : function () { dismissFix(cid); } });
+      delete plan.requestedBy; if (!plan.from) delete plan.from;
+      plan.key = pid;   // review 6: a replacement plan is a new card (its step switches start all on)
+      return Object.assign(base, { plan: plan });
+    }
+    // Requests not of a card on screen (a question beside the chat, a paired window, or a card further down the deck); a card's
+    // own request shows in that card while card.fix waits for it, and never moves here.
+    var sideChecks = Object.keys(checkReqs).map(function (k) { return checkReqs[k]; }).filter(function (q) {
+      return !q.hidden && !(q.cardId && deckIds[q.cardId]);
+    });
     var agentPanels = function () {
-      return sidePlans.map(function (e) {
-        var pl = e.plan, by = pl.requestedBy || {}, phase = pl.status === 'ineligible' ? 'ineligible' : opPhase(e.op) || (e.approving || pl.status === 'approved' || pl.status === 'running' ? 'running' : 'awaiting');
+      return sideChecks.map(function (q) {
+        var v = FIX.checksView(q, Date.now());
+        // As the design's AdminRights page shows it beside the chat: in a glass panel.
+        return h(GlassPanel, { key: 'checks:' + q.requestId, className: 'ot-enter ot-checks-side', style: { padding: 16 } }, h(OT.AdminChecks, { state: v.state, cause: v.cause || undefined, secondsLeft: v.secondsLeft || undefined,
+          unread: v.unread, ai: aiLabel || undefined, checks: v.checks, onRun: function () { approveChecks(q.requestId); }, onDecline: function () { declineChecks(q.requestId); } }));
+      }).concat(sidePlans.map(function (e) {
+        var pl = e.plan;
         var close = function () { putPlan(e.planId, { closed: true }); };
-        return h(PlanCard, { key: 'plan:' + e.planId, className: 'ot-enter',
-          title: e.kind === 'undo' ? 'Undo' : (REQUESTER[by.kind] || 'Assistant') + ' wants to change', subtitle: pl.label || (pl.target && pl.target.label),
-          state: phase, preview: planPreview(pl), ineligible: pl.ineligible, progress: e.progress || PROGRESS[pl.actionId] || 'Applying…',
-          receipt: e.op && e.op.receipt && e.op.receipt.text, failWord: e.op && FAIL_WORD[e.op.state],
-          onApprove: function () { approvePlan(e.planId, null); }, onDecline: function () { declinePlan(e.planId); },
-          approveError: e.approveError, onRetry: function () { approvePlan(e.planId, null); }, failManualUri: e.op && e.op.manualUri,
-          onOpenSettings: openSettings, onClose: close, onCheck: function () { checkOperation(e); },
-          onUndo: e.op && e.op.undo && e.op.undo.available ? function () { close(); undoOperation(e.op); } : null });
+        // ot-plan-<id>: a card's Show script finds it.
+        // Re-check 3: closing a card's ended script also ends the card's fix (fix.dismiss); the card is back to normal.
+        var closeScript = pl.cardId && FIX.scriptPointer(pl, e.op) === 'ended' ? function () { close(); dismissFix(pl.cardId); } : close;
+        if (pl.kind === 'script') return h(ScriptApproval, scriptCardProps(e, { key: 'plan:' + e.planId, className: 'ot-enter ot-plan-' + e.planId, onClose: closeScript }));
+        // A fix, or a single change an assistant asked for (or an Undo): the approval card (a single change is one step).
+        var extra = { key: 'plan:' + e.planId, className: 'ot-enter', onClose: close };
+        // Undo of a single change: its own card replaces this one.
+        if (pl.kind !== 'fix') extra.onUndoStep = function () { close(); undoOperation(e.op); };
+        return h(ApprovalCard, planCardProps(e, extra));
       }).concat([
-        pairing && id !== 'login' && h(PairingCard, { key: 'pair', className: 'ot-enter', client: ORIGIN_LABEL[pairing.client] || 'Claude Code', code: pairing.code, busy: pairBusy,
-          onApprove: function () { decidePairing(true); }, onDeny: function () { decidePairing(false); } }),
-        grantFor && h(GrantSheet, { key: 'grant:' + grantFor.kind, className: 'ot-enter', recipient: (providers[grantFor.kind] && providers[grantFor.kind].label) || '',
-          goal: grantFor.pending && grantFor.pending.text, findings: report.counts.findings, busy: !!grantFor.busy,
-          limits: grantDiagnostics.length ? DEFAULT_LIMITS : { totalBytes: DEFAULT_LIMITS.totalBytes, turns: DEFAULT_LIMITS.turns },
-          diagnostics: grantDiagnostics.map(function (d) { return { id: d, label: DIAG_LABELS[d] || d }; }), changes: !grantToolsOff,
-          onStart: startTask, onCancel: function () { if (grantFor.pending && !grantFor.pending.cardId && !grantFor.pending.scan) setRestore({ text: grantFor.pending.text, token: Date.now() }); setGrant(null); } }),
-        showActivity && task && h(ActivityPanel, { key: 'act', className: 'ot-enter', title: task.recipient.label + (taskActive ? '' : ' · ' + (TASK_WORD[task.status] || task.status)),
+        pairing && id !== 'login' && h(PairingCard, { key: 'pair', className: 'ot-enter', client: WINDOW_NAME, code: pairing.code, busy: pairBusy,
+          onPair: function () { decidePairing(true); }, onCancel: function () { decidePairing(false); } }),
+        grantFor && h(PermissionGrant, { key: 'grant:' + grantFor.kind + ':' + (perm ? perm.permissions.revision : 0), className: 'ot-enter', client: grantName,
+          preset: permToggles(perm ? perm.permissions : permDefaults()), webUnavailable: grantAvail.web === 'no', adminUnavailable: grantAvail.admin === false, provider: grantName,
+          showScripts: false, busy: !!grantFor.busy, updated: grantUpdated, onCancel: function () { setGrant(null); }, onContinue: allowPairing }),
+        // design v72: once the task's latest question is answered and nothing runs, the finished view (the steps folded).
+        // A typed question's answer panel carries the answer, so the panel gets none: the question is its headline. The
+        // first look (no typed goal) keeps its answer under “First look at your PC”.
+        showActivity && task && h(ActivityPanel, { key: 'act', className: 'ot-enter', title: aiName(task.recipient.kind, task.recipient.label) + (taskActive ? '' : ' · ' + (TASK_WORD[task.status] || task.status)),
+          finished: !!lastDone && !runInProgress, agent: aiName(task.recipient.kind, task.recipient.label), goal: lastDone && !lastDone.scan ? lastDone.q : null,
+          answer: lastDone && lastDone.scan && !runInProgress ? OT.runAnswer(lastDone.text, (lastDone.citations || []).map(citeChip), openCite) : null,
           active: taskActive, items: actItems, nativeClient: !!(task.recipient && /_mcp$/.test(task.recipient.kind || '') && task.recipient.mode !== 'headless'), used: task.used, limits: task.grant && task.grant.limits, highlight: actHit,
           // Stop only while a turn or run is in progress, and it cancels that run (agent.cancel), not the task.
-          onStop: runInProgress ? cancelRun : null, onClose: function () { setShowActivity(false); setActHit(null); } })]);
+          onStop: runInProgress ? cancelRun : null, onClose: function () { setShowActivity(false); setActHit(null); } })]));
     };
 
     var toastEl = toast && h('div', { className: 'ot-toast text-mono-sm ot-fade', role: 'status' }, toast);
@@ -1713,18 +2425,34 @@
         !notice && h('div', { className: 'ot-choice-foot' }, h(Button, { variant: 'primary', onClick: boot }, 'Retry'))));
     } else if (id === 'login') {
       body = h('div', { key: 'login', className: cls('ot-flow-panel') }, h(LoginPanel, {
-        initialProvider: isLocal ? 'claude-code' : conn.value === 'api' ? 'api-key' : conn.value,
+        // A retired saved AI selects nothing; otherwise the saved choice's tile (Claude when local).
+        initialProvider: conn.retired ? null : isLocal ? 'claude' : OT.pickerTile(conn.value),
         // Back leaves everything as it was: a half-made connection on the chooser is dropped.
         onBack: returnTo ? function () { var r = returnTo; setReturnTo(null); setConnect(null); go(r); } : null,
         initialApi: conn.kind === 'openai_api' ? 'openai' : 'anthropic', connect: connect, pairBusy: pairBusy,
         onApprove: function () { decidePairing(true); }, onDeny: function () { decidePairing(false); },
         onContinue: function () { if (connect) commitProvider({ value: connect.tile, label: connect.label || conn.label, kind: connect.kind }); },
         onCopyFail: function () { flash('Copy failed'); },
-        tileStates: tileStates, waitLong: waitLong, onDisconnect: disconnectKind,
-        onTile: checkClient, onClientAction: clientAction, clientViews: clientViews,
+        tileStates: tileStates, waitLong: waitLong,
+        onTile: checkClient, onClientAction: clientAction, clientViews: clientViews, tileStatus: tileStatus,
         onLater: function () { chooseProvider('later', 'Later'); },
         onConnect: chooseProvider }),
         toastEl);
+    } else if (id === PERM_STAGE) {
+      // (permSeen is cleared below whenever the page is not showing.)
+      // M9 §1.4: the same page after the chooser, at boot, and from the pill (Back and Continue return where it came from).
+      var pr = perm || { permissions: permDefaults(), available: {} }, pAvail = pr.available || {};
+      var pName = (curProvider && aiName(curProvider.kind, curProvider.label)) || (isLocal ? null : aiName(conn.kind, conn.label)) || 'your AI';
+      if (permSeen.current == null && perm) permSeen.current = perm.permissions.revision;
+      var permUpdated = permSeen.current != null && permSeen.current !== 'loading' && !!perm && perm.permissions.revision !== permSeen.current;
+      body = h('div', { key: PERM_STAGE, className: cls('ot-flow-panel') }, h(PermissionsPanel, { key: 'perm:' + pr.permissions.revision,
+        updated: permUpdated, focusTitle: permFocus.current,
+        // design v70: the note over the page only the first time it is finished (connection-state.js permSkipNote).
+        skipNote: OT.permSkipNote(perm && perm.permissions),
+        agent: pName, provider: pName, initial: permToggles(pr.permissions), explainOnly: pAvail.tools === false, webUnavailable: pAvail.web === 'no',
+        // m9 §17.1 (design v75): the administrator row, disabled with its grey line while not available in this version.
+        adminUnavailable: pAvail.admin === false,
+        showScripts: !!pAvail.scripts, busy: permBusy, onBack: function () { leavePermissions(true); }, onContinue: savePermissions }), toastEl);
     } else if (id === 'use') {
       body = h('div', { key: 'use', className: cls('ot-flow-panel') }, h(ChoicePanel, { step: '1 / 3', title: 'How do you use your PC?', initial: usage,
         options: USE_OPTIONS, onNext: function (sel) {
@@ -1775,8 +2503,10 @@
           h('div', { className: 'ot-reportbar ot-welcome-bar' },
             h('span', { className: 'text-mono-sm ot-muted' }, whenDay(welcome.generatedAt) + (welcome.pending > 0 ? ' · ' + welcome.pending + ' to review' : '')))),
         h(PromptBox, { className: 'ot-enter', busy: id === 'scanning', autoFocus: true, onDraft: setDraft, restore: restore,
-          placeholder: onMain && report ? 'Reply, or ask about the report' : 'What would you like to check?',
+          placeholder: onMain && report ? 'Ask or reply…' : 'What would you like to check?',
           onSubmit: submitMain }),
+        // M9 §1.4: what the AI may do, in one line; Change opens the permissions page.
+        onMain && permLine && h(PermissionsSummary, { className: 'ot-perm-under ot-enter', text: permLine, onChange: function () { openPermissions(id, true); } }),
         toast && h('div', { className: 'ot-toast text-mono-sm ot-fade', role: 'status' }, toast),
         id === 'scanning' && h(ScanStatus, { className: 'ot-enter', cats: scanCats.length ? scanCats : OT.ui.SCAN_CATS, done: scanDone, current: scanCurrent, skipping: skipping, onSkip: skipCollector, onStop: stopScan }),
         // One toolbar under the box. Suggestions and History drop down here; Report opens the report over the page.
@@ -1793,12 +2523,17 @@
             h(Button, { variant: 'neu', size: 'sm', icon: 'repeat', id: 'ot-scan-btn', 'aria-haspopup': 'true', 'aria-expanded': menu === 'scan', 'aria-controls': 'ot-scan-menu',
               className: menu === 'scan' ? 'is-on' : null, 'aria-label': 'Scan', title: 'Scan', onClick: function () { setMenu(menu === 'scan' ? null : 'scan'); } }, tbLabel('Scan')),
             report && h(Button, { variant: 'neu', size: 'sm', icon: 'report', 'aria-label': 'Report', title: 'Report', onClick: function () { setMenu(null); setSheet('open'); } }, tbLabel('Report'))),
+          // M9 §6.2: while the report's research runs (design Toolbar `researching`); nothing once it ends.
+          toolbarChip && h(OT.ToolbarStatus, Object.assign({ onShowNew: showNewCheckups }, toolbarChip)),
           menu === 'suggest' && h(OT.SuggestionList, { id: 'ot-suggest-menu', toggleId: 'ot-suggest-btn', items: starters, onClose: function () { setMenu(null); },
             onPick: function (s) { setMenu(null); runAudit(s.text, s.intent); } }),
           menu === 'history' && h(OT.HistoryList, { id: 'ot-history-menu', toggleId: 'ot-history-btn', rows: historyRows, onClose: function () { setMenu(null); },
             onOpen: function (r) { if (r.bench) { setMenu(null); bench.openRun(r.bench); focusBench(300); } else showPanel(r.id); }, onDelete: deleteAnswer }),
           menu === 'scan' && h(OT.ScanMenu, { id: 'ot-scan-menu', toggleId: 'ot-scan-btn', benchRunning: bench.active, onClose: function () { setMenu(null); },
             onPick: function (pick) { setMenu(null); if (pick === 'full') fullScan(); else openBench(); } })),
+        // Report a problem: the prompt under the toolbar (in the page flow), then the preview like the other panels.
+        onMain && problems.prompt('ot-enter'),
+        onMain && problems.panel('ot-enter'),
         onMain && bench.open && h(OT.BenchPanel, { key: 'bench', className: 'ot-enter', view: bench.view, caps: bench.caps, run: bench.run, warn: bench.warn, toast: bench.toast,
           starting: bench.starting, cancelling: bench.cancelling, onStart: bench.start, onCancel: bench.cancel, onClose: bench.close,
           onInvestigate: benchAi ? investigate : null, onSaveImage: saveBenchImage }),
@@ -1808,14 +2543,18 @@
           h('div', { className: 'ot-choice-foot' },
             h(Button, { variant: 'ghost', onClick: function () { setSummary(null); } }, 'Not now'),
             h(Button, { variant: 'primary', iconRight: 'chevron', onClick: function () { setReturnTo('main'); setWave({ speed: 0.7, words: [] }); go('login'); } }, 'Choose AI'))),
-        onMain && classes && h(SharePreview, { className: 'ot-enter', agent: (curProvider && curProvider.label) || conn.label, classes: classes, size: kib(summary.preview.bytes || 0),
+        onMain && classes && h(SharePreview, { className: 'ot-enter', agent: (curProvider && aiName(curProvider.kind, curProvider.label)) || conn.label, classes: classes, size: kib(summary.preview.bytes || 0),
           onCancel: function () { setSummary(null); }, onShare: share }),
-        onMain && summary === 'continue' && h(ContinuePanel, { className: 'ot-enter', client: (curProvider && curProvider.label) || conn.label, prompt: CONTINUE_PROMPT,
+        onMain && summary === 'continue' && h(ContinuePanel, { className: 'ot-enter', client: WINDOW_NAME, prompt: CONTINUE_PROMPT,
           onCopyFail: function () { flash('Copy failed'); }, onClose: function () { setSummary(null); } }),
         // m5 §9: each question its own panel, newest first. A follow-up opens a new panel above (same conversation).
         onMain && panels.map(function (a) {
           var mine = !!task && a.taskId === task.taskId;
-          return h(OT.AnswerPanel, { key: a.id, className: 'ot-enter', item: a, onCite: openCite,
+          // M9 §2 (design GuideAnswer): the built-in guide's answer, with Connect AI.
+          if (a.local) return h(OT.GuideAnswer, { key: a.id, answerId: a.id, className: 'ot-enter', question: a.q, text: a.text,
+            onClose: function () { setOpen([a.id], false); },
+            onConnect: function () { setDetailOpen(false); setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } });
+          return h(OT.AnswerPanel, { key: a.id, className: 'ot-enter', item: a, onCite: openCite, onOpenSource: openSource,
             onFollow: inApp ? function (q) { followUp(a, q); } : null, followBusy: runInProgress,
             onStop: mine && runInProgress ? cancelRun : null, onClose: function () { setOpen([a.id], false); }, onBenchmark: openBench });
         }),
@@ -1828,7 +2567,8 @@
             }))),
         // The deck, on the same page: the open card stays open until another is opened, Collapse or Escape.
         onMain && report && fu && (curCard
-          ? h(OT.CardGrid, { className: cx('ot-cards', 'n-' + cards.length, openId && 'has-open'), openKey: openId }, cards.map(function (card, ci) {
+          ? h(OT.CardGrid, { className: cx('ot-cards', 'n-' + cards.length, openId && 'has-open'), openKey: openId }, deck.map(function (d) {
+            var card = d.card, ci = d.i;
             var cid = card.id, curCard = card, curId = cid, curState = cardState[cid] || {};
             var curFinding = report ? report.findings.filter(function (f) { return f.id === card.findingId; })[0] : null;
             var curSettings = cardSettings(card), curDetails = details[card.findingId];
@@ -1841,16 +2581,33 @@
             if ((curPhase === 'preview' || curPhase === 'ineligible') && !curPlan) curPhase = null;   // never a blank card
             var cardAnswer = answers.filter(function (a) { return a.cardId === cid; }).pop() || null;
             var aiCard = curCard.origin === 'ai', aiTask = aiCard ? cardTaskId(curCard) : null;
+            // §6.8: a check-up card (the design's CheckupCard): Ask about this and Hide, sources by id, no preview.
+            var checkup = aiCard ? OT.checkupOf(curCard) : null;
             // An AI card cites the evidence of the task that added it: shown once fetched, or as no longer available.
             if (aiCard) curEvidence = (card.evidenceIds || []).concat(curDetails ? curEvidence : []).filter(function (x, i, a) { return a.indexOf(x) === i; });
             var aiWhy = aiCard ? curCard.why || (curCard.text !== curCard.title ? curCard.text : null) : null;
+            // m9 §17.3 (design FixForMe, FixStates): the card's fix from card.fix; the button while nothing else is on it.
+            var cardNote = typeof curCard.note === 'string' && curCard.note ? curCard.note : null;
+            var fixPanel = cardFixProps(curCard, { note: cardNote, findingId: !aiCard && !checkup ? curCard.findingId || null : null });
+            var opinion = !!(fixPanel && (fixPanel.state === 'needsYou' || fixPanel.state === 'nothing'));
+            // Coordinator (e) / design v82: a fix turn's reply is not shown under a card that shows a fix panel (it stays in the chat).
+            if (cardAnswer && cardAnswer.fix && fixPanel) cardAnswer = null;
+            var fixAvail = curCard.fix && !opinion ? null : FIX.fixAvailability({ tools: fixTools, open: true, changes: fixChanges, busy: runInProgress });
             return h(InsightCard, { key: curId, cardKey: curId, className: cid === openId ? 'is-open' : null, category: curCard.category,
+              isNew: isNewCard(cid),
               // An AI card: its title is the claim and its why the observation (the host sends text = why).
               text: aiCard ? curCard.title || curCard.text : curCard.text,
               onFocus: function () { focusCard(cid); }, onCollapse: cid === openId && canFold ? foldCards : null,
               observation: aiCard ? aiWhy : evById[(curCard.evidenceIds || [])[0]] ? evById[curCard.evidenceIds[0]].display : curCard.why || null,
               // m5 §5: the AI's note (plain text, shown as text only) and the AI tag on cards it added.
-              note: typeof curCard.note === 'string' && curCard.note ? curCard.note : null, noteBy: aiLabel, ai: curCard.origin === 'ai',
+              // With the AI's opinion shown in the fix panel, its note is shown there (once).
+              note: opinion ? null : cardNote, noteBy: aiLabel, aiTag: curCard.origin === 'ai',
+              ai: (curCard.fix && curCard.fix.by) || aiLabel || undefined, fix: fixPanel, fixAvailable: fixAvail || undefined,
+              onFix: function () { fixAsk(cid); }, onPermissions: function () { openPermissions(id, true); },
+              // M9 §6.2: the research label and its note; the card, its severity and its options stay as they are.
+              research: !aiCard && card.findingId && researchNotes[card.findingId] ? Object.assign({ onOpenSource: openSource }, researchNotes[card.findingId]) : null,
+              checkup: checkup,
+              onOpenSource: openSource, replySources: cardAnswer && cardAnswer.text ? cardAnswer.sources : null,
               evidence: curEvidence.map(function (eid) {
                 var e = evById[eid] || (curDetails && curDetails.evidence.filter(function (x) { return x.id === eid; })[0]) || (aiCard ? tev.current[eid] : null);
                 if (!e) return aiCard && tevGone.current[eid] ? { id: eid, label: citeChip(eid).label, display: 'No longer available', missing: true } : null;
@@ -1862,33 +2619,41 @@
               onAskFocus: function () { setFocusPart(cid, 'ask', true); }, onAskBlur: function () { if (!cardAnswer || cardAnswer.text != null || cardAnswer.failedTurn) setFocusPart(cid, 'ask', false); },
               onLater: function () { leave(cid, 'later'); },
               // An AI card has one plain Hide (card-level); a finding's card offers what Ignore would hide.
-              settingsUri: curSettings, ignoreChoices: aiCard ? null : ignoreChoices(curFinding ? curFinding.ruleId : '', curCard.category),
+              ignoreChoices: aiCard ? null : ignoreChoices(curFinding ? curFinding.ruleId : '', curCard.category),
               onIgnore: function (choice) { ignoreAs(curCard, choice); }, hideLabel: aiCard ? 'Hide' : null,
-              options: cardOptions(curCard, curFinding), guide: curCard.guide, preview: curPlan ? planPreview(curPlan) : null,
-              ineligible: curPlan && curPlan.ineligible, progress: curPlanEntry && (curPlanEntry.progress || PROGRESS[curPlan.actionId]) || null,
-              receipt: curOp && curOp.receipt ? curOp.receipt.text : null, failWord: curOp && FAIL_WORD[curOp.state],
-              onUndo: curOp && curOp.undo && curOp.undo.available ? function () { undoOperation(curOp); } : null,
-              onCheck: function () { checkOperation(curPlanEntry); },
-              approveError: curPlanEntry && curPlanEntry.approveError, onRetry: function () { if (curState.planId) approvePlan(curState.planId, curId); },
-              failManualUri: curOp && curOp.manualUri,
-              onOpenSettings: function (uri) { openSettings(uri); setMode(curId, 'guide', { opened: true }); },
-              onBack: function () { setMode(curId, null); unfocus(curId); },
-              // Back from a preview: no decision about the card; the unused plan is dropped.
-              onPreviewBack: function () { if (curState.planId && curPlan && curPlan.status === 'awaiting_user') declinePlan(curState.planId); setMode(curId, null); unfocus(curId); },
-              checkAgain: !!curState.opened, recheck: curState.recheck,
+              options: cardOptions(curCard, curFinding), guide: curCard.guide,
+              // Every change in a card is the approval card inside it: a fix with its steps, a single change as one step
+              // (preview, Defender scans, can't run, result, Undo).
+              change: curPlan && curPlan.kind !== 'script' ? planCardProps(Object.assign({ planId: curState.planId }, curPlanEntry), {
+                // No Undo offered for a verified change: the manual route (the finding's Settings page), when there is one.
+                manualUri: curSettings,
+                onApprove: function () { approvePlan(curState.planId, curId); },
+                onDecline: function () { declinePlan(curState.planId); leave(curId, 'decline'); }, onNext: function () { leave(curId, 'done'); },
+                // Can't run: Windows Settings is the way; the finding's guided card then offers Check again (design v59: no
+                // steps mode on the card itself).
+                onPlanSettings: function (uri) { openSettings(uri); if (curCard.findingId && curSettings) previewAction(curCard, 'manual.open'); },
+                // Close (Dismiss when expired) drops the plan and the card is as before.
+                onClose: function () { putPlan(curState.planId, { closed: true }); setMode(curId, null); unfocus(curId); },
+                // Back (design v54): leaves the preview without a decision; the unused plan is left to expire (never declined).
+                onBack: curPlan.status === 'awaiting_user' || FIX.isGuided(curPlan) ? function () { setMode(curId, null); unfocus(curId); backFocus.current = curId; } : null,
+                guide: curCard.guide || null, guideTitle: curFinding ? curFinding.title : null,
+                // Design v59: the Settings path the host sends beside the page (English Windows only), shown as the step's `does`.
+                settingsPath: curCard.settingsPath || (curFinding && curFinding.settingsPath) || null }) : null,
+              // M9 §3.6: which entry or process, when the finding cites several (then Preview change with that one).
+              pick: curState.mode === 'pick' && curState.pick ? { choices: curState.pick.choices,
+                onPick: function (evidenceId) { previewAction(curCard, curState.pick.actionId, evidenceId); },
+                onBack: function () { setMode(curId, null); backFocus.current = curId; } } : null,
               mode: curPhase, reply: cardAnswer ? (cardAnswer.failedTurn ? failOf(cardAnswer) : cardAnswer.text) : replyText(curCard.reply),
               // M6a §8: the card's AI answer keeps its voltage note and Run benchmark, as an answer panel does.
               replyRisk: !!(cardAnswer && cardAnswer.text && (cardAnswer.warnings || []).indexOf('voltage') >= 0),
               onReplyBenchmark: cardAnswer && cardAnswer.text && cardAnswer.suggest === 'benchmark' ? openBench : null,
               // A report-only answer (no AI in the app): offer the chooser once, under the answer.
               onReplyConnect: !cardAnswer && curCard.reply && !inApp && !nativeLive && !isMcpKind(conn.kind) ? function () { setDetailOpen(false); setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } : null,
-              replyBusy: cardAnswer && cardAnswer.text == null && !cardAnswer.failedTurn ? cardAnswer.busy || 'Thinking…' : null,
+              // A fix ask's work shows in the fix panel, not as Thinking… under the card.
+              replyBusy: cardAnswer && cardAnswer.text == null && !cardAnswer.failedTurn && !cardAnswer.fix ? cardAnswer.busy || 'Thinking…' : null,
               replyCites: cardAnswer && cardAnswer.text ? (cardAnswer.citations || []).map(citeChip) : null, leaving: cardLeaving === cid, askToken: askToken.cid === cid ? askToken.n : 0, askRestore: askRestore && askRestore.cid === cid ? askRestore : null,
               index: total - fu.pendingCount + 1 + ci, total: total,
-              onOption: function (o) { onOption(curId, o); }, onAsk: function (t) { ask(curId, t); }, onCite: function (eid) { openCite(eid, aiTask); },
-              onApprove: function () { if (curState.planId) approvePlan(curState.planId, curId); },
-              onDecline: function () { if (curState.planId) declinePlan(curState.planId); leave(curId, 'decline'); },
-              onNext: function () { leave(curId, 'done'); } });
+              onOption: function (o) { onOption(curId, o); }, onAsk: function (t) { ask(curId, t); }, onCite: function (eid) { openCite(eid, aiTask); } });
           }))
           : h(ReviewComplete, { key: 'complete', className: 'ot-enter', items: reviewed,
               onUndo: function (cid) { var e = cardOp(cid); if (e && e.op.undo && e.op.undo.available) undoOperation(e.op); },
@@ -1899,27 +2664,38 @@
     return h('div', { className: cx('ot-flow', p.className) },
       // The sea pauses while the full-screen report covers it.
       h(WaveBackground, { speed: wave.speed, words: wave.words, paused: !!sheet && !toLogin }),
-      signedIn && h('div', { className: cx('ot-flow-top', toLogin ? 'ot-sink' : 'ot-enter') },
-        h('div', { className: 'ot-brand' }, h(Logo, { size: 28 })),
+      // The top row is the page's first row (inside the scroller): it scrolls with the page, never fixed over content.
+      h('div', { className: cx('ot-flow-stage', id === 'login' || id === PERM_STAGE ? 'is-login' : null, signedIn && 'has-top') },
+        signedIn && h('div', { className: cx('ot-flow-top', toLogin ? 'ot-sink' : 'ot-enter') },
+        problems.menu(),
         // M1 makes no AI connection, so the pill never says Connected.
         // Status only as the backend reports it (provider.list / provider.connect / pairing events).
         // A paired native client working on an active task is the live connection, whatever the chooser says.
         // §9: label · word and tone come only from connectionState (provider.list + provider.status events).
         h(ConnectionPill, { provider: pillState.label, status: working && bstate !== 'reconnecting' ? 'live' : pillState.tone,
           detail: working && bstate !== 'reconnecting' ? 'Working' : pillState.word,
-          onOpen: pillKind ? function () { setDetailOpen(!detailOpen); } : null, open: detailOpen,
+          onOpen: function () { setDetailOpen(!detailOpen); }, open: detailOpen,
           // Change works anywhere except mid-scan; Back on the login returns to this exact step.
           onChange: id === 'scanning' || stage.leaving ? null : function () { setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } })),
-      signedIn && detailOpen && pillKind && h('div', { className: 'ot-conn-wrap' }, h(ConnectionDetail, { className: 'ot-enter', state: pillState, waitLong: waitLong,
-        command: pillState.command && (showCmd || waitLong) ? regs.current[pillKind] || null : null, onCopyFail: function () { flash('Copy failed'); },
-        actions: rowActions(pillState, pillKind),
-        onDisconnect: pillState.disconnect ? function () { disconnectKind(pillKind); } : null,
+      // design v73 (PillPanelStates): the panel's state from the connection (pillPanelState); Local only opens it too.
+      signedIn && detailOpen && h('div', { className: 'ot-conn-wrap' }, h(ConnectionDetail, { key: pillKind || 'local', className: 'ot-enter', label: pillState.label,
+        panel: OT.pillPanelState({ kind: pillKind, local: !pillKind, entry: pillKind ? providers[pillKind] : null, label: conn.label, backend: bstate, task: task }, working && bstate !== 'reconnecting'),
+        command: pillState.command ? regs.current[pillKind] || null : null, onCopy: function () { return copyCommand(regs.current[pillKind]); },
+        onAction: function (name) { pillAction(name, pillKind); },
+        // Disconnect asks first in the panel; the call is sent once. Hidden mid-scan and while something runs.
+        busy: id === 'scanning' || working,
+        onDisconnect: pillKind && pillState.disconnect ? function () { return disconnectKind(pillKind); } : null,
+        // M9 §1.4: the permissions page, with Back, as Change opens the chooser.
+        onPermissions: id === 'scanning' || !perm ? null : function () { openPermissions(id, true); },
         onChange: id === 'scanning' ? null : function () { setDetailOpen(false); setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } })),
-      h('div', { className: cx('ot-flow-stage', id === 'login' ? 'is-login' : null) }, body),
+      // Away from the main page, the report preview opens under the top row.
+      signedIn && id !== 'main' && problems.panel('ot-enter ot-rp-top'),
+      body),
       peek && h(OT.EvidencePeek, { label: peek.label, ev: peek.ev, missing: peek.missing, when: peek.ev ? observedLabel(peek.ev) : null,
         onReport: peek.inReport ? function () { var id = peek.id; setPeek(null); setSheet(rows.some(function (r) { return r.id === id; }) ? id : 'open'); } : null,
         onClose: function () { setPeek(null); } }),
-      sheet && h(ReportSheet, { className: toLogin ? 'ot-sink' : null, rows: rows, categories: report ? report.categories : null, fixed: fixed, when: whenLabel(report), highlight: sheet === 'open' ? null : sheet, summary: summaryLines,
+      sheet && h(ReportSheet, { className: toLogin ? 'ot-sink' : null, rows: sheetRows, categories: report ? report.categories : null, fixed: fixed, when: whenLabel(report), highlight: sheet === 'open' ? null : sheet, summary: summaryLines,
+        checkups: sheetCheckups, onOpenSource: openSource,
         // The summary answers on the main page, under the box.
         onSummarize: summaryLines ? null : function () { setSheet(null); requestSummary(); }, onClose: function () { setSheet(null); } }));
   }

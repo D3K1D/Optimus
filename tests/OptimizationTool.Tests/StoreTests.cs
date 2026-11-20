@@ -29,7 +29,7 @@ public class StoreTests
         using (var store = Store.Open(dir)) { }
         using var conn = Open(dir);
         Assert.Equal((long)Store.SchemaVersion, Scalar(conn, "PRAGMA user_version"));
-        Assert.Equal(7, Store.SchemaVersion);
+        Assert.Equal(9, Store.SchemaVersion);
     }
 
     [Fact]

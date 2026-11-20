@@ -10,12 +10,12 @@ public sealed class ClientConnectorTests
     private const string Bridge = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe";
     private const string NpmDir = @"C:\Users\u\AppData\Roaming\npm";
     private const string ClaudeCmd = NpmDir + @"\claude.cmd";
-    private const string CodexExe = @"C:\Tools\codex\codex.exe";
+    private const string ClaudeExe = @"C:\Tools\claude\claude.exe";
     private const string SysRoot = @"C:\Windows";
     private const string Cmd = @"C:\Windows\System32\cmd.exe";
 
     private readonly HashSet<string> _files = new(StringComparer.OrdinalIgnoreCase) { Bridge };
-    private string _path = @"C:\Windows\system32;" + NpmDir + @";C:\Tools\codex";
+    private string _path = @"C:\Windows\system32;" + NpmDir + @";C:\Tools\claude";
     private readonly FakeRunner _runner = new();
     private readonly FakeConfirm _confirm = new();
     private readonly BridgeDispatcher _dispatcher;
@@ -24,7 +24,7 @@ public sealed class ClientConnectorTests
     {
         var connector = new ClientConnector(_runner, new CliLocator(() => _path, f => _files.Contains(f)), _confirm, Bridge,
             systemRoot: SysRoot, fileExists: f => _files.Contains(f));
-        _dispatcher = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled, clients: connector);
+        _dispatcher = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), AppLog.Disabled, clients: connector);
     }
 
     private sealed class NoBackend : IBackend
@@ -48,7 +48,6 @@ public sealed class ClientConnectorTests
         public string? RawGetOutput;        // overrides the get output
         public int? GetExit;
         public bool AddFails;
-        public string Flavor = "claude";
 
         public Task<ProcessResult> RunAsync(ProcessCommand c, TimeSpan timeout, CancellationToken ct)
         {
@@ -56,10 +55,8 @@ public sealed class ClientConnectorTests
             var args = c.Argv.Skip(1).ToArray();
             ProcessResult r = args switch
             {
-                ["--version"] => new(0, Flavor == "claude" ? "2.0.14 (Claude Code)\n" : "codex-cli 0.167.0\n", "", false),
+                ["--version"] => new(0, "2.0.14 (Claude Code)\n", "", false),
                 ["--help"] => new(0, CliHelp.Claude, "", false),
-                ["exec", "--help"] => new(0, CliHelp.Codex, "", false),
-                ["features", "list"] => new(0, CliHelp.CodexFeatures, "", false),
                 ["mcp", "get", "optimization-tool"] => Get(),
                 ["mcp", "add", .., "--", var path] => Add(path),
                 ["mcp", "remove", ..] => Remove(),
@@ -71,13 +68,8 @@ public sealed class ClientConnectorTests
         private ProcessResult Get()
         {
             if (RawGetOutput is not null) return new(GetExit ?? 0, RawGetOutput, "", false);
-            if (Registered is null)
-                return Flavor == "claude"
-                    ? new(1, "", "No MCP server found with name: optimization-tool\n", false)
-                    : new(1, "", "Error: No MCP server named 'optimization-tool' found.\n", false);
-            return Flavor == "claude"
-                ? new(0, $"optimization-tool:\n  Scope: User config (available in all your projects)\n  Status: ✓ Connected\n  Type: stdio\n  Command: {Registered}\n  Args: \n  Environment:\n\nTo remove this server, run: claude mcp remove \"optimization-tool\" -s user\n", "", false)
-                : new(0, $"optimization-tool\n  enabled: true\n  transport: stdio\n  command: {Registered}\n  args: -\n  cwd: -\n  env: -\n  remove: codex mcp remove optimization-tool\n", "", false);
+            if (Registered is null) return new(1, "", "No MCP server found with name: optimization-tool\n", false);
+            return new(0, $"optimization-tool:\n  Scope: User config (available in all your projects)\n  Status: ✓ Connected\n  Type: stdio\n  Command: {Registered}\n  Args: \n  Environment:\n\nTo remove this server, run: claude mcp remove \"optimization-tool\" -s user\n", "", false);
         }
 
         private ProcessResult Add(string path)
@@ -103,7 +95,7 @@ public sealed class ClientConnectorTests
     private static string[] Args(ProcessCommand c) => c.Argv.Skip(1).ToArray();
 
     /// <summary>Runs other than the --version identity check and the --help capability probe.</summary>
-    private List<ProcessCommand> McpRuns => _runner.Runs.Where(r => Args(r) is not (["--version"] or ["--help"] or ["exec", "--help"] or ["features", "list"])).ToList();
+    private List<ProcessCommand> McpRuns => _runner.Runs.Where(r => Args(r) is not (["--version"] or ["--help"])).ToList();
 
     // ---------- status ----------
 
@@ -130,48 +122,40 @@ public sealed class ClientConnectorTests
     }
 
     [Theory]
-    [InlineData("claude", Bridge, "yes")]
-    [InlineData("claude", @"c:\program files\optimus\OPTIMIZATIONTOOL.MCP.EXE", "yes")]
-    [InlineData("claude", @"C:\Old\OptimizationTool.Mcp.exe", "outdated")]
-    [InlineData("codex", Bridge, "yes")]
-    [InlineData("codex", @"D:\dev\OptimizationTool.Mcp.exe", "outdated")]
-    [InlineData("codex", "OptimizationTool.Mcp.exe", "outdated")]
-    public async Task Status_compares_the_registered_path(string flavor, string registered, string expected)
+    [InlineData(Bridge, "yes")]
+    [InlineData(@"c:\program files\optimus\OPTIMIZATIONTOOL.MCP.EXE", "yes")]
+    [InlineData(@"C:\Old\OptimizationTool.Mcp.exe", "outdated")]
+    [InlineData(@"D:\dev\OptimizationTool.Mcp.exe", "outdated")]
+    [InlineData("OptimizationTool.Mcp.exe", "outdated")]
+    public async Task Status_compares_the_registered_path(string registered, string expected)
     {
         _files.Add(ClaudeCmd);
-        _files.Add(CodexExe);
         _files.Add(registered); // a bridge still present elsewhere is not repaired (see Status_repairs_a_registration_to_a_removed_bridge)
-        _runner.Flavor = flavor;
         _runner.Registered = registered;
-        var client = flavor == "claude" ? "claude_code" : "codex";
-        var r = (await Call("shell.clientStatus", $$"""{"client":"{{client}}"}"""))["result"]!;
+        var r = (await Call("shell.clientStatus", """{"client":"claude_code"}"""))["result"]!;
         Assert.Equal(expected, r["registered"]!.GetValue<string>());
         Assert.DoesNotContain(McpRuns, run => Args(run) is ["mcp", "add", ..] or ["mcp", "remove", ..]);
     }
 
-    [Theory]
-    [InlineData("claude", "claude_code")]
-    [InlineData("codex", "codex")]
-    public async Task Status_repairs_a_registration_to_a_removed_bridge(string flavor, string client)
+    [Fact]
+    public async Task Status_repairs_a_registration_to_a_removed_bridge()
     {
         // 0.8 → 0.9 moved the install from Program Files\Optimization Tool to Program Files\Optimus; the MSI removed the old folder.
         const string old = @"C:\Program Files\Optimization Tool\OptimizationTool.Mcp.exe";
         _files.Add(ClaudeCmd);
-        _files.Add(CodexExe);
-        _runner.Flavor = flavor;
         _runner.Registered = old;
-        var r = (await Call("shell.clientStatus", $$"""{"client":"{{client}}"}"""))["result"]!;
+        var r = (await Call("shell.clientStatus", """{"client":"claude_code"}"""))["result"]!;
 
         Assert.Equal("yes", r["registered"]!.GetValue<string>());
         Assert.Equal(Bridge, _runner.Registered);
         Assert.Empty(_confirm.Shown); // the user approved this app's registration before; only its path changed
-        var scope = flavor == "claude" ? new[] { "--scope", "user" } : [];
+        string[] scope = ["--scope", "user"];
         Assert.Equal(
             [["mcp", "get", "optimization-tool"],
              ["mcp", "remove", .. scope, "optimization-tool"],
              ["mcp", "add", .. scope, "optimization-tool", "--", Bridge],
              ["mcp", "get", "optimization-tool"]],
-            McpRuns.Where(run => Args(run) is not ["auth", ..] and not ["login", ..]).Select(Args));
+            McpRuns.Where(run => Args(run) is not ["auth", ..]).Select(Args));
     }
 
     [Theory]
@@ -257,20 +241,19 @@ public sealed class ClientConnectorTests
     }
 
     [Fact]
-    public async Task Register_codex_exe_uses_argument_list_without_shell()
+    public async Task Register_claude_exe_uses_argument_list_without_shell()
     {
-        _files.Add(CodexExe);
-        _runner.Flavor = "codex";
+        _files.Add(ClaudeExe);
         _runner.Registered = @"C:\Old\OptimizationTool.Mcp.exe";
-        var r = (await Call("shell.registerClient", """{"client":"codex"}"""))["result"]!;
+        var r = (await Call("shell.registerClient", """{"client":"claude_code"}"""))["result"]!;
         Assert.Equal("added", r["status"]!.GetValue<string>());
         var after = McpRuns.Skip(1).ToList();
         Assert.Equal(
-            [["mcp", "remove", "optimization-tool"], ["mcp", "add", "optimization-tool", "--", Bridge], ["mcp", "get", "optimization-tool"]],
+            [["mcp", "remove", "--scope", "user", "optimization-tool"], ["mcp", "add", "--scope", "user", "optimization-tool", "--", Bridge], ["mcp", "get", "optimization-tool"]],
             after.Select(Args));
-        Assert.All(after, c => { Assert.Equal(CodexExe, c.FileName); Assert.Null(c.CmdArguments); });
-        Assert.Equal(["mcp", "add", "optimization-tool", "--", Bridge], after[1].ArgumentList);
-        Assert.Equal($"codex mcp add optimization-tool -- \"{Bridge}\"", Assert.Single(_confirm.Shown).Command);
+        Assert.All(after, c => { Assert.Equal(ClaudeExe, c.FileName); Assert.Null(c.CmdArguments); });
+        Assert.Equal(["mcp", "add", "--scope", "user", "optimization-tool", "--", Bridge], after[1].ArgumentList);
+        Assert.Equal($"claude mcp add --scope user optimization-tool -- \"{Bridge}\"", Assert.Single(_confirm.Shown).Command);
     }
 
     [Fact]
@@ -346,17 +329,18 @@ public sealed class ClientConnectorTests
     [InlineData("""{"client":"claude_code "}""")]
     [InlineData("""{"client":"claude_code & calc"}""")]
     [InlineData("""{"client":"..\\..\\evil"}""")]
-    [InlineData("""{"client":"codex","path":"C:\\evil\\OptimizationTool.Mcp.exe"}""")]
-    [InlineData("""{"client":"codex","args":["--","x"]}""")]
+    [InlineData("""{"client":"claude_code","path":"C:\\evil\\OptimizationTool.Mcp.exe"}""")]
+    [InlineData("""{"client":"claude_code","args":["--","x"]}""")]
+    [InlineData("""{"client":"codex"}""")] // M9: the retired client is no longer a client
     [InlineData("""{"client":"claude_code","command":"C:\\evil.exe"}""")]
-    [InlineData("""{"client":["codex"]}""")]
+    [InlineData("""{"client":["claude_code"]}""")]
     [InlineData("""{"client":7}""")]
     [InlineData("{}")]
     [InlineData("null")]
     public async Task Bad_params_are_rejected_without_running_anything(string paramsJson)
     {
         _files.Add(ClaudeCmd);
-        _files.Add(CodexExe);
+        _files.Add(ClaudeExe);
         foreach (var m in new[] { "shell.clientStatus", "shell.registerClient", "shell.unregisterClient" })
         {
             var reply = await Call(m, paramsJson);
@@ -405,7 +389,7 @@ public sealed class ClientConnectorTests
         _files.Add(ClaudeCmd);
         var connector = new ClientConnector(_runner, new CliLocator(() => _path, f => _files.Contains(f)), _confirm, bad,
             systemRoot: SysRoot, fileExists: f => _files.Contains(f));
-        var d = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), DesktopLog.Disabled, clients: connector);
+        var d = new BridgeDispatcher(new BridgeRouter(), new NoBackend(), AppLog.Disabled, clients: connector);
         var r = JsonNode.Parse((await d.HandleAsync("""{"type":"rpc","id":1,"method":"shell.registerClient","params":{"client":"claude_code"}}""", Doc, true, default))!)!;
         Assert.Equal("""{"status":"failed","error":"unsupported_path"}""", r["result"]!.ToJsonString());
         Assert.Empty(McpRuns);
@@ -417,11 +401,11 @@ public sealed class ClientConnectorTests
     {
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            Path.GetFullPath(@".\claude.exe"), @"C:\a\claude.cmd", @"C:\a\claude.exe", @"C:\b\codex.cmd",
+            Path.GetFullPath(@".\claude.exe"), @"C:\a\claude.cmd", @"C:\a\claude.exe", @"C:\b\tool.cmd",
         };
         var locator = new CliLocator(() => @".;""C:\a"";;C:\b", files.Contains);
         Assert.Equal(@"C:\a\claude.exe", locator.Find("claude"));
-        Assert.Equal(@"C:\b\codex.cmd", locator.Find("codex"));
+        Assert.Equal(@"C:\b\tool.cmd", locator.Find("tool"));
         Assert.Null(locator.Find("other"));
     }
 }

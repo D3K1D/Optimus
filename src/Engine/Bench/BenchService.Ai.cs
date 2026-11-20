@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Engine.Bench;
 
@@ -62,7 +63,7 @@ public sealed partial class BenchService
                 calls.Add(prepare);
                 try { slots = await prepare.WaitAsync(token).ConfigureAwait(false); }
                 catch (OperationCanceledException) { break; }
-                catch (Exception ex) { _log($"snapshot prepare {part}: {ex.GetType().Name}"); continue; }
+                catch (Exception ex) { AppLog.Current.Warn($"bench: snapshot prepare {part}: {ex.GetType().Name}", ErrorSites.BenchSensors); continue; }
                 var telemetry = new PartTelemetry(part) { SampleSeconds = T.SampleInterval.TotalSeconds };
                 for (var i = 0; i < T.SnapshotSamples && !token.IsCancellationRequested; i++)
                 {

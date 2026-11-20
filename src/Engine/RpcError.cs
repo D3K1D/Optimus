@@ -1,4 +1,6 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json.Nodes;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Engine;
 
@@ -20,22 +22,41 @@ public static class ErrorCodes
     public const int InvalidState = -32013;
 }
 
-/// <summary>A JSON-RPC error the API returns to the client. Thrown inside a store transaction it also rolls the transaction back.</summary>
-public sealed class RpcError(int code, string message, JsonNode? data = null) : Exception(message)
+/// <summary>
+/// A JSON-RPC error the API returns to the client. Thrown inside a store transaction it also rolls the transaction back.
+/// Records where it was raised (the helpers record their caller) and an optional error-site id; the host logs both,
+/// neither is sent to the client (docs/error-logging.md §1).
+/// </summary>
+public sealed class RpcError(int code, string message, JsonNode? data = null,
+    [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) : Exception(message)
 {
     public int Code { get; } = code;
     public JsonNode? ErrorData { get; } = data;
 
-    public static RpcError Params(string field, string message) =>
-        new(ErrorCodes.InvalidParams, message, new JsonObject { ["field"] = field });
+    /// <summary>The error-site id (<c>E-XXX-nnn</c>) when this place is worth naming; null otherwise.</summary>
+    public string? Site { get; init; }
 
-    public static RpcError NotFound(string kind, string id) =>
-        new(ErrorCodes.NotFound, $"No {kind} {id}.", new JsonObject { ["kind"] = kind, ["id"] = id });
+    /// <summary>Where it was raised: <c>src/...cs</c>.</summary>
+    public string RaisedFile { get; } = CodeLocation.From(file);
+    public int RaisedLine { get; } = line;
 
-    public static RpcError State(string reason, string message) =>
-        new(ErrorCodes.InvalidState, message, new JsonObject { ["reason"] = reason });
+    /// <summary><c>src/...cs:line</c>.</summary>
+    public string RaisedAt => RaisedFile + ":" + RaisedLine.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-    public static RpcError Corrupt(string kind, string id) =>
+    public static RpcError Params(string field, string message, string? site = null,
+        [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) =>
+        new(ErrorCodes.InvalidParams, message, new JsonObject { ["field"] = field }, file, line) { Site = site };
+
+    public static RpcError NotFound(string kind, string id, string? site = null,
+        [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) =>
+        new(ErrorCodes.NotFound, $"No {kind} {id}.", new JsonObject { ["kind"] = kind, ["id"] = id }, file, line) { Site = site };
+
+    public static RpcError State(string reason, string message, string? site = null,
+        [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) =>
+        new(ErrorCodes.InvalidState, message, new JsonObject { ["reason"] = reason }, file, line) { Site = site };
+
+    public static RpcError Corrupt(string kind, string id, string? site = null,
+        [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) =>
         new(ErrorCodes.InvalidState, $"Stored {kind} {id} could not be read.",
-            new JsonObject { ["reason"] = "corrupt_record", ["kind"] = kind, ["id"] = id });
+            new JsonObject { ["reason"] = "corrupt_record", ["kind"] = kind, ["id"] = id }, file, line) { Site = site };
 }

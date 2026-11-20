@@ -7,12 +7,13 @@ using OptimizationTool.Host;
 using OptimizationTool.Host.Elevation;
 using OptimizationTool.Providers;
 using OptimizationTool.Transport;
+using OptimizationTool.Transport.Logging;
 using OptimizationTool.Windows;
 
 // OptimizationTool.Host [--data-dir <path>] [--pipe-name <name>] [--source windows|fixture] [--fixture-speed <factor>]
-//                       [--sample-seconds <n>] [--idle-exit-seconds <n>] [--dev-allow-any-client] [--enable-firewall-handler]
+//                       [--sample-seconds <n>] [--idle-exit-seconds <n>] [--dev-allow-any-client] [--enable-firewall-handler] [--enable-admin-actions] [--enable-elevated-scripts] [--dev-log]
 const string Usage = "Usage: OptimizationTool.Host [--data-dir <path>] [--pipe-name <name>] [--source windows|fixture] "
-    + "[--fixture-speed <factor>] [--sample-seconds <n>] [--idle-exit-seconds <n>] [--dev-allow-any-client] [--enable-firewall-handler]";
+    + "[--fixture-speed <factor>] [--sample-seconds <n>] [--idle-exit-seconds <n>] [--dev-allow-any-client] [--enable-firewall-handler] [--enable-admin-actions] [--enable-elevated-scripts] [--dev-log]";
 var dataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OptimizationTool");
 var pipeName = PipeNames.ForCurrentSession();
 var source = "windows";
@@ -21,6 +22,8 @@ var sampleSeconds = 60.0;
 var idleSeconds = 120.0;
 var devAllowAnyClient = false;
 var enableFirewallHandler = false;
+var enableAdminActions = false; // m9 D6: administrator actions added in M9 stay off until the VM pass
+var enableElevatedScripts = false; // m9 §5.4, D6: elevated scripts need this AND --enable-admin-actions
 
 for (var i = 0; i < args.Length; i++)
 {
@@ -35,6 +38,9 @@ for (var i = 0; i < args.Length; i++)
         case "--idle-exit-seconds": idleSeconds = double.Parse(Next(), CultureInfo.InvariantCulture); break;
         case "--dev-allow-any-client" or "--dev-allow-any-agent": devAllowAnyClient = true; break; // old name kept as an alias
         case "--enable-firewall-handler": enableFirewallHandler = true; break;
+        case "--enable-admin-actions": enableAdminActions = true; break;
+        case "--enable-elevated-scripts": enableElevatedScripts = true; break;
+        case DevLogSwitch.Argument: break; // read by DevLogSwitch below
         default:
             Console.Error.WriteLine($"Unknown argument {args[i]}.");
             Console.Error.WriteLine(Usage);
@@ -47,11 +53,19 @@ if (source is not ("windows" or "fixture") || sampleSeconds <= 0)
     return 64;
 }
 
+// Diagnostics go to stderr and to <data dir>\logs\host.log, and to dev.log when the developer log is on (scrubbed of the
+// user's folder, names, SIDs and emails: docs/error-logging.md). The shell starts the host with no console, so the files
+// are the only record of why a host failed or exited.
+var hostLog = AppLog.Open("host", dataDir, DevLogSwitch.IsOn(args, dataDir), echo: Console.Error);
+void Log(string message) => hostLog.Info(message);
+CrashHandlers.Register(hostLog, dataDir, ErrorSites.HostUnhandled);
+Log($"lifecycle: start {typeof(AppLog).Assembly.GetName().Version?.ToString(3)} pid={Environment.ProcessId} source={source} dev-log={DevLogSwitch.Explain(args, dataDir)}");
+
 // One host per pipe name. The mutex is held on this (main) thread for the life of the process.
 using var mutex = new Mutex(initiallyOwned: true, @"Local\OptimizationTool.Host." + pipeName, out var owned);
 if (!owned)
 {
-    Console.Error.WriteLine($"Another host already serves {pipeName}.");
+    Log($"another host already serves {pipeName}; exiting");
     return HostExitCodes.AlreadyServing;
 }
 
@@ -61,12 +75,10 @@ if (!owned)
 using var userLock = SingleHostLock.TryAcquire(SingleHostLock.NameForCurrentUser(dataDir));
 if (userLock is null)
 {
-    Console.Error.WriteLine("Optimus is open in another session.");
+    Log("other_session: Optimus is open in another session; exiting");
     mutex.ReleaseMutex();
     return HostExitCodes.OtherSession;
 }
-
-void Log(string message) => Console.Error.WriteLine($"{DateTime.UtcNow:HH:mm:ss.fff} {message}");
 
 // In-app providers (src/Providers): Anthropic and OpenAI adapters with keys, and the ChatGPT plan through a browser
 // sign-in; secrets in current-user DPAPI under the data directory (secrets folder). The plan adapter shares the
@@ -86,6 +98,9 @@ BenchOptions bench = source == "windows"
     }
     : FixtureBench.Options(speed);
 
+// One broker route for every administrator change: single plans, fix plans and the scripts' restore point (m9 §3.5).
+var elevation = new BrokerElevation { AdminChecksEnabled = enableAdminActions }; // m9 §17.2: administrator checks behind the same flag
+
 HostServer server;
 try
 {
@@ -100,6 +115,7 @@ catch (DataTooNewException ex)
     return HostExitCodes.NeedsUpdate;
 }
 
+
 HostServer StartServer() => HostServer.Start(new HostOptions
 {
     DataDir = dataDir, PipeName = pipeName, FixtureSpeed = speed,
@@ -109,8 +125,27 @@ HostServer StartServer() => HostServer.Start(new HostOptions
     DevAllowAnyAgent = devAllowAnyClient, DevAllowAnyClient = devAllowAnyClient,
     // M4: compiled handlers; machine-scope ones elevate through the one-shot broker (UAC). Firewall stays off by default.
     ActionModules = source == "windows" ? WindowsModules.Actions : [],
-    Elevation = new BrokerElevation(),
+    Elevation = elevation,
     EnableFirewallHandler = enableFirewallHandler,
+    EnableAdminActions = enableAdminActions,
+    // m9 §5: approved scripts (the user turns them on; each one is read and approved in the native dialog). Live source only.
+    Scripts = source == "windows"
+        ? new OptimizationTool.Engine.Actions.Scripts.ScriptOptions
+        {
+            Runner = new OptimizationTool.Windows.Actions.Scripts.WindowsScriptRunner(),
+            Parser = new OptimizationTool.Windows.Actions.Scripts.PowerShellParser(Path.Combine(dataDir, "script-runs")),
+            Policy = new OptimizationTool.Windows.Actions.Scripts.ScriptPolicyReader(),
+            // m9 §5.2: the restore-point pre-step goes through the broker only with --enable-admin-actions; otherwise flag_off.
+            RestorePoint = enableAdminActions
+                ? new OptimizationTool.Windows.Actions.RestorePoint.BrokerRestorePointStep(elevation, new OptimizationTool.Windows.Actions.RestorePoint.WindowsRestorePointSystem())
+                : null,
+            // m9 §5.4: an elevated script is one broker session, only with both flags; otherwise admin_unavailable.
+            ElevatedRunner = enableAdminActions && enableElevatedScripts ? new BrokerScriptRunner(elevation) : null,
+            EnableElevatedScripts = enableElevatedScripts,
+        }
+        : new(),
+    // Design v59: settingsPath beside Settings links only when Windows shows its pages in English.
+    DisplayLanguage = new OptimizationTool.Windows.WindowsDisplayLanguage(),
     Bench = bench,
     Agent = new AgentOptions
     {
@@ -118,12 +153,15 @@ HostServer StartServer() => HostServer.Start(new HostOptions
         SignIns = [chatGpt],
         Credentials = credentials,
         McpExecutablePath = Path.Combine(AppContext.BaseDirectory, HostServer.AgentExecutable),
-        CliRunner = new CliRunner(), // m5: headless Claude Code / Codex runs in the background
+        CliRunner = new CliRunner(), // m5: headless Claude Code runs in the background
+        FileIdentity = source == "windows" ? WindowsModules.FileIdentity : null, // m9 §6.1: research subjects' signature, read locally
+        ElevatedReads = elevation, // m9 §17.2: administrator checks through the same one-shot helper (behind --enable-admin-actions)
     },
 });
 Console.CancelKeyPress += (_, e) => { e.Cancel = true; _ = server.DisposeAsync().AsTask(); };
 Console.Out.WriteLine($"ready pipe={pipeName} source={source} data={dataDir}");
 Console.Out.Flush();
+Log("lifecycle: ready");
 
 server.Completion.GetAwaiter().GetResult();
 userLock.Dispose();

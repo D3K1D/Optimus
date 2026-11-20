@@ -13,11 +13,19 @@ public sealed class FirewallEnablePublicHandler(ActionContext context, IPublicFi
     private readonly IPublicFirewallReader _reader = reader ?? new WindowsPublicFirewallReader();
 
     public string ActionId => FirewallPlan.ActionId;
-    public string Version => "1.0.0";
-    public string Label => "Turn on firewall for public networks";
+    public string Version => FirewallPlan.HandlerVersion;
+    public string Label => FirewallPlan.Label;
     public string Privilege => "admin";
     public bool SupportsUndo => true;
     public string Kind => "setting";
+    public string Group => "security";
+    public string What => "Turns Windows Firewall back on for public networks such as cafés and airports.";
+    public IReadOnlyList<string> Flags => [ActionFlags.Network];
+    public JsonObject? ParameterSchema => null;
+    public bool TakesLease => false;
+
+    /// <summary>The lock key for the Public profile switch (m9 §3.1).</summary>
+    internal const string Resource = "fw:profile:public";
 
     public Task<ActionResolution> ResolveAsync(ActionRequest request, CancellationToken ct)
     {
@@ -27,7 +35,11 @@ public sealed class FirewallEnablePublicHandler(ActionContext context, IPublicFi
         var mode = FirewallPlan.Mode(request.Parameters);
         if (mode is null || !FirewallPlan.ValidTarget(request.Target))
             return Task.FromResult(FirewallPlan.Ineligible("bad_request", "This change isn't supported."));
-        return Task.Run(() => FirewallPlan.Resolve(_reader.Read(ct), mode, handlerEnabled: true, request.Target), ct);
+        return Task.Run(() =>
+        {
+            var r = FirewallPlan.Resolve(_reader.Read(ct), mode, handlerEnabled: true, request.Target);
+            return r.Eligible ? r with { Resources = [Resource] } : r;
+        }, ct);
     }
 
     public Task<JsonObject> ReadTargetAsync(JsonObject target, CancellationToken ct)
@@ -49,7 +61,11 @@ public sealed class FirewallEnablePublicHandler(ActionContext context, IPublicFi
             return new ActionOutcome("failed", execution.Before.DeepClone().AsObject(), "Nothing changed.", "bad_request", "This change isn't supported.");
         progress?.Report("Waiting for Windows permission");
         // The only write path: the one-shot elevated broker (it re-resolves and refuses if the plan drifted).
-        return await context.Elevation.RunAsync(ActionId, execution, ct).ConfigureAwait(false);
+        // The engine normally sends administrator steps to the broker itself (m9 §3.5); this direct path is one step.
+        var step = new ElevatedStep(1, ActionId, Version, execution.Target, execution.Before, execution.After, execution.Parameters);
+        var result = await context.Elevation.RunAsync(new ElevatedRequest(execution.PlanId, execution.PlanHash, [step]), CancellationToken.None, ct).ConfigureAwait(false);
+        return result.Steps.FirstOrDefault(s => s.N == 1).Outcome
+            ?? new ActionOutcome(result.Dispatched ? "indeterminate" : "failed", new JsonObject(), "The result could not be confirmed.", "bad_response");
     }
 
     public ActionRequest? UndoRequest(JsonObject target, JsonObject before)

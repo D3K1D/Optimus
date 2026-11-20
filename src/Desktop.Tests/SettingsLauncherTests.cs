@@ -20,7 +20,7 @@ public class SettingsLauncherTests
         public Harness()
         {
             Launcher = new SettingsLauncher(Opened.Add, () => Now);
-            Dispatcher = new BridgeDispatcher(new BridgeRouter(), Backend, DesktopLog.Disabled, Launcher);
+            Dispatcher = new BridgeDispatcher(new BridgeRouter(), Backend, AppLog.Disabled, Launcher);
         }
 
         public void Advance(TimeSpan t) => Now += (long)(t.TotalSeconds * Stopwatch.Frequency);
@@ -59,8 +59,36 @@ public class SettingsLauncherTests
     [Fact]
     public void Catalog_matches_m2_collectors_section_5()
     {
-        Assert.Equal(12, SettingsLauncher.Catalog.Count);
+        Assert.Equal(13, SettingsLauncher.Catalog.Count);
+        Assert.Contains("ms-settings:display-advancedgraphics", (IReadOnlySet<string>)SettingsLauncher.Catalog); // Settings › System › Display › Graphics
         Assert.All(SettingsLauncher.Catalog, u => Assert.True(u.StartsWith("ms-settings:", StringComparison.Ordinal) || u.StartsWith("windowsdefender://", StringComparison.Ordinal)));
+    }
+
+    /// <summary>Design v59: the shell opens exactly the pages of the one table the host sends settingsPath from.</summary>
+    [Fact]
+    public void The_catalog_is_the_shared_table()
+    {
+        Assert.Equal(OptimizationTool.Transport.SettingsPages.All.Select(p => p.Uri).Order(StringComparer.Ordinal), SettingsLauncher.Catalog.Order(StringComparer.Ordinal));
+        Assert.All(SettingsLauncher.Catalog, u => Assert.NotNull(OptimizationTool.Transport.SettingsPages.EnglishPath(u)));
+    }
+
+    [Fact]
+    public async Task Opens_Settings_System_Display_Graphics()
+    {
+        var h = new Harness();
+        Assert.True((await h.Call("""{"uri":"ms-settings:display-advancedgraphics"}"""))["result"]!["opened"]!.GetValue<bool>());
+        Assert.Equal(["ms-settings:display-advancedgraphics"], h.Opened);
+    }
+
+    [Theory]
+    [InlineData("ms-settings:display-advancedgraphics/")]
+    [InlineData("ms-settings:Display-AdvancedGraphics")]
+    [InlineData("ms-settings:display-advancedgraphics?x=1")]
+    public async Task Rejects_near_misses_of_the_graphics_page(string uri)
+    {
+        var h = new Harness();
+        Assert.Equal(-32602, (await h.Call(new JsonObject { ["uri"] = uri }.ToJsonString()))["error"]!["code"]!.GetValue<int>());
+        Assert.Empty(h.Opened);
     }
 
     [Theory]
@@ -137,7 +165,7 @@ public class SettingsLauncherTests
     public async Task Launch_failure_is_an_error_not_a_crash()
     {
         var launcher = new SettingsLauncher(_ => throw new System.ComponentModel.Win32Exception(2));
-        var d = new BridgeDispatcher(new BridgeRouter(), new ThrowingBackend(), DesktopLog.Disabled, launcher);
+        var d = new BridgeDispatcher(new BridgeRouter(), new ThrowingBackend(), AppLog.Disabled, launcher);
         var reply = JsonNode.Parse((await d.HandleAsync("""{"type":"rpc","id":1,"method":"shell.openSettings","params":{"uri":"ms-settings:troubleshoot"}}""", Doc, true, default))!)!;
         Assert.Equal(-32013, reply["error"]!["code"]!.GetValue<int>());
     }

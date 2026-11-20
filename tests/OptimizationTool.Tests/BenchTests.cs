@@ -489,10 +489,12 @@ public class BenchTests
     public async Task HostRestart_TurnsUnfinishedRowsInterrupted_AndPrunesOldOnes()
     {
         var dir = TestHost.NewDataDir();
+        // Relative to now: runs are kept 7 days, so a fixed date would be pruned once it is a week old.
+        var recent = DateTime.UtcNow.AddHours(-1).ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", System.Globalization.CultureInfo.InvariantCulture);
         using (var store = Store.Open(dir))
             store.Write(db =>
             {
-                foreach (var (id, state, at) in new[] { ("bench-00000000000000aa", "running", "2026-11-09T10:00:00.000Z"),
+                foreach (var (id, state, at) in new[] { ("bench-00000000000000aa", "running", recent),
                                                        ("bench-00000000000000bb", "cancelled", "2020-01-01T00:00:00.000Z") })
                 {
                     var body = new JsonObject

@@ -117,14 +117,14 @@ test('fixture shell.clientStatus: blocked, outdated, unknown sign-in and plan vs
   assert.equal((await entryOf(be, 'claude_code_mcp')).status, 'connected');
 
   // Outdated: installed with its details, outdated:true; error/unavailable until updated.
-  st = await be.call('fixture.setClient', { client: 'codex', installed: true, signedIn: true, outdated: true });
+  st = await be.call('fixture.setClient', { client: 'claude_code', installed: true, signedIn: true, outdated: true, version: '1.0.0' });
   assert.deepEqual([st.installed, st.outdated, st.signedIn], [true, true, true]);
-  e = await entryOf(be, 'codex_mcp');
+  e = await entryOf(be, 'claude_code_mcp');
   assert.deepEqual([e.status, e.detail], ['error', 'unavailable']);
-  await be.call('fixture.setClient', { client: 'codex', installDelay: 20 });
-  await be.call('shell.installClient', { client: 'codex' });
+  await be.call('fixture.setClient', { client: 'claude_code', installDelay: 20 });
+  await be.call('shell.installClient', { client: 'claude_code' });
   await sleep(60);
-  st = await be.call('shell.clientStatus', { client: 'codex' });
-  assert.equal(st.outdated, undefined);
-  assert.equal((await entryOf(be, 'codex_mcp')).status, 'connected');
+  st = await be.call('shell.clientStatus', { client: 'claude_code' });
+  assert.deepEqual([st.outdated, st.version], [undefined, '2.1.0']);
+  assert.equal((await entryOf(be, 'claude_code_mcp')).status, 'connected');
 });

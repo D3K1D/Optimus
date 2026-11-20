@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json.Nodes;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Engine.Bench;
 
@@ -167,7 +168,7 @@ public sealed partial class BenchService
         {
             IReadOnlyList<MetricSlot> slots;
             try { slots = hub.Prepare(part.Id, hw); }
-            catch (Exception ex) { _log($"bench sensors {part.Id}: {ex.GetType().Name}"); continue; }
+            catch (Exception ex) { AppLog.Current.Warn($"bench: sensors {part.Id}: {ex.GetType().Name}", ErrorSites.BenchSensors); continue; }
             foreach (var s in slots.Where(s => s.Available && s.Source != "worker"))
                 sensors.Add(new JsonObject { ["id"] = $"{part.Id}.{s.Id}", ["source"] = s.Source, ["unit"] = s.Unit });
         }
@@ -199,7 +200,7 @@ public sealed partial class BenchService
     private PowerState SafePower(ISensorHub hub)
     {
         try { return hub.Power(); }
-        catch (Exception ex) { _log($"bench power: {ex.GetType().Name}"); return new PowerState("unknown", "unknown"); }
+        catch (Exception ex) { AppLog.Current.Warn($"bench: power read failed: {ex.GetType().Name}", ErrorSites.BenchSensors); return new PowerState("unknown", "unknown"); }
     }
 
     /// <summary>Hardware facts (≤ 5 s) and whether the bench folder is usable (not a reparse point).</summary>
@@ -210,7 +211,7 @@ public sealed partial class BenchService
         try { folder = BenchFolder.Prepare(_dataDir); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _log($"bench folder refused: {ex.GetType().Name}");
+            AppLog.Current.Warn($"bench: folder refused: {ex.GetType().Name}", ErrorSites.BenchFolder);
             folder = _dataDir;
             folderOk = false;
         }
@@ -223,7 +224,7 @@ public sealed partial class BenchService
         }
         catch (Exception ex)
         {
-            _log($"bench hardware: {ex.GetType().Name}");
+            AppLog.Current.Warn($"bench: hardware read failed: {ex.GetType().Name}", ErrorSites.BenchSensors);
             return (null, folderOk);
         }
     }
@@ -485,7 +486,7 @@ public sealed partial class BenchService
                 db.AppendEvent(Stream(runId), "bench.progress", ProgressPayload(body));
                 db.AppendEvent(Stream(runId), "bench.finished", new JsonObject { ["state"] = "interrupted", ["score"] = null });
             });
-            _log($"benchmark {runId} marked interrupted");
+            AppLog.Current.Info($"bench: run {runId} marked interrupted");
         }
         _store.Write(Prune);
     }
@@ -511,7 +512,7 @@ public sealed partial class BenchService
         foreach (var run in runs)
             if (run.TryStop("shutdown")) run.SignalStop();
         try { await Task.WhenAll(runs.Select(r => r.Task)).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false); }
-        catch (Exception ex) { _log($"stopping benchmarks: {ex.GetType().Name}"); }
+        catch (Exception ex) { AppLog.Current.Warn($"bench: stopping benchmarks: {ex.GetType().Name}", ErrorSites.BenchStop); }
     }
 
     // ================================================================ persistence helpers

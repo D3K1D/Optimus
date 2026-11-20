@@ -150,7 +150,7 @@ public class DefenderActionTests
         Assert.Equal("completed", o.State);
         Assert.Equal("updated", o.Observed["result"]!.GetValue<string>());
         Assert.Contains("1.400.20.0", o.ReceiptText);
-        Assert.Equal("Updating definitions", progress[0]);
+        Assert.Equal("Updating virus definitions", progress[0]);
         Assert.Equal(new[] { "-SignatureUpdate" }, Assert.Single(f.Runs));
     }
 
@@ -223,7 +223,7 @@ public class DefenderActionTests
         Assert.Equal(2, o.Observed["threats"]!["count"]!.GetValue<int>());
         Assert.Equal(1, o.Observed["threats"]!["pua"]!.GetValue<int>());
         Assert.Contains("2 threats", o.ReceiptText);
-        Assert.Equal("Scanning · quick", progress[0]);
+        Assert.Equal("Quick scan · just started", progress[0]);
         Assert.Single(f.Runs); // only the scan; nothing else is started
     }
 
@@ -268,18 +268,37 @@ public class DefenderActionTests
         Assert.Equal("cancelled", o.Code);
         await f.KilledSignal.Task.WaitAsync(TimeSpan.FromSeconds(60)); // the kill is observed, not assumed to be instant
         Assert.True(f.Killed);
-        lock (progress) Assert.Contains(progress, p => p.StartsWith("Scanning · full · ", StringComparison.Ordinal));
+        lock (progress) Assert.True(progress.Count >= 2 && progress.All(p => p == "Full scan · just started"));
     }
 
-    /// <summary>Records progress and cancels as soon as a timed tick ("Scanning · full · N min") arrives.</summary>
+    /// <summary>Records progress and cancels as soon as a timed tick (the second line) arrives.</summary>
     private sealed class CancelOnTick(List<string> lines, CancellationTokenSource cts) : IProgress<string>
     {
         public void Report(string value)
         {
-            lock (lines) lines.Add(value);
-            if (value.StartsWith("Scanning · full · ", StringComparison.Ordinal)) cts.Cancel();
+            int n;
+            lock (lines) { lines.Add(value); n = lines.Count; }
+            if (n >= 2) cts.Cancel();
         }
     }
+
+    [Theory]
+    [InlineData(0, "Quick scan · just started", "Full scan · just started", "Updating virus definitions")]
+    [InlineData(59, "Quick scan · just started", "Full scan · just started", "Updating virus definitions")]
+    [InlineData(60, "Quick scan · running for 1 min", "Full scan · running for 1 min", "Updating virus definitions · running for 1 min")]
+    [InlineData(299, "Quick scan · running for 4 min", "Full scan · running for 4 min", "Updating virus definitions · running for 4 min")]
+    public void Progress_words_say_the_whole_minutes_elapsed(int seconds, string quick, string full, string update)
+    {
+        var f = new FakeDefender();
+        var at = TimeSpan.FromSeconds(seconds);
+        Assert.Equal(quick, H(DefenderOp.QuickScan, f).ProgressText(at));
+        Assert.Equal(full, H(DefenderOp.FullScan, f).ProgressText(at));
+        Assert.Equal(update, H(DefenderOp.UpdateSignatures, f).ProgressText(at));
+    }
+
+    [Fact]
+    public void Full_scan_what_line_is_the_designed_sentence() =>
+        Assert.Equal("A full scan can take an hour or more.", H(DefenderOp.FullScan, new FakeDefender()).What);
 
     [Fact]
     public async Task Execute_rechecks_eligibility_before_running()

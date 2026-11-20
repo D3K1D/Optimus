@@ -33,7 +33,7 @@ test('Begin scan → report with deterministic IDs, gap, and the prototype queue
   assert.equal(fin.payload.status, 'complete_with_gaps');
   const r = await be.call('report.get', { reportId: fin.payload.reportId });
   assert.equal(r.reportId, 'report-' + H(s.scanId));
-  assert.deepEqual(r.counts, { findings: 9, gaps: 1 });   // c1–c8 + the Defender definitions card (m2-extras)
+  assert.deepEqual(r.counts, { findings: 16, gaps: 1 });   // c1–c8 + the Defender definitions card + three listeners + power, setting and process cards + the BIOS fan card (m2-extras)
   const fw = r.evidence.find((e) => e.collectorId === 'fixture.firewall');
   assert.equal(fw.id, 'ev-' + H(s.scanId, 'fixture.firewall', 'firewall.profile.public'));
   const f1 = r.findings.find((f) => f.ruleId === 'fw.public_off');
@@ -43,7 +43,7 @@ test('Begin scan → report with deterministic IDs, gap, and the prototype queue
   assert.equal(r.gaps[0].status, 'timed_out');
   const fu = await be.call('followup.get', { reportId: r.reportId });
   assert.equal(fu.card.id, 'card-' + H(r.reportId, f1.id));
-  assert.equal(fu.total, 9);
+  assert.equal(fu.total, 16);
   // Gaming → performance cards follow security.
   const fu2 = await be.call('followup.respond', { idempotencyKey: key(), reportId: r.reportId, expectedRevision: fu.revision, scope: 'card', cardId: fu.card.id, option: 'ignore' });
   assert.equal(fu2.card.title, 'High performance on battery');
@@ -121,7 +121,7 @@ test('reload resumes at the report', async () => {
   assert.equal(o.resume.reportId, fin.payload.reportId);
   assert.equal(o.resume.scanId, s.scanId);
   const r = await be2.call('report.get', { reportId: o.resume.reportId });
-  assert.equal(r.findings.length, 9);
+  assert.equal(r.findings.length, 16);
 });
 
 test('fixture mirrors the shell\'s startup states and shell.retryBackend', async () => {

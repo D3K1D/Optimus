@@ -19,7 +19,6 @@ internal sealed class McpHarness : IAsyncDisposable
 
     public McpClient Client { get; private set; } = null!;
 
-    static McpHarness() => Log.FilePath = null;
 
     public static async Task<McpHarness> StartAsync(string pipeName, string clientName = "claude-code", string clientVersion = "2.1.310",
         Func<BridgeOptions, BridgeOptions>? configure = null)

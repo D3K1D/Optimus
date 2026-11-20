@@ -2,7 +2,7 @@ using System.Text.Json.Nodes;
 
 namespace OptimizationTool.Engine.Agent;
 
-// M5 (contracts/m5-chat.md §1–§3): Claude Code and Codex used in-app. The shell reports each CLI (provider.setClient);
+// M5 (contracts/m5-chat.md §1–§3): Claude Code used in-app. The shell reports the CLI (provider.setClient);
 // a signed-in CLI makes its kind "connected", agent.start without a pairing makes a headless task, and agent.ask on it
 // runs the CLI in the background with a one-run token its MCP bridge presents instead of a pairing code.
 public sealed partial class AgentService
@@ -10,19 +10,19 @@ public sealed partial class AgentService
     /// <summary>
     /// What the shell last reported about a CLI. Kept in memory for the host's lifetime (the shell sends it again when it
     /// reconnects). Compatible false: an outdated CLI. Blocked: a CLI exists but cannot be started. Auth: subscription |
-    /// api_key | other (how the CLI bills; informational). CodexFeatures (Codex only): the probed m6 §0 features each run
-    /// disables; a compatible Codex without them is treated as outdated (fail closed).
+    /// api_key | other (how the CLI bills; informational). ClaudeFlags (m9 §6.3): which of --safe-mode and
+    /// --setting-sources the probed help lists (chat adds --setting-sources=; research needs both).
     /// </summary>
     private sealed record ClientReport(string? Path, bool? SignedIn, string? Version, bool Compatible = true, bool Blocked = false, string? Auth = null,
-        IReadOnlyList<string>? CodexFeatures = null)
+        IReadOnlyList<string>? ClaudeFlags = null)
     {
         public bool Usable => Path is not null && Compatible && !Blocked;
     }
 
     private static readonly string[] AuthKinds = ["subscription", "api_key", "other"];
 
-    /// <summary>The user's Codex <c>cli_auth_credentials_store</c> (m5-chat §3), read per run. Tests replace it.</summary>
-    internal Func<string?> CodexCredentialsStore { get; set; } = CodexConfig.ReadCredentialsStore;
+    /// <summary>The fields provider.setClient accepts.</summary>
+    private static readonly string[] SetClientFields = ["kind", "path", "signedIn", "version", "compatible", "blocked", "auth", "claudeFlags"];
 
     /// <summary>A live run: its task, kind and turn. Bound to the bridge process once the bridge presents the token.</summary>
     private sealed record RunBinding(string Token, string TaskId, string Kind, string TurnId);
@@ -66,6 +66,9 @@ public sealed partial class AgentService
     /// </summary>
     public JsonNode SetClient(JsonObject p)
     {
+        // A closed field set: a field this host no longer reads (M9 dropped the per-client feature list) is refused, not ignored.
+        if (p.Select(x => x.Key).FirstOrDefault(key => !SetClientFields.Contains(key, StringComparer.Ordinal)) is { } unknown)
+            throw RpcError.Params(unknown, $"{unknown} is not a provider.setClient field.");
         var kind = P.OneOf(p, "kind", McpKinds);
         var path = P.Str(p, "path", required: false, maxLength: 1024);
         if (p["signedIn"] is not (null or JsonValue)) throw RpcError.Params("signedIn", "signedIn must be true, false or null.");
@@ -74,10 +77,8 @@ public sealed partial class AgentService
         var compatible = OptionalBool(p, "compatible") ?? true;
         var blocked = OptionalBool(p, "blocked") ?? false;
         var auth = p["auth"] is null ? null : P.OneOf(p, "auth", AuthKinds);
-        var codexFeatures = CodexFeatures(p, kind);
+        var claudeFlags = ClaudeFlags(p, kind);
         if (blocked && path is not null) throw RpcError.Params("blocked", "A blocked client has no path.");
-        // m6 §0, fail closed: a Codex the shell did not probe for its features is not used in-app.
-        if (kind == "codex_mcp" && path is not null && compatible && !blocked && codexFeatures is null) compatible = false;
         if (path is not null)
         {
             var valid = path.All(ch => !char.IsControl(ch)) && Path.IsPathFullyQualified(path)
@@ -89,7 +90,8 @@ public sealed partial class AgentService
         {
             // signedIn null (the check failed or timed out) is "unknown": the previous sign-in state of an installed CLI stays.
             if (path is not null && signedIn is null && _clients.TryGetValue(kind, out var previous) && previous.Path is not null) signedIn = previous.SignedIn;
-            _clients[kind] = new ClientReport(path, path is null ? null : signedIn, version, compatible, blocked, path is null ? null : auth, path is null ? null : codexFeatures);
+            _clients[kind] = new ClientReport(path, path is null ? null : signedIn, version, compatible, blocked, path is null ? null : auth,
+                path is null ? null : claudeFlags);
         }
         var state = blocked ? "blocked" : path is null ? "not installed" : !compatible ? "outdated"
             : signedIn switch { true => "signed in", false => "signed out", _ => "unknown" };
@@ -97,24 +99,35 @@ public sealed partial class AgentService
         return FreshEntry(kind);
     }
 
+    /// <summary>The Claude Code flags the shell's help probe may report (m9 §6.3; --max-turns §17.6).</summary>
+    public static readonly string[] ProbedClaudeFlags = ["--safe-mode", "--setting-sources", "--max-turns"];
+
     /// <summary>
-    /// codexFeatures (m6 §0, Codex only, optional): the §0 features this Codex lists, to disable on every run. Each must be
-    /// one of <see cref="HeadlessCommand.CodexLockdownFeatures"/>, at most once; anything else → -32602.
+    /// claudeFlags (m9 §6.3, Claude Code only, optional): which of <see cref="ProbedClaudeFlags"/> the probed help lists,
+    /// each at most once; anything else → -32602. Absent: none (chat keeps its argv; research is unavailable).
     /// </summary>
-    private static IReadOnlyList<string>? CodexFeatures(JsonObject p, string kind)
+    private static IReadOnlyList<string>? ClaudeFlags(JsonObject p, string kind)
     {
-        if (p["codexFeatures"] is null) return null;
-        const string message = "codexFeatures must be a list of distinct m6 §0 Codex feature names.";
-        if (kind != "codex_mcp" || p["codexFeatures"] is not JsonArray list) throw RpcError.Params("codexFeatures", message);
-        List<string> features = [];
+        if (p["claudeFlags"] is null) return null;
+        const string message = "claudeFlags must be a list of distinct probed Claude Code flags.";
+        if (kind != "claude_code_mcp" || p["claudeFlags"] is not JsonArray list) throw RpcError.Params("claudeFlags", message);
+        List<string> flags = [];
         foreach (var item in list)
         {
-            if (item is not JsonValue v || !v.TryGetValue<string>(out var name)
-                || !HeadlessCommand.CodexLockdownFeatures.Contains(name, StringComparer.Ordinal) || features.Contains(name, StringComparer.Ordinal))
-                throw RpcError.Params("codexFeatures", message);
-            features.Add(name);
+            if (item is not JsonValue v || !v.TryGetValue<string>(out var name) || !ProbedClaudeFlags.Contains(name, StringComparer.Ordinal) || flags.Contains(name, StringComparer.Ordinal))
+                throw RpcError.Params("claudeFlags", message);
+            flags.Add(name);
         }
-        return features;
+        return flags;
+    }
+
+    /// <summary>The CLI of an MCP kind as research sees it (m9 §6.3): usable path, version, sign-in and probed capabilities; else null.</summary>
+    private ResearchClient? ResearchClientOf(string kind)
+    {
+        lock (_gate)
+            return _clients.TryGetValue(kind, out var c) && c.Usable
+                ? new ResearchClient(c.Path!, c.Version, c.SignedIn, c.ClaudeFlags ?? [])
+                : null;
     }
 
     private static bool? OptionalBool(JsonObject p, string name) => p[name] switch
@@ -189,11 +202,20 @@ public sealed partial class AgentService
 
     // ---------------------------------------------------------------- the run (§3)
 
-    private async Task HeadlessAsync(string taskId, string turnId, string text, string? cardId, CancellationToken ct)
+    /// <summary>m9 §17.6: adds (or with a negative count releases) model round trips on the task's used.turns, in one transaction.</summary>
+    private void ReserveTurns(string taskId, long count) => _store.Write(db =>
+    {
+        var t = LoadTask(db, taskId);
+        AddUsed(t, "turns", count);
+        SaveTask(db, t);
+        UsageEvent(db, t);
+    });
+
+    private async Task HeadlessAsync(string taskId, string turnId, AskTurn ask, CancellationToken ct)
     {
         try
         {
-            await RunHeadlessAsync(taskId, turnId, text, cardId, ct).ConfigureAwait(false);
+            await RunHeadlessAsync(taskId, turnId, ask, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -206,11 +228,12 @@ public sealed partial class AgentService
         }
         finally
         {
+            EndFixTurn(taskId, turnId); // m9 §17.3
             EndRun(taskId);
         }
     }
 
-    private async Task RunHeadlessAsync(string taskId, string turnId, string text, string? cardId, CancellationToken ct)
+    private async Task RunHeadlessAsync(string taskId, string turnId, AskTurn ask, CancellationToken ct)
     {
         var task = _store.Write(db => LoadLive(db, taskId));
         if (InactiveCode(task) is { } inactive)
@@ -219,7 +242,9 @@ public sealed partial class AgentService
             return;
         }
         var grant = GrantOf(task);
-        if (UsedValue(task, "turns") >= grant.Limits.Turns)
+        // m9 §17.6: one launch may use up to min(the ask's budget, what is left of the per-task bound) model round trips.
+        var allowance = (int)Math.Min(AskTurns(grant, ask.Fix is not null), TaskTurns - UsedValue(task, "turns"));
+        if (allowance <= 0) // the per-task runaway bound
         {
             Exhaust(taskId, turnId, 0);
             return;
@@ -228,16 +253,19 @@ public sealed partial class AgentService
         const int n = 1;
         TryEvent(taskId, "agent.turn", new JsonObject { ["turnId"] = turnId, ["n"] = n, ["status"] = "started" });
         var kind = task["recipient"].Text("kind");
-        var codex = kind == "codex_mcp";
         string? cli;
-        IReadOnlyList<string>? codexFeatures = null;
+        var settingSources = false; // m9 §6.3 chat hardening: --setting-sources= when the probed help lists it
+        var maxTurnsListed = false; // m9 §17.6: --max-turns only when the probed help lists it
         lock (_gate)
         {
             var usable = _clients.TryGetValue(kind, out var c) && c.Usable && c.SignedIn != false;
             cli = usable ? c!.Path : null;
-            if (usable) codexFeatures = c!.CodexFeatures;
+            if (usable)
+            {
+                settingSources = c!.ClaudeFlags?.Contains("--setting-sources", StringComparer.Ordinal) == true;
+                maxTurnsListed = c.ClaudeFlags?.Contains("--max-turns", StringComparer.Ordinal) == true;
+            }
         }
-        if (codex && codexFeatures is null) cli = null; // m6 §0: never run a Codex whose features were not probed
         var bridge = _options.McpExecutablePath;
         if (cli is null || bridge is null || _options.CliRunner is not { } runner || DataDir is null)
         {
@@ -248,7 +276,7 @@ public sealed partial class AgentService
         var runDir = Path.Combine(DataDir, "agent-runs", taskId);
         var session = task["clientSession"]?.GetValue<string>();
         var first = session is null;
-        var prompt = _store.Write(db => Prompt(db, taskId, text, cardId, first));
+        var prompt = _store.Write(db => Prompt(db, taskId, ask, first));
         var run = OpenRun(taskId, kind, turnId);
         var mcpConfig = Path.Combine(runDir, HeadlessCommand.McpConfigFile);
         try
@@ -257,34 +285,24 @@ public sealed partial class AgentService
             try { Acl.RestrictDirectory(runDir); }
             catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException) { _log($"task {taskId} run folder ACL: {ex.GetType().Name}"); }
 
-            IReadOnlyList<string>? args;
-            string stdin;
-            if (codex)
-            {
-                args = HeadlessCommand.Codex(runDir, bridge, run.Token, session, codexFeatures!, CodexCredentialsStore());
-                stdin = first ? SystemPrompt + "\n\n" + prompt : prompt;
-            }
-            else
-            {
-                var id = first ? Guid.NewGuid() : Guid.TryParse(session, out var g) ? g : Guid.NewGuid();
-                session = id.ToString("D");
-                File.WriteAllText(mcpConfig, HeadlessCommand.ClaudeMcpConfig(bridge, run.Token));
-                File.WriteAllText(Path.Combine(runDir, HeadlessCommand.SystemFile), SystemPrompt);
-                args = HeadlessCommand.Claude(runDir, id, resume: !first);
-                stdin = prompt;
-            }
-            if (args is null)
-            {
-                TurnFailed(taskId, turnId, n, "unavailable");
-                return;
-            }
+            var id = first ? Guid.NewGuid() : Guid.TryParse(session, out var g) ? g : Guid.NewGuid();
+            session = id.ToString("D");
+            File.WriteAllText(mcpConfig, HeadlessCommand.ClaudeMcpConfig(bridge, run.Token));
+            File.WriteAllText(Path.Combine(runDir, HeadlessCommand.SystemFile), SystemPrompt);
+            // m9 §17.6: Claude Code's own cap on agentic turns is this launch's allowance (the ask's 8, a fix ask 12, never more
+            // than the task has left), passed only when the probed help lists --max-turns; otherwise the host deadline below
+            // and the reservation apply.
+            var args = HeadlessCommand.Claude(runDir, id, resume: !first, settingSources, maxTurnsListed ? allowance : null);
+            var stdin = prompt;
 
-            var seconds = Math.Min(MaxRunSeconds, grant.Limits.Turns * grant.Limits.TurnSeconds);
+            // The allowance is reserved before the launch (it stays counted if the run is cut off or the host stops).
+            ReserveTurns(taskId, allowance);
+            var seconds = Math.Min(MaxRunSeconds, allowance * grant.Limits.TurnSeconds);
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(TimeSpan.FromSeconds(seconds));
             // m6 §0 runtime guard: a tool the run must not have kills the process tree at once (cancelling the run).
             using var guard = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
-            var stream = new HeadlessStream(codex, () => { try { guard.Cancel(); } catch (ObjectDisposedException) { } });
+            var stream = new HeadlessStream(() => { try { guard.Cancel(); } catch (ObjectDisposedException) { } });
             CliExit? exit = null;
             string? stopped = null; // cancelled | timeout | tool_blocked | internal: the run ended before the CLI did
             try
@@ -309,19 +327,22 @@ public sealed partial class AgentService
             if (exit is { Started: false })
             {
                 _log($"task {taskId} headless run did not start ({exit.LaunchError ?? "launch_failed"})");
-                TurnFailed(taskId, turnId, n, "unavailable"); // never launched: nothing to count
+                ReserveTurns(taskId, -allowance); // never launched: nothing to count
+                TurnFailed(taskId, turnId, n, "unavailable");
                 return;
             }
 
-            // Every launched run counts as a turn, however it ended; its tokens are added to used. The client's session or
-            // thread is kept for the next ask: one the CLI reported is kept even when the run was cancelled or timed out.
+            // m9 §17.6: a launched run counts the round trips it reports (num_turns) in place of the reservation; one that
+            // reports none, or was cut off, keeps the reservation. Its tokens are added to used. The client's session is
+            // kept for the next ask: one the CLI reported is kept even when the run was cancelled or timed out.
+            var counted = stopped is null && stream.NumTurns is { } reported ? reported : allowance;
             var answer = stopped is null ? stream.Answer : null;
-            var newSession = codex ? stream.Session : stream.Session ?? (answer is not null ? session : null);
+            var newSession = stream.Session ?? (answer is not null ? session : null);
             var usage = new JsonObject { ["inputTokens"] = stream.InputTokens, ["outputTokens"] = stream.OutputTokens };
             _store.Write(db =>
             {
                 var t = LoadTask(db, taskId);
-                AddUsed(t, "turns", 1);
+                AddUsed(t, "turns", counted - allowance);
                 AddUsed(t, "inputTokens", stream.InputTokens);
                 AddUsed(t, "outputTokens", stream.OutputTokens);
                 if (newSession is not null) t["clientSession"] = newSession;

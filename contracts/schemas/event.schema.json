@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.optimizationtool.invalid/v1/event.schema.json",
   "title": "Event envelope",
-  "description": "events.notify params and events.read events[] (protocol-v1 §5, m3-agent §4 Events). seq is monotonic per stream, from 1.",
+  "description": "events.notify params and events.read events[] (protocol-v1 §5, m3-agent §4 Events, m9 §1.2 ai.permissions). seq is monotonic per stream, from 1.",
   "type": "object",
   "required": ["stream", "seq", "type", "at", "payload"],
   "properties": {
@@ -67,7 +67,9 @@
           "status": { "enum": ["running", "complete", "error", "denied"] },
           "bytes": { "type": "integer", "minimum": 0 },
           "evidenceIds": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } },
-          "origin": { "enum": ["in_app", "claude_code", "codex"] } } } } }
+          "origin": { "enum": ["in_app", "claude_code", "codex"], "description": "codex: legacy, read only (events stored before M9 dropped the Codex provider)." },
+          "planId": { "type": "string", "pattern": "^plan-", "description": "request_action and propose_fix (m9 §4): the plan the call created." },
+          "label": { "type": "string", "maxLength": 120, "description": "web_lookup (m9 §6.5): what was looked up (\"Steam · open port\"), built by the host from the subject; for the Activity row only, never part of a tool result." } } } } }
     },
     {
       "if": { "properties": { "type": { "const": "agent.message" } } },
@@ -79,14 +81,21 @@
           "dropped": { "type": "integer", "minimum": 0 },
           "followUps": { "type": "array", "maxItems": 3, "items": { "type": "string", "minLength": 3, "maxLength": 120 } },
           "suggest": { "const": "benchmark", "description": "m6 §8: the answer ended with the stripped tag Do: benchmark; the app shows a Run benchmark button." },
-          "warnings": { "type": "array", "items": { "enum": ["voltage"] }, "description": "m6 §8: the answer mentions undervolting, overclocking, voltage offsets, Curve Optimizer, Vcore or similar." } } } } }
+          "warnings": { "type": "array", "items": { "enum": ["voltage"] }, "description": "m6 §8: the answer mentions undervolting, overclocking, voltage offsets, Curve Optimizer, Vcore or similar." },
+          "sources": { "type": "array", "maxItems": 8, "description": "m9 §7: the sources of this turn's web_lookup calls, for the app only (never in a tool result or the transcript). Opened with shell.openSource.",
+            "items": { "type": "object", "required": ["sourceId", "title", "domain"], "additionalProperties": false,
+              "properties": { "sourceId": { "$ref": "research.schema.json#/$defs/sourceId" }, "title": { "type": "string", "maxLength": 120 }, "domain": { "type": "string", "maxLength": 253 } } } } } } } }
     },
     {
       "if": { "properties": { "type": { "const": "agent.question" } } },
       "then": { "properties": { "payload": {
         "required": ["turnId", "text", "cardId"],
+        "if": { "not": { "anyOf": [{ "required": ["intent"] }, { "required": ["checks"] }] } }, "then": { "properties": { "text": { "minLength": 1 } } },
         "properties": {
-          "turnId": { "type": "string", "pattern": "^turn-" }, "text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "turnId": { "type": "string", "pattern": "^turn-" }, "text": { "type": "string", "maxLength": 2000, "description": "The user's words; empty only on a fix ask without words (intent fix)." },
+          "intent": { "const": "fix", "description": "m9 §17.3: a Fix for me ask on cardId." }, "attemptId": { "type": "string", "pattern": "^fix-", "description": "m9 §17.3: the fix attempt the ask started." },
+          "revise": { "type": "string", "pattern": "^plan-", "description": "m9 §17.3: the plan the user asked to change (cancelled, revised)." },
+          "checks": { "$ref": "checks.schema.json#/$defs/requestId", "description": "m9 §17.2: the host's continuation after this request of administrator checks ended (text empty; the turn is the host's fixed message)." },
           "cardId": { "type": ["string", "null"] },
           "context": { "type": "object", "required": ["benchRunId", "part"], "additionalProperties": false,
             "properties": { "benchRunId": { "type": "string", "pattern": "^bench-" }, "part": { "enum": ["cpu", "gpu", "ram", "disk"] } } } } } } }
@@ -95,7 +104,16 @@
       "if": { "properties": { "type": { "const": "agent.task" } } },
       "then": { "properties": { "payload": {
         "required": ["status", "used"],
-        "properties": { "status": { "$ref": "agent-task.schema.json#/properties/status" }, "used": { "$ref": "agent-task.schema.json#/properties/used" } } } } }
+        "properties": { "status": { "$ref": "agent-task.schema.json#/properties/status" }, "used": { "$ref": "agent-task.schema.json#/properties/used" },
+          "grant": { "$ref": "agent-task.schema.json#/$defs/grant", "description": "m9 §1.2: present when a widening ai.setPermissions updated the task's grant in place." } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "agent.checks" } } },
+      "then": { "properties": { "stream": { "const": "user" }, "payload": { "$ref": "checks.schema.json#/$defs/request" } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "card.fix" } } },
+      "then": { "properties": { "stream": { "const": "user" }, "payload": { "$ref": "fix.schema.json#/$defs/event" } } }
     },
     {
       "if": { "properties": { "type": { "const": "action.plan" } } },
@@ -111,15 +129,20 @@
         "properties": {
           "operationId": { "type": "string", "pattern": "^op-" }, "planId": { "type": "string", "pattern": "^plan-" },
           "state": { "$ref": "operation.schema.json#/properties/state" },
-          "receipt": { "$ref": "operation.schema.json#/$defs/receipt" },
-          "progress": { "type": "string" }, "manualUri": { "type": "string" } } } } }
+          "receipt": { "oneOf": [{ "$ref": "operation.schema.json#/$defs/receipt" }, { "$ref": "operation.schema.json#/$defs/scriptReceipt" }] },
+          "progress": { "type": "string", "description": "Provider operations: a progress line. Fix operations (m9 §4.1): Step n of k on step events. Scripts (m9 §5.7): Making a restore point, then Running · m:ss." },
+          "manualUri": { "type": "string" },
+          "settingsPath": { "type": "string", "description": "Design v59: the page as Windows names it in English (e.g. Settings › Apps › Startup), sent beside manualUri only when Windows’ display language is English and the page has a known path; absent otherwise." },
+          "result": { "type": "string", "description": "A provider operation's own result name (operation.schema.json result), on its final event." },
+          "step": { "type": "object", "required": ["n", "state"], "additionalProperties": false, "description": "m9 §4.1: a fix step transition; the final event of a fix has no step.",
+            "properties": { "n": { "type": "integer", "minimum": 1 }, "state": { "$ref": "operation.schema.json#/$defs/fixStep/properties/state" } } } } } } }
     },
     {
       "if": { "properties": { "type": { "const": "provider.status" } } },
       "then": { "properties": { "payload": {
         "required": ["kind", "status", "detail", "since"],
         "properties": {
-          "kind": { "enum": ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"] },
+          "kind": { "enum": ["local", "anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp"] },
           "status": { "$ref": "provider-list.schema.json#/$defs/status" },
           "detail": { "$ref": "provider-list.schema.json#/$defs/detail" },
           "code": { "type": "string", "pattern": "^[0-9]{4}$" },
@@ -141,11 +164,21 @@
         "properties": { "state": { "$ref": "bench-run.schema.json#/properties/state" }, "score": { "type": ["number", "null"] }, "partial": { "type": ["boolean", "null"] } } } } }
     },
     {
+      "if": { "properties": { "type": { "const": "ai.permissions" } } },
+      "then": { "properties": { "stream": { "const": "user" }, "payload": {
+        "required": ["permissions"],
+        "properties": { "permissions": { "$ref": "permissions.schema.json#/$defs/record" } } } } }
+    },
+    {
+      "if": { "properties": { "type": { "const": "research.state" } } },
+      "then": { "properties": { "stream": { "const": "user" }, "payload": { "$ref": "research.schema.json#/$defs/state" } } }
+    },
+    {
       "if": { "properties": { "type": { "const": "agent.pairing" } } },
       "then": { "properties": { "payload": {
         "required": ["pairingId", "client", "code", "status"],
         "properties": {
-          "pairingId": { "type": "string", "pattern": "^pair-" }, "client": { "enum": ["claude_code", "codex", "unknown"] },
+          "pairingId": { "type": "string", "pattern": "^pair-" }, "client": { "enum": ["claude_code", "unknown"] },
           "code": { "type": "string", "pattern": "^[0-9]{4}$" }, "status": { "enum": ["pending", "approved", "denied", "expired"] } } } } }
     }
   ]

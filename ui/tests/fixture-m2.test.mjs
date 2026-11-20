@@ -114,13 +114,13 @@ test('rescan comparison: one new, one fixed; report.compare returns the findings
   const { report: r2 } = await fullScan(be, { intent: 'rescan', baseReportId: r.reportId });
   assert.equal(r2.comparison.new.length, 1);
   assert.equal(r2.comparison.resolved.length, 2);
-  assert.equal(r2.comparison.unchanged, 7);
+  assert.equal(r2.comparison.unchanged, 14);
   const c = await be.call('report.compare', { reportId: r2.reportId, baseReportId: r.reportId });
   assert.equal(c.new[0].ruleId, 'storage.volume_low');
   assert.deepEqual(c.resolved.map((f) => f.ruleId).sort(), ['privacy.optional_diag', 'start.suggestions_on']);
   const priv = r2.categories.find((x) => x.id === 'privacy_telemetry');
   assert.deepEqual([priv.status, priv.findings], ['complete', 0]);
-  assert.equal(c.unchanged.length, 7);
+  assert.equal(c.unchanged.length, 14);
   // A plain scan of the same intent compares against the previous report too.
   const { report: r3 } = await fullScan(be);
   assert.equal(r3.baseReportId, r2.reportId);

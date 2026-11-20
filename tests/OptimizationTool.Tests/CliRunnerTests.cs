@@ -81,4 +81,23 @@ public sealed class CliRunnerTests : IDisposable
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => new CliRunner().RunAsync(new CliLaunch(cli, [], "", _dir), _ => { }, cts.Token));
         Assert.True(clock.Elapsed < TimeSpan.FromSeconds(15));
     }
+
+    [Fact]
+    public async Task AnExplicitEnvironment_IsTheWholeEnvironment_AndChatRunsKeepInheriting()
+    {
+        // m9 §6.3: a research launch passes an allowlist; nothing else of the host's environment reaches the child.
+        Environment.SetEnvironmentVariable("OT_RUNNER_SECRET", "leak");
+        try
+        {
+            var cli = Script("env.cmd", "echo [%OT_RUNNER_SECRET%] [%OT_KEEP%]");
+            var env = new Dictionary<string, string> { ["SystemRoot"] = Environment.GetEnvironmentVariable("SystemRoot")!, ["ComSpec"] = Environment.GetEnvironmentVariable("ComSpec")!, ["OT_KEEP"] = "kept" };
+            var lines = new List<string>();
+            await new CliRunner().RunAsync(new CliLaunch(cli, [], "", _dir, env), lines.Add, default);
+            Assert.Contains("[] [kept]", lines);
+            lines.Clear();
+            await new CliRunner().RunAsync(new CliLaunch(cli, [], "", _dir), lines.Add, default);
+            Assert.Contains("[leak] []", lines);
+        }
+        finally { Environment.SetEnvironmentVariable("OT_RUNNER_SECRET", null); }
+    }
 }

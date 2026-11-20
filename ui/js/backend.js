@@ -12,7 +12,7 @@
  *   types: scan.progress {done,total,current} · scan.coverage {collectorId,status} · scan.finished {status,reportId}
  *          inventory.fact {kind,label} · inventory.finished {status}
  *
- * @typedef {{value:('local'|'later'|'claude-code'|'codex'|'api'), label:string}} ProviderChoice
+ * @typedef {{value:('local'|'later'|'claude-code'|'api'|'chatgpt'), label:string}} ProviderChoice
  * @typedef {Object} Onboarding
  * @property {number} revision
  * @property {'provider'|'use'|'goal'|'specs'|'complete'} step

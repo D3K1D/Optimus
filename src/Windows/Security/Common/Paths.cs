@@ -120,9 +120,150 @@ internal static class LaunchString
 
     public sealed record Parsed(string? Image, bool HasArguments, string? Payload);
 
+    /// <summary>
+    /// For actions (never evidence): the image and the raw argument text that follows it, so an action's fingerprint can
+    /// identify what a host process (rundll32, a script host, …) really runs with <see cref="HostedPayload"/>.
+    /// </summary>
+    public static (string? Image, string Tail) Split(string? raw, PathRoots roots, Func<string, bool> fileExists, string? systemDir)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return (null, "");
+        var (image, rest) = SplitCore(raw, roots, fileExists, systemDir);
+        return (image.Length == 0 ? null : image, rest);
+    }
+
+    private static readonly HashSet<string> DllHosts = new(StringComparer.OrdinalIgnoreCase) { "rundll32.exe", "regsvr32.exe" };
+    private static readonly HashSet<string> ScriptHosts = new(StringComparer.OrdinalIgnoreCase) { "wscript.exe", "cscript.exe", "mshta.exe" };
+    private static readonly HashSet<string> PowerShells = new(StringComparer.OrdinalIgnoreCase) { "powershell.exe", "pwsh.exe" };
+    /// <summary>Hosts whose arguments are themselves code or name what runs in a way Optimus doesn't parse: arguments → unidentified.</summary>
+    private static readonly HashSet<string> OpaqueHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cmd.exe", "conhost.exe", "forfiles.exe", "msbuild.exe", "installutil.exe", "regasm.exe", "regsvcs.exe", "msiexec.exe", "hh.exe",
+        "bash.exe", "wsl.exe", "msxsl.exe", "odbcconf.exe", "pcalua.exe", "scriptrunner.exe", "explorer.exe", "control.exe", "certutil.exe", "bitsadmin.exe",
+    };
+    private static readonly HashSet<string> PsFlags = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "noprofile", "nop", "nologo", "noninteractive", "noni", "noexit", "sta", "mta",
+    };
+    private static readonly HashSet<string> PsValued = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "executionpolicy", "ep", "ex", "exec", "windowstyle", "w", "win", "version", "v", "inputformat", "if", "outputformat", "of", "o", "workingdirectory", "wd",
+    };
+
+    /// <summary>
+    /// What a host process runs (m9 §3.2 fingerprints): the payload file of rundll32/regsvr32 (the DLL), a script host
+    /// (the script), PowerShell (-File's script), as a fully qualified path. Identified is false when the program is a
+    /// host whose arguments can't be tied to one file (an inline command, a URL, regsvr32 /i, cmd /c …): an action must
+    /// then not offer to re-enable it. Any other program: no payload, identified. Text only; nothing is run.
+    /// </summary>
+    public static (string? Payload, bool Identified) HostedPayload(string? image, string? arguments, string? workingDirectory, Func<string, bool> fileExists,
+        string? systemDir, PathRoots? roots = null)
+    {
+        if (string.IsNullOrWhiteSpace(image)) return (null, true);
+        var name = PathRoots.FileName(image.Trim().Trim('"'));
+        var args = Tokens(roots is null || arguments is null ? arguments ?? "" : roots.ExpandKnown(arguments));
+        if (args.Count == 0) return (null, true);
+        if (OpaqueHosts.Contains(name)) return (null, false);
+        string? file = null;
+        if (DllHosts.Contains(name))
+        {
+            if (name.Equals("rundll32.exe", StringComparison.OrdinalIgnoreCase))
+            {
+                file = args[0].Value.Split(',')[0]; // a DLL path, then its entry point after the comma
+            }
+            else
+            {
+                if (args.Any(a => !a.Quoted && (a.Value.StartsWith("/i", StringComparison.OrdinalIgnoreCase) || a.Value.StartsWith("-i", StringComparison.OrdinalIgnoreCase))))
+                    return (null, false); // DllInstall gets a free string (a URL with scrobj): not one file
+                file = args.FirstOrDefault(a => a.Quoted || !(a.Value.StartsWith('/') || a.Value.StartsWith('-'))).Value;
+            }
+        }
+        else if (ScriptHosts.Contains(name))
+        {
+            file = args.FirstOrDefault(a => a.Quoted || !a.Value.StartsWith("//", StringComparison.Ordinal)).Value;
+            if (file is not null && name.Equals("mshta.exe", StringComparison.OrdinalIgnoreCase) && file.Contains(':') && !(file.Length > 2 && file[1] == ':'))
+                return (null, false); // a URL or an inline javascript:/vbscript: program
+        }
+        else if (PowerShells.Contains(name))
+        {
+            for (var i = 0; i < args.Count && file is null; i++)
+            {
+                var a = args[i];
+                if (a.Quoted || !(a.Value.StartsWith('-') || a.Value.StartsWith('/'))) return (null, false); // a command, not a file
+                var sw = a.Value.TrimStart('-', '/');
+                if (sw.Equals("file", StringComparison.OrdinalIgnoreCase) || sw.Equals("f", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Count) return (null, false);
+                    file = args[i + 1].Value;
+                }
+                else if (PsValued.Contains(sw)) i++;
+                else if (!PsFlags.Contains(sw)) return (null, false); // -Command, -EncodedCommand, anything Optimus doesn't know
+            }
+            if (file is null) return (null, false);
+        }
+        else return (null, true);
+
+        if (string.IsNullOrWhiteSpace(file)) return (null, false);
+        var path = PathRoots.StripPrefixes(file.Trim());
+        if (path.IndexOf('\\') < 0 && path.IndexOf('/') < 0)
+        {
+            // A bare name: DLL hosts load from System32 first; otherwise (and then) the program's working folder.
+            if (DllHosts.Contains(name) && systemDir is not null)
+            {
+                var dll = HasExtension(path) || path.Contains('.') ? path : path + ".dll";
+                if (fileExists(Path.Combine(systemDir, dll))) return (Path.Combine(systemDir, dll), true);
+            }
+        }
+        if (!Path.IsPathFullyQualified(path) && !string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            var wd = roots?.ExpandKnown(workingDirectory.Trim().Trim('"')) ?? workingDirectory.Trim().Trim('"');
+            if (Path.IsPathFullyQualified(wd)) path = Path.Combine(wd, path);
+        }
+        return Path.IsPathFullyQualified(path) && path.IndexOfAny(Path.GetInvalidPathChars()) < 0 ? (path, true) : (null, false);
+    }
+
+    /// <summary>Command-line tokens: whitespace-separated, double quotes group (and are removed).</summary>
+    private static List<(string Value, bool Quoted)> Tokens(string s)
+    {
+        var list = new List<(string, bool)>();
+        var i = 0;
+        while (i < s.Length && list.Count < 64)
+        {
+            while (i < s.Length && char.IsWhiteSpace(s[i])) i++;
+            if (i >= s.Length) break;
+            var sb = new System.Text.StringBuilder();
+            var quoted = false;
+            var inQuote = false;
+            while (i < s.Length && (inQuote || !char.IsWhiteSpace(s[i])))
+            {
+                if (s[i] == '"') { inQuote = !inQuote; quoted = true; }
+                else sb.Append(s[i]);
+                i++;
+            }
+            list.Add((sb.ToString(), quoted));
+        }
+        return list;
+    }
+
     public static Parsed Parse(string? raw, PathRoots roots, Func<string, bool> fileExists, string? systemDir)
     {
         if (string.IsNullOrWhiteSpace(raw)) return new(null, false, null);
+        var (image, rest) = SplitCore(raw, roots, fileExists, systemDir);
+        var hasArgs = rest.Trim().Length > 0;
+        string? payload = null;
+        if (hasArgs && PathRoots.FileName(image).Equals("rundll32.exe", StringComparison.OrdinalIgnoreCase))
+        {
+            // rundll32 "C:\x\y.dll",Entry → payload is the DLL (an image, not an argument we keep).
+            var arg = rest.Trim();
+            string dll;
+            if (arg.StartsWith('"')) { var c = arg.IndexOf('"', 1); dll = c > 0 ? arg[1..c] : arg[1..]; }
+            else { var c = arg.IndexOfAny([',', ' ']); dll = c > 0 ? arg[..c] : arg; }
+            payload = Resolve(dll.Trim(), fileExists, systemDir);
+        }
+        return new(image.Length == 0 ? null : image, hasArgs, payload);
+    }
+
+    private static (string Image, string Tail) SplitCore(string raw, PathRoots roots, Func<string, bool> fileExists, string? systemDir)
+    {
         var s = roots.ExpandKnown(raw.Trim());
         if (s.StartsWith(@"\SystemRoot\", StringComparison.OrdinalIgnoreCase) && systemDir is not null)
             s = Path.GetDirectoryName(systemDir) + s[@"\SystemRoot".Length..];
@@ -141,19 +282,7 @@ internal static class LaunchString
             (image, rest) = SplitUnquoted(s, fileExists);
         }
 
-        image = Resolve(image.Trim(), fileExists, systemDir);
-        var hasArgs = rest.Trim().Length > 0;
-        string? payload = null;
-        if (hasArgs && PathRoots.FileName(image).Equals("rundll32.exe", StringComparison.OrdinalIgnoreCase))
-        {
-            // rundll32 "C:\x\y.dll",Entry → payload is the DLL (an image, not an argument we keep).
-            var arg = rest.Trim();
-            string dll;
-            if (arg.StartsWith('"')) { var c = arg.IndexOf('"', 1); dll = c > 0 ? arg[1..c] : arg[1..]; }
-            else { var c = arg.IndexOfAny([',', ' ']); dll = c > 0 ? arg[..c] : arg; }
-            payload = Resolve(dll.Trim(), fileExists, systemDir);
-        }
-        return new(image.Length == 0 ? null : image, hasArgs, payload);
+        return (Resolve(image.Trim(), fileExists, systemDir), rest);
     }
 
     private static (string Image, string Tail) SplitUnquoted(string s, Func<string, bool> fileExists)

@@ -83,6 +83,11 @@ public class AgentActionTests
         public string Privilege => inner.Privilege;
         public bool SupportsUndo => inner.SupportsUndo;
         public string Kind => inner.Kind;
+        public string Group => inner.Group;
+        public string What => inner.What;
+        public IReadOnlyList<string> Flags => inner.Flags;
+        public JsonObject? ParameterSchema => inner.ParameterSchema;
+        public bool TakesLease => inner.TakesLease;
         public async Task<ActionResolution> ResolveAsync(ActionRequest request, CancellationToken ct)
         {
             Entered.TrySetResult();

@@ -4,7 +4,7 @@ using OptimizationTool.Transport;
 
 namespace OptimizationTool.Desktop.Tests;
 
-/// <summary>Help text excerpts (as printed by Claude Code 2.1.318 and codex-cli 0.167) the capability probe accepts.</summary>
+/// <summary>Help text excerpts (as printed by Claude Code 2.1.318) the capability probe accepts.</summary>
 internal static class CliHelp
 {
     public const string Claude = """
@@ -26,49 +26,13 @@ internal static class CliHelp
           mcp                                   Configure and manage MCP servers
         """;
 
-    public const string Codex = """
-        Run Codex non-interactively
-
-        Usage: codex exec [OPTIONS] [PROMPT] [COMMAND]
-
-        Commands:
-          resume  Resume a previous session by id or pick the most recent with --last
-          help    Print this message or the help of the given subcommand(s)
-
-        Options:
-          -c, --config <key=value>
-              --disable <FEATURE>
-          -s, --sandbox <SANDBOX_MODE>
-          -C, --cd <DIR>
-              --skip-git-repo-check
-              --ignore-user-config
-              --json
-        """;
-
-    /// <summary>An excerpt of <c>codex features list</c> (codex-cli 0.167.0-alpha.3.2).</summary>
-    public const string CodexFeatures = """
-        apps                                     stable             true
-        apps_mcp_path_override                   removed            false
-        browser_use                              stable             true
-        code_mode_host                           stable             true
-        in_app_browser                           stable             true
-        multi_agent                              stable             true
-        shell_tool                               stable             true
-        unified_exec                             stable             true
-        web_search_request                       deprecated         false
-        """;
-
-    /// <summary>What the shell reports for <see cref="CodexFeatures"/>: the §0 features listed, in §0 order.</summary>
-    public static readonly string[] CodexDisabled = ["shell_tool", "unified_exec", "apps", "browser_use", "in_app_browser", "multi_agent"];
 }
 
-/// <summary>Cross-PC CLI handling: capability probe and outdated CLIs, blocked launches, Codex/Claude sign-in forms and auth kind, npm shims, re-sent reports.</summary>
+/// <summary>Cross-PC CLI handling: capability probe and outdated CLIs, blocked launches, Claude sign-in and auth kind, npm shims, re-sent reports.</summary>
 public sealed class CliCompatibilityTests
 {
     private const string Doc = "https://app.optimizationtool.invalid/index.html";
     private const string Bridge = @"C:\Program Files\Optimus\OptimizationTool.Mcp.exe";
-    private const string OldCodex = @"C:\Old\codex.exe";
-    private const string NewCodex = @"C:\New\codex.exe";
     private const string OldClaude = @"C:\Old\claude.exe";
     private const string NewClaude = @"C:\New\claude.exe";
 
@@ -82,7 +46,7 @@ public sealed class CliCompatibilityTests
         new(_runner, new CliLocator(() => _path, _files.Contains), new NoConfirm(), Bridge, systemRoot: @"C:\Windows",
             fileExists: _files.Contains, npm: npm ?? NpmShimEnvironment.None, environment: n => _env.GetValueOrDefault(n));
 
-    private BridgeDispatcher Dispatcher(ClientConnector connector) => new(new BridgeRouter(), _backend, DesktopLog.Disabled, clients: connector);
+    private BridgeDispatcher Dispatcher(ClientConnector connector) => new(new BridgeRouter(), _backend, AppLog.Disabled, clients: connector);
 
     private sealed class NoConfirm : IClientConfirmPrompt
     {
@@ -104,7 +68,6 @@ public sealed class CliCompatibilityTests
     {
         public readonly Dictionary<string, ProcessResult> Version = new(StringComparer.OrdinalIgnoreCase);
         public readonly Dictionary<string, ProcessResult> Help = new(StringComparer.OrdinalIgnoreCase);
-        public readonly Dictionary<string, ProcessResult> Features = new(StringComparer.OrdinalIgnoreCase);
         public ProcessResult? Auth;
         public readonly List<ProcessCommand> Runs = [];
 
@@ -112,15 +75,12 @@ public sealed class CliCompatibilityTests
         {
             Runs.Add(c);
             var cli = c.Argv[0];
-            var claude = Path.GetFileNameWithoutExtension(cli) == "claude";
             ProcessResult r = c.Argv.Skip(1).ToArray() switch
             {
-                ["--version"] => Version.GetValueOrDefault(cli) ?? new(0, claude ? "2.1.318 (Claude Code)\n" : "codex-cli 0.167.0\n", "", false),
-                ["--help"] or ["exec", "--help"] => Help.GetValueOrDefault(cli) ?? new(0, claude ? CliHelp.Claude : CliHelp.Codex, "", false),
-                ["features", "list"] => Features.GetValueOrDefault(cli) ?? new(0, CliHelp.CodexFeatures, "", false),
+                ["--version"] => Version.GetValueOrDefault(cli) ?? new(0, "2.1.318 (Claude Code)\n", "", false),
+                ["--help"] => Help.GetValueOrDefault(cli) ?? new(0, CliHelp.Claude, "", false),
                 ["mcp", "get", _] => new(1, "", "No MCP server found with name: optimization-tool\n", false),
                 ["auth", "status"] => Auth ?? new(0, """{"loggedIn": true, "authMethod": "claude.ai", "apiProvider": "firstParty"}""", "", false),
-                ["login", "status"] => Auth ?? new(0, "", "Logged in using ChatGPT\n", false),
                 _ => new(2, "", "", false),
             };
             return Task.FromResult(r);
@@ -132,45 +92,12 @@ public sealed class CliCompatibilityTests
 
     private JsonObject LastReport => _backend.Calls.Last().Params!;
 
-    // ---------- 1. Codex login status forms ----------
-
-    [Theory]
-    [InlineData(0, "", "Logged in using ChatGPT\n", true, "subscription")]
-    [InlineData(0, "", "Logged in using an API key - sk-proj-***ABCD\n", true, "api_key")]
-    [InlineData(0, "", "API key configured - sk-proj-***ABCD\n", true, "api_key")]
-    [InlineData(0, "API key configured - sk-***\n", "", true, "api_key")]
-    [InlineData(0, "", "Logged in using workload identity\n", true, "other")]
-    [InlineData(1, "", "Not logged in\n", false, null)]
-    [InlineData(1, "", "Error checking login status: permission denied\n", null, null)]
-    [InlineData(101, "", "thread 'main' panicked\n", null, null)]
-    public void Codex_LoginStatus_AllSuccessForms(int exit, string stdout, string stderr, bool? signedIn, string? auth)
-    {
-        var r = new ProcessResult(exit, stdout, stderr, false);
-        Assert.Equal(signedIn, ClientConnector.ParseSignedIn("codex", r));
-        Assert.Equal(auth, signedIn == true ? ClientConnector.ParseAuth("codex", r) : null);
-    }
-
-    [Fact]
-    public async Task Codex_ApiKeyConfigured_IsSignedIn_AndTheKeyFragmentIsNeverReported()
-    {
-        _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Auth = new ProcessResult(0, "", "API key configured - sk-proj-***WXYZ\n", false);
-        var r = await Status(Dispatcher(Connector()), "codex");
-        Assert.True(r["signedIn"]!.GetValue<bool>());
-        Assert.Equal("api_key", r["auth"]!.GetValue<string>());
-        Assert.DoesNotContain("sk-", r.ToJsonString(), StringComparison.Ordinal);
-        Assert.True(LastReport["signedIn"]!.GetValue<bool>());
-        Assert.Equal("api_key", LastReport["auth"]!.GetValue<string>());
-        Assert.DoesNotContain("sk-", LastReport.ToJsonString(), StringComparison.Ordinal);
-    }
-
     [Fact]
     public void LaunchFailure_OrTimeout_IsUnknown_NotSignedOut()
     {
-        Assert.Null(ClientConnector.ParseSignedIn("codex", new ProcessResult(-1, "", "", false, LaunchFailure.Policy)));
+        Assert.Null(ClientConnector.ParseSignedIn("claude_code", new ProcessResult(-1, "", "", false, LaunchFailure.Policy)));
         Assert.Null(ClientConnector.ParseSignedIn("claude_code", new ProcessResult(-1, "", "", false, LaunchFailure.AccessDenied)));
-        Assert.Null(ClientConnector.ParseSignedIn("codex", new ProcessResult(-1, "", "", true)));
+        Assert.Null(ClientConnector.ParseSignedIn("claude_code", new ProcessResult(-1, "", "", true)));
     }
 
     // ---------- 7. Claude auth kind ----------
@@ -215,24 +142,19 @@ public sealed class CliCompatibilityTests
     public void Capabilities_RequireEveryFlagTheAppPasses()
     {
         Assert.True(ClientConnector.HasCapabilities("claude_code", CliHelp.Claude));
-        Assert.True(ClientConnector.HasCapabilities("codex", CliHelp.Codex));
         Assert.False(ClientConnector.HasCapabilities("claude_code", CliHelp.Claude.Replace("--strict-mcp-config", "", StringComparison.Ordinal)));
         Assert.False(ClientConnector.HasCapabilities("claude_code", CliHelp.Claude.Replace("  auth ", "  other ", StringComparison.Ordinal)));
-        Assert.False(ClientConnector.HasCapabilities("codex", CliHelp.Codex.Replace("--ignore-user-config", "", StringComparison.Ordinal)));
-        Assert.False(ClientConnector.HasCapabilities("codex", CliHelp.Codex.Replace("  resume ", "  other ", StringComparison.Ordinal)));
     }
 
-    [Theory]
-    [InlineData("codex", OldCodex, NewCodex)]
-    [InlineData("claude_code", OldClaude, NewClaude)]
-    public async Task AnOutdatedCli_LosesToAWorkingOne(string client, string old, string current)
+    [Fact]
+    public async Task AnOutdatedCli_LosesToAWorkingOne()
     {
-        _files.UnionWith([old, current]);
-        _runner.Help[old] = new ProcessResult(0, client == "codex" ? "Usage: codex exec [OPTIONS]\n  --json\n" : "Usage: claude [options]\n  -p, --print\n", "", false);
-        var r = await Status(Dispatcher(Connector()), client);
+        _files.UnionWith([OldClaude, NewClaude]);
+        _runner.Help[OldClaude] = new ProcessResult(0, "Usage: claude [options]\n  -p, --print\n", "", false);
+        var r = await Status(Dispatcher(Connector()), "claude_code");
         Assert.True(r["installed"]!.GetValue<bool>());
         Assert.Null(r["outdated"]);
-        Assert.Equal(current, LastReport["path"]!.GetValue<string>());
+        Assert.Equal(NewClaude, LastReport["path"]!.GetValue<string>());
         Assert.False(LastReport.ContainsKey("compatible"));
     }
 
@@ -240,126 +162,67 @@ public sealed class CliCompatibilityTests
     public async Task OnlyAnOutdatedCli_ReportsOutdated_IsNotCached_AndAnUpdateIsPickedUp()
     {
         _path = @"C:\Old";
-        _files.Add(OldCodex);
-        _runner.Version[OldCodex] = new ProcessResult(0, "codex-cli 0.30.0\n", "", false);
-        _runner.Help[OldCodex] = new ProcessResult(0, "Usage: codex exec [OPTIONS]\n  --json\n", "", false);
+        _files.Add(OldClaude);
+        _runner.Version[OldClaude] = new ProcessResult(0, "1.0.30 (Claude Code)\n", "", false);
+        _runner.Help[OldClaude] = new ProcessResult(0, "Usage: claude [options]\n  -p, --print\n", "", false);
         var connector = Connector();
-        var r = await Status(Dispatcher(connector), "codex");
+        var r = await Status(Dispatcher(connector), "claude_code");
         Assert.True(r["installed"]!.GetValue<bool>());
         Assert.True(r["outdated"]!.GetValue<bool>());
-        Assert.Equal("0.30.0", r["version"]!.GetValue<string>());
-        Assert.Equal(OldCodex, LastReport["path"]!.GetValue<string>());
+        Assert.Equal("1.0.30", r["version"]!.GetValue<string>());
+        Assert.Equal(OldClaude, LastReport["path"]!.GetValue<string>());
         Assert.False(LastReport["compatible"]!.GetValue<bool>());
-        Assert.Null(connector.ResolvedFor("codex"));
+        Assert.Null(connector.ResolvedFor("claude_code"));
 
         // The same version is not probed twice.
         _runner.Runs.Clear();
-        await Status(Dispatcher(connector), "codex");
-        Assert.DoesNotContain(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["exec", "--help"]));
+        await Status(Dispatcher(connector), "claude_code");
+        Assert.DoesNotContain(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["--help"]));
 
         // Updated in place: a new version is probed again and now qualifies.
-        _runner.Version[OldCodex] = new ProcessResult(0, "codex-cli 0.167.0\n", "", false);
-        _runner.Help.Remove(OldCodex);
-        r = await Status(Dispatcher(connector), "codex");
+        _runner.Version[OldClaude] = new ProcessResult(0, "2.1.318 (Claude Code)\n", "", false);
+        _runner.Help.Remove(OldClaude);
+        r = await Status(Dispatcher(connector), "claude_code");
         Assert.Null(r["outdated"]);
         Assert.False(LastReport.ContainsKey("compatible"));
-        Assert.Equal(OldCodex, connector.ResolvedFor("codex")?.Path);
+        Assert.Equal(OldClaude, connector.ResolvedFor("claude_code")?.Path);
     }
 
     [Fact]
     public async Task ACachedCliThatBecomesOutdated_IsDropped_AndTheNextCandidateWins()
     {
-        _files.UnionWith([OldCodex, NewCodex]);
+        _files.UnionWith([OldClaude, NewClaude]);
         var connector = Connector();
-        await Status(Dispatcher(connector), "codex");
-        Assert.Equal(OldCodex, connector.ResolvedFor("codex")?.Path);
+        await Status(Dispatcher(connector), "claude_code");
+        Assert.Equal(OldClaude, connector.ResolvedFor("claude_code")?.Path);
 
-        _runner.Version[OldCodex] = new ProcessResult(0, "codex-cli 0.20.0\n", "", false); // downgraded
-        _runner.Help[OldCodex] = new ProcessResult(0, "Usage: codex exec\n", "", false);
-        await Status(Dispatcher(connector), "codex");
-        Assert.Equal(NewCodex, connector.ResolvedFor("codex")?.Path);
-        Assert.Equal(NewCodex, LastReport["path"]!.GetValue<string>());
-    }
-
-    // ---------- m6 §0: Codex features probe (fail closed) ----------
-
-    [Fact]
-    public async Task Codex_ReportsTheProbedFeatures_AndProbesOncePerVersion()
-    {
-        _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Version[NewCodex] = new ProcessResult(0, "codex-cli 0.167.0-alpha.3.2\n", "", false);
-        var connector = Connector();
-        var r = await Status(Dispatcher(connector), "codex");
-        Assert.Null(r["outdated"]);
-        Assert.Equal(CliHelp.CodexDisabled, LastReport["codexFeatures"]!.AsArray().Select(n => n!.GetValue<string>()));
-        Assert.False(LastReport.ContainsKey("compatible"));
-        Assert.Contains(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["features", "list"]));
-
-        _runner.Runs.Clear();
-        await Status(Dispatcher(connector), "codex");
-        Assert.DoesNotContain(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["features", "list"])); // cached per path and version
-        Assert.Equal(CliHelp.CodexDisabled, LastReport["codexFeatures"]!.AsArray().Select(n => n!.GetValue<string>()));
+        _runner.Version[OldClaude] = new ProcessResult(0, "1.0.20 (Claude Code)\n", "", false); // downgraded
+        _runner.Help[OldClaude] = new ProcessResult(0, "Usage: claude\n", "", false);
+        await Status(Dispatcher(connector), "claude_code");
+        Assert.Equal(NewClaude, connector.ResolvedFor("claude_code")?.Path);
+        Assert.Equal(NewClaude, LastReport["path"]!.GetValue<string>());
     }
 
     [Fact]
-    public async Task Claude_ReportHasNoCodexFeatures()
+    public async Task Claude_ReportsTheResearchFlags_ItsHelpLists()
     {
+        // m9 §6.3: --safe-mode and --setting-sources, when the printed help lists them; none otherwise (research fails closed).
         _path = @"C:\New";
         _files.Add(NewClaude);
         await Status(Dispatcher(Connector()), "claude_code");
-        Assert.False(LastReport.ContainsKey("codexFeatures"));
-        Assert.DoesNotContain(_runner.Runs, c => c.Argv.Skip(1).SequenceEqual(["features", "list"]));
+        Assert.False(LastReport.ContainsKey("claudeFlags"));
+
+        _runner.Help[NewClaude] = new ProcessResult(0, CliHelp.Claude + "\n  --safe-mode                           Disable customisations\n  --setting-sources <sources>           Comma-separated list\n", "", false);
+        await Status(Dispatcher(Connector()), "claude_code"); // a new connector probes again
+        Assert.Equal(["--safe-mode", "--setting-sources"], LastReport["claudeFlags"]!.AsArray().Select(n => n!.GetValue<string>()));
+
+        Assert.Empty(ClientConnector.ProbedClaudeFlags("  --safe-mode-extra   x\n  --setting-sourcesX y"));
+        Assert.Equal(["--setting-sources"], ClientConnector.ProbedClaudeFlags("  --setting-sources <s>  list"));
+        // m9 §17.6: --max-turns is reported only when listed as an option (2.1.318's help does not list it).
+        Assert.Equal(["--max-turns"], ClientConnector.ProbedClaudeFlags("  --max-turns <n>  cap"));
+        Assert.Empty(ClientConnector.ProbedClaudeFlags("  --max-turnsX <n>\n  max-turns"));
     }
 
-    [Theory]
-    [InlineData(1, "error: unrecognized subcommand 'features'\n", false)]
-    [InlineData(-1, "", true)]                                        // timed out
-    public async Task Codex_FeaturesProbeThatFails_IsOutdated_AndTriedAgain(int exit, string stderr, bool timedOut)
-    {
-        _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Features[NewCodex] = new ProcessResult(exit, "", stderr, timedOut);
-        var connector = Connector();
-        var r = await Status(Dispatcher(connector), "codex");
-        Assert.True(r["outdated"]!.GetValue<bool>());
-        Assert.False(LastReport["compatible"]!.GetValue<bool>());
-        Assert.False(LastReport.ContainsKey("codexFeatures"));
-
-        _runner.Features.Remove(NewCodex); // works next time: not cached
-        r = await Status(Dispatcher(connector), "codex");
-        Assert.Null(r["outdated"]);
-        Assert.NotNull(LastReport["codexFeatures"]);
-    }
-
-    [Theory]
-    [InlineData("garbage\n")]
-    [InlineData("code_mode_host  stable  true\n")]                    // apps missing
-    [InlineData("")]
-    public async Task Codex_FeaturesWithoutTheRequiredOnes_IsOutdated(string listing)
-    {
-        _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Features[NewCodex] = new ProcessResult(0, listing, "", false);
-        var r = await Status(Dispatcher(Connector()), "codex");
-        Assert.True(r["outdated"]!.GetValue<bool>());
-        Assert.False(LastReport["compatible"]!.GetValue<bool>());
-        Assert.False(LastReport.ContainsKey("codexFeatures"));
-    }
-
-    [Theory]
-    [InlineData("codex-cli 0.166.0\n")]
-    [InlineData("codex-cli 0.166.9-alpha.1\n")]
-    [InlineData("codex-cli\n")]                                       // no version
-    public async Task Codex_TooOldOrUnreadableVersion_IsOutdated(string version)
-    {
-        _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Version[NewCodex] = new ProcessResult(0, version, "", false);
-        var r = await Status(Dispatcher(Connector()), "codex");
-        Assert.True(r["outdated"]!.GetValue<bool>());
-        Assert.False(LastReport["compatible"]!.GetValue<bool>());
-    }
 
     [Fact]
     public async Task AnInconclusiveProbe_DoesNotBlockTheCli()
@@ -383,9 +246,9 @@ public sealed class CliCompatibilityTests
     public async Task ACandidateThatCannotStart_IsBlocked_NotMissing(string? launch, string stderr, string reason)
     {
         _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Version[NewCodex] = new ProcessResult(launch is null ? 1 : -1, "", stderr, false, launch);
-        var r = await Status(Dispatcher(Connector()), "codex");
+        _files.Add(NewClaude);
+        _runner.Version[NewClaude] = new ProcessResult(launch is null ? 1 : -1, "", stderr, false, launch);
+        var r = await Status(Dispatcher(Connector()), "claude_code");
         Assert.False(r["installed"]!.GetValue<bool>());
         Assert.True(r["blocked"]!.GetValue<bool>());
         Assert.Equal(reason, r["blockedReason"]!.GetValue<string>());
@@ -397,9 +260,9 @@ public sealed class CliCompatibilityTests
     [Fact]
     public async Task ABlockedCandidate_DoesNotHideAWorkingOne()
     {
-        _files.UnionWith([OldCodex, NewCodex]);
-        _runner.Version[OldCodex] = new ProcessResult(-1, "", "", false, LaunchFailure.Policy);
-        var r = await Status(Dispatcher(Connector()), "codex");
+        _files.UnionWith([OldClaude, NewClaude]);
+        _runner.Version[OldClaude] = new ProcessResult(-1, "", "", false, LaunchFailure.Policy);
+        var r = await Status(Dispatcher(Connector()), "claude_code");
         Assert.True(r["installed"]!.GetValue<bool>());
         Assert.Null(r["blocked"]);
         Assert.False(LastReport.ContainsKey("blocked"));
@@ -409,9 +272,9 @@ public sealed class CliCompatibilityTests
     public async Task ANotACliCandidate_IsNotBlocked()
     {
         _path = @"C:\New";
-        _files.Add(NewCodex);
-        _runner.Version[NewCodex] = new ProcessResult(0, "something else 1.0\n", "", false);
-        var r = await Status(Dispatcher(Connector()), "codex");
+        _files.Add(NewClaude);
+        _runner.Version[NewClaude] = new ProcessResult(0, "something else 1.0\n", "", false);
+        var r = await Status(Dispatcher(Connector()), "claude_code");
         Assert.False(r["installed"]!.GetValue<bool>());
         Assert.Null(r["blocked"]);
     }
@@ -452,16 +315,16 @@ public sealed class CliCompatibilityTests
     public async Task AShimWhosePackageNeedsNode_WithNoNode_IsBlockedAsNodeMissing()
     {
         const string npm = @"C:\Users\A%B\AppData\Roaming\npm";
-        const string js = npm + @"\node_modules\@openai\codex\bin\codex.js";
+        const string js = npm + @"\node_modules\@anthropic-ai\claude-code\cli.js";
         _path = npm;
-        _files.Add(npm + @"\codex.cmd");
+        _files.Add(npm + @"\claude.cmd");
         var shim = new NpmShimEnvironment
         {
             FileExists = f => f == js,
-            ReadText = f => f.EndsWith(@"@openai\codex\package.json", StringComparison.Ordinal) ? """{"bin":{"codex":"bin/codex.js"}}""" : null,
+            ReadText = f => f.EndsWith(@"@anthropic-ai\claude-code\package.json", StringComparison.Ordinal) ? """{"bin":{"claude":"cli.js"}}""" : null,
             ChildPath = () => @"C:\Windows",
         };
-        var r = await Status(Dispatcher(Connector(shim)), "codex");
+        var r = await Status(Dispatcher(Connector(shim)), "claude_code");
         Assert.True(r["blocked"]!.GetValue<bool>());
         Assert.Equal("node_missing", r["blockedReason"]!.GetValue<string>());
     }
@@ -472,19 +335,20 @@ public sealed class CliCompatibilityTests
     public async Task ResendReports_SendsTheLastReportForEachClientAgain()
     {
         _path = @"C:\New";
-        _files.UnionWith([NewClaude, NewCodex]);
+        _files.Add(NewClaude);
         var connector = Connector();
         await Status(Dispatcher(connector), "claude_code");
-        await Status(Dispatcher(connector), "codex");
-        var sent = _backend.Calls.Select(c => c.Params!.ToJsonString()).ToList();
+        _runner.Auth = new ProcessResult(1, """{"loggedIn": false}""", "", false);
+        await Status(Dispatcher(connector), "claude_code"); // only the last report is kept
+        var sent = _backend.Calls.Last().Params!.ToJsonString();
 
         var restarted = new Backend();
-        await connector.ResendReportsAsync(restarted, DesktopLog.Disabled, default);
-        Assert.Equal(["provider.setClient", "provider.setClient"], restarted.Calls.Select(c => c.Method));
-        Assert.Equal(sent.Order(StringComparer.Ordinal), restarted.Calls.Select(c => c.Params!.ToJsonString()).Order(StringComparer.Ordinal));
+        await connector.ResendReportsAsync(restarted, AppLog.Disabled, default);
+        Assert.Equal(["provider.setClient"], restarted.Calls.Select(c => c.Method));
+        Assert.Equal(sent, restarted.Calls.Single().Params!.ToJsonString());
 
         var empty = new Backend();
-        await Connector().ResendReportsAsync(empty, DesktopLog.Disabled, default);
+        await Connector().ResendReportsAsync(empty, AppLog.Disabled, default);
         Assert.Empty(empty.Calls);
     }
 
@@ -511,16 +375,16 @@ public sealed class CliCompatibilityTests
     [Fact]
     public void NpmShim_JsBin_RunsNode_FromTheShimFolderFirst_ThenPath()
     {
-        var js = Npm + @"\node_modules\@openai\codex\bin\codex.js";
-        const string json = """{"name":"@openai/codex","bin":{"codex":"bin/codex.js"}}""";
-        var local = NpmShim.Resolve(Npm + @"\codex.cmd", Shim(@"@openai\codex", json, [js, Npm + @"\node.exe", @"C:\Program Files\nodejs\node.exe"], @"C:\Program Files\nodejs"));
+        var js = Npm + @"\node_modules\@anthropic-ai\claude-code\cli.js";
+        const string json = """{"name":"@anthropic-ai/claude-code","bin":{"claude":"cli.js"}}""";
+        var local = NpmShim.Resolve(Npm + @"\claude.cmd", Shim(@"@anthropic-ai\claude-code", json, [js, Npm + @"\node.exe", @"C:\Program Files\nodejs\node.exe"], @"C:\Program Files\nodejs"));
         Assert.Equal(Npm + @"\node.exe", local.Target?.FileName);
         Assert.Equal([js], local.Target!.Prefix);
 
-        var onPath = NpmShim.Resolve(Npm + @"\codex.cmd", Shim(@"@openai\codex", json, [js, @"C:\Program Files\nodejs\node.exe"], @"C:\Windows;C:\Program Files\nodejs"));
+        var onPath = NpmShim.Resolve(Npm + @"\claude.cmd", Shim(@"@anthropic-ai\claude-code", json, [js, @"C:\Program Files\nodejs\node.exe"], @"C:\Windows;C:\Program Files\nodejs"));
         Assert.Equal(@"C:\Program Files\nodejs\node.exe", onPath.Target?.FileName);
 
-        var none = NpmShim.Resolve(Npm + @"\codex.cmd", Shim(@"@openai\codex", json, [js], @"C:\Windows"));
+        var none = NpmShim.Resolve(Npm + @"\claude.cmd", Shim(@"@anthropic-ai\claude-code", json, [js], @"C:\Windows"));
         Assert.Null(none.Target);
         Assert.True(none.NodeMissing);
     }
@@ -577,7 +441,7 @@ public sealed class CliCompatibilityTests
         var exe = Npm + @"\node_modules\@anthropic-ai\claude-code\bin\claude.exe";
         var connector = Connector(Shim(@"@anthropic-ai\claude-code", """{"bin":{"claude":"bin/claude.exe"}}""", [exe]));
         Assert.Equal($"& '{exe}' auth login", connector.SignInCommandFor("claude_code", Npm + @"\claude.cmd")!.ArgumentList[^1]);
-        Assert.Equal(@"& 'C:\O''Brien\codex.exe' login", connector.SignInCommandFor("codex", @"C:\O'Brien\codex.exe")!.ArgumentList[^1]);
+        Assert.Equal(@"& 'C:\O''Brien\claude.exe' auth login", connector.SignInCommandFor("claude_code", @"C:\O'Brien\claude.exe")!.ArgumentList[^1]);
     }
 
     [Theory]

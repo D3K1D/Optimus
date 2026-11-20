@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.optimizationtool.invalid/v1/checks.schema.json",
+  "title": "Administrator checks",
+  "description": "m9 §17.2 / §17.6 administrator checks on the host: a request (the waiting run_diagnostic calls of one turn with an admin-tier id; a paired window's calls join the task's open request until it is approved), the agent.checks event payload on stream user, and checks.approve / checks.decline / checks.list (desktop only). The root is a request view, as checks.approve and checks.decline return it and agent.checks carries it.",
+  "$ref": "#/$defs/request",
+  "$defs": {
+    "state": { "enum": ["awaiting_user", "running", "complete", "declined", "expired", "failed", "cancelled"],
+      "description": "A request's state and each check operation's (get_operation answers the same; complete, as long diagnostics)." },
+    "checkId": { "enum": ["security.defender_history", "storage.health", "security.encryption"] },
+    "requestId": { "type": "string", "pattern": "^chk-[0-9a-f]{16}$" },
+    "code": { "type": ["string", "null"], "pattern": "^[a-z_]{1,40}$",
+      "description": "Why it ended this way. cancelled: permissions (a narrowing), ai (the chosen AI changed), task_ended, admin_unavailable, exhausted, stopped. declined: user_declined (in the app), uac_cancelled, broker_cancelled (the helper's Cancel). failed: timeout, malformed, interrupted, the helper's refusal (different_admin, bad_nonce, …) or the host's not-started code (broker_missing, broker_not_started, …). null otherwise." },
+    "request": {
+      "type": "object",
+      "required": ["requestId", "revision", "taskId", "cardId", "state", "code", "retryAt", "expiresAt", "checks"],
+      "additionalProperties": false,
+      "properties": {
+        "requestId": { "$ref": "#/$defs/requestId" },
+        "revision": { "type": "integer", "minimum": 1, "description": "Bumped when a check joins. checks.approve must send it (stale: -32002 {reason: stale_revision, current}). Membership is frozen once approved." },
+        "taskId": { "type": "string", "pattern": "^task-" },
+        "cardId": { "type": ["string", "null"], "description": "The card of the fix attempt whose turn asked, or null." },
+        "state": { "$ref": "#/$defs/state" },
+        "code": { "$ref": "#/$defs/code" },
+        "retryAt": { "type": ["string", "null"], "description": "While waiting: when the 60 s cooldown after a decline or cancel ends (ISO 8601 UTC), else null. checks.approve before then: -32013 {reason: cooldown, retryAt}." },
+        "expiresAt": { "type": "string", "description": "A request waits 10 minutes for the user, then it is expired." },
+        "checks": { "type": "array", "minItems": 1, "maxItems": 4,
+          "items": { "type": "object", "required": ["operationId", "id", "label", "state"], "additionalProperties": false,
+            "properties": {
+              "operationId": { "type": "string", "pattern": "^op-" },
+              "id": { "$ref": "#/$defs/checkId" },
+              "label": { "type": "string", "maxLength": 80, "description": "The host's label (AdminChecks.HostLabel), e.g. \"Defender detection history · last 30 days\"." },
+              "state": { "$ref": "#/$defs/state" } } } }
+      }
+    },
+    "approveParams": {
+      "type": "object", "required": ["idempotencyKey", "requestId", "revision"], "additionalProperties": false,
+      "description": "checks.approve → the request (running). Only an awaiting request (else -32013 with its state as reason); the host rechecks the task, the grant (checks and admin), the flag and the budget first and otherwise cancels it with that code.",
+      "properties": { "idempotencyKey": { "type": "string", "maxLength": 64 }, "requestId": { "$ref": "#/$defs/requestId" }, "revision": { "type": "integer", "minimum": 1 } }
+    },
+    "declineParams": {
+      "type": "object", "required": ["requestId"], "additionalProperties": false,
+      "description": "checks.decline → the request (declined, code user_declined); the cooldown starts. Only an awaiting request (else -32013 with its state).",
+      "properties": { "requestId": { "$ref": "#/$defs/requestId" } }
+    },
+    "listParams": {
+      "type": "object", "additionalProperties": false,
+      "description": "checks.list {} (desktop only)."
+    },
+    "listResult": {
+      "type": "object", "required": ["requests"], "additionalProperties": false,
+      "description": "checks.list → every request that has not ended (awaiting_user, including one waiting out the cooldown with retryAt, and running), oldest first, as agent.checks carries them: the app shows them again after a reload.",
+      "properties": { "requests": { "type": "array", "items": { "$ref": "#/$defs/request" } } }
+    },
+    "toolWaiting": {
+      "type": "object", "required": ["untrusted", "operationId", "status", "next"], "additionalProperties": false,
+      "description": "run_diagnostic with an admin-tier id: the check waits for the user (or is already running, when asked again).",
+      "properties": { "untrusted": { "type": "string" }, "operationId": { "type": "string", "pattern": "^op-" }, "status": { "enum": ["awaiting_user", "running"] }, "next": { "type": "string" } }
+    }
+  }
+}

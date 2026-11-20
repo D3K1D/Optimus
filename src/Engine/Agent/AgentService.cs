@@ -41,37 +41,94 @@ public sealed class AgentOptions
     /// </summary>
     public TimeSpan SignInTimeout { get; init; } = TimeSpan.FromMinutes(3.5);
 
-    /// <summary>M5: starts headless Claude Code / Codex runs (src/Host CliRunner). Null: MCP kinds cannot be asked in-app.</summary>
+    /// <summary>M5: starts headless Claude Code runs (src/Host CliRunner). Null: MCP kinds cannot be asked in-app.</summary>
     public ICliRunner? CliRunner { get; init; }
+
+    /// <summary>
+    /// m9 §6.1: reads a file's Authenticode identity locally for research subjects (src/Windows). Null: every subject's
+    /// signature is "unknown" (so no considered_safe label can be applied).
+    /// </summary>
+    public IFileIdentity? FileIdentity { get; init; }
+
+    /// <summary>m9 §6.8: the check-up's time budget in all (6 minutes). Tests shorten it.</summary>
+    public TimeSpan CheckupBudget { get; init; } = CheckupPolicy.RunBudget;
+
+    /// <summary>
+    /// m9 §6.3: research for the headless kind (Claude Code). Null: the built-in HeadlessResearcher (the CLI runner, the
+    /// research argv, the closed guards). Tests may replace it.
+    /// </summary>
+    public IWebResearch? HeadlessResearch { get; init; }
+
+    /// <summary>
+    /// This PC's user, PC and domain names for the identity filter (research subjects, web_lookup, the check-up summary).
+    /// Null: <see cref="IdentityFilter.Local()"/>. Tests replace it so they never depend on the real machine's names.
+    /// </summary>
+    public Func<IReadOnlyList<LocalIdentity>>? LocalIdentities { get; init; }
+
+    /// <summary>
+    /// m9 §17.2: administrator checks through the one-shot elevated helper (the host's BrokerElevation). Null: no elevation
+    /// path for reads, so no administrator check is offered. Tests pass fakes only.
+    /// </summary>
+    public Actions.IElevatedReads? ElevatedReads { get; init; }
 }
 
-/// <summary>Task limits (§2). Defaults are the contract's example values.</summary>
-public sealed record Limits(int DiagnosticCalls = 10, int ResultBytes = 32768, int TotalBytes = 131072, int Turns = 8, int TurnSeconds = 90, int MaxSampleSeconds = 60)
+/// <summary>Task limits (§2; m9 §1.3 adds webLookups, fixSteps and scripts). Defaults are the contract's example values.</summary>
+public sealed record Limits(int DiagnosticCalls = 10, int ResultBytes = 32768, int TotalBytes = 131072, int Turns = 8, int TurnSeconds = 90, int MaxSampleSeconds = 60,
+    int WebLookups = 4, int FixSteps = 6, int Scripts = 3)
 {
     public JsonObject ToJson() => new()
     {
         ["diagnosticCalls"] = DiagnosticCalls, ["resultBytes"] = ResultBytes, ["totalBytes"] = TotalBytes,
         ["turns"] = Turns, ["turnSeconds"] = TurnSeconds, ["maxSampleSeconds"] = MaxSampleSeconds,
+        ["webLookups"] = WebLookups, ["fixSteps"] = FixSteps, ["scripts"] = Scripts,
     };
 }
 
-/// <summary>What a task may do and share (§2 grant). CanRequestChanges (M4, default off): the task may ask for catalog changes the user approves.</summary>
-public sealed record Grant(IReadOnlyList<string> Diagnostics, bool ShareNames, Limits Limits, int IdleExpirySeconds, bool CanRequestChanges = false)
+/// <summary>
+/// What a task may do and share (m3 §2 grant, changed by m9 §1.3): diagnostics, names, what it may see (specs, history),
+/// changes (off | ask | fix), scripts, web and the permissions revision it was built from. <see cref="CanRequestChanges"/>
+/// is derived (changes != off) and written for old readers only. m9 §17.1: <see cref="Admin"/> (administrator rights) is
+/// absent = false in a stored grant and in a given one.
+/// </summary>
+public sealed record Grant(IReadOnlyList<string> Diagnostics, bool ShareNames, Limits Limits, int IdleExpirySeconds, string Changes = "off",
+    bool SeeSpecs = true, bool SeeHistory = true, bool Scripts = false, bool Web = false, long PermissionsRevision = 0, bool Admin = false)
 {
+    public bool CanRequestChanges => Changes != "off";
+
     public JsonObject ToJson() => new()
     {
         ["diagnostics"] = Json.Array(Diagnostics), ["share"] = new JsonObject { ["names"] = ShareNames },
+        ["see"] = new JsonObject { ["specs"] = SeeSpecs, ["history"] = SeeHistory },
+        ["changes"] = Changes, ["scripts"] = Scripts, ["web"] = Web, ["admin"] = Admin, ["permissionsRevision"] = PermissionsRevision,
         ["limits"] = Limits.ToJson(), ["idleExpirySeconds"] = IdleExpirySeconds, ["canRequestChanges"] = CanRequestChanges,
     };
 
-    public static Grant FromJson(JsonNode node) => new(
-        Json.Strings(node["diagnostics"]), node["share"]?["names"]?.GetValue<bool>() ?? false,
-        new Limits(I(node, "diagnosticCalls"), I(node, "resultBytes"), I(node, "totalBytes"), I(node, "turns"), I(node, "turnSeconds"), I(node, "maxSampleSeconds")),
-        node["idleExpirySeconds"]!.GetValue<int>(), node["canRequestChanges"]?.GetValue<bool>() ?? false);
+    /// <summary>A stored grant. Grants stored before m9 have no see/changes/scripts/web: they read as they behaved (see on, changes from canRequestChanges).</summary>
+    public static Grant FromJson(JsonNode node)
+    {
+        var d = new Limits();
+        int L(string key, int fallback) => node["limits"]?[key] is JsonValue v && v.TryGetValue<int>(out var x) ? x : fallback;
+        bool B(JsonNode? n, bool fallback) => n is JsonValue v && v.TryGetValue<bool>(out var b) ? b : fallback;
+        return new Grant(
+            Json.Strings(node["diagnostics"]), B(node["share"]?["names"], false),
+            new Limits(L("diagnosticCalls", d.DiagnosticCalls), L("resultBytes", d.ResultBytes), L("totalBytes", d.TotalBytes), L("turns", d.Turns),
+                L("turnSeconds", d.TurnSeconds), L("maxSampleSeconds", d.MaxSampleSeconds), L("webLookups", d.WebLookups), L("fixSteps", d.FixSteps), L("scripts", d.Scripts)),
+            node["idleExpirySeconds"]!.GetValue<int>(),
+            ChangesOf(node["changes"], node["canRequestChanges"]) ?? "off",
+            B(node["see"]?["specs"], true), B(node["see"]?["history"], true), B(node["scripts"], false), B(node["web"], false),
+            node["permissionsRevision"] is JsonValue pv && pv.TryGetValue<long>(out var rev) ? rev : 0, B(node["admin"], false));
+    }
 
-    private static int I(JsonNode node, string key) => node["limits"]![key]!.GetValue<int>();
+    /// <summary>Legacy precedence (m9 §1.3): <c>changes</c> wins; without it <c>canRequestChanges:true</c> means ask. Null when neither is usable.</summary>
+    private static string? ChangesOf(JsonNode? changes, JsonNode? canRequestChanges) =>
+        changes is JsonValue cv && cv.TryGetValue<string>(out var c) && Permissions.ChangeLevels.Contains(c) ? c
+        : canRequestChanges is JsonValue bv && bv.TryGetValue<bool>(out var b) ? (b ? "ask" : "off")
+        : null;
 
-    /// <summary>Validates a client-supplied grant; missing limits take defaults; out-of-range values are refused.</summary>
+    /// <summary>
+    /// Validates a client-supplied grant; missing limits take defaults; out-of-range values are refused. Fields m9 added
+    /// are optional: see defaults on, changes from the legacy canRequestChanges (else off), scripts and web off.
+    /// </summary>
     public static Grant Parse(JsonNode? node)
     {
         if (node is not JsonObject g) throw RpcError.Params("grant", "grant must be an object.");
@@ -90,13 +147,25 @@ public sealed record Grant(IReadOnlyList<string> Diagnostics, bool ShareNames, L
         var limits = new Limits(
             Lim("diagnosticCalls", d.DiagnosticCalls, 0, 50), Lim("resultBytes", d.ResultBytes, 1024, 262144),
             Lim("totalBytes", d.TotalBytes, 1024, 1 << 20), Lim("turns", d.Turns, 1, 20),
-            Lim("turnSeconds", d.TurnSeconds, 5, 300), Lim("maxSampleSeconds", d.MaxSampleSeconds, Agent.Diagnostics.MinSampleSeconds, 120));
+            Lim("turnSeconds", d.TurnSeconds, 5, 300), Lim("maxSampleSeconds", d.MaxSampleSeconds, Agent.Diagnostics.MinSampleSeconds, 120),
+            Lim("webLookups", d.WebLookups, 0, 20), Lim("fixSteps", d.FixSteps, 1, 20), Lim("scripts", d.Scripts, 0, 10));
         if (limits.TotalBytes < limits.ResultBytes) throw RpcError.Params("grant.limits.totalBytes", "totalBytes must be at least resultBytes.");
         var idle = 900;
         if (g["idleExpirySeconds"] is { } iv)
             idle = iv is JsonValue v && v.TryGetValue<int>(out var x) && x is >= 60 and <= 86400 ? x : throw RpcError.Params("grant.idleExpirySeconds", "idleExpirySeconds must be 60-86400.");
-        var changes = g["canRequestChanges"] is JsonValue cv && cv.TryGetValue<bool>(out var c) && c;
-        return new Grant(diagnostics.Distinct().ToList(), names, limits, idle, changes);
+        bool Flag(JsonNode? value, string field, bool fallback) =>
+            value is null ? fallback : value is JsonValue v && v.TryGetValue<bool>(out var b) ? b : throw RpcError.Params(field, $"{field} must be true or false.");
+        if (g["see"] is not (null or JsonObject)) throw RpcError.Params("grant.see", "see must be an object.");
+        var specs = Flag(g["see"]?["specs"], "grant.see.specs", true);
+        var history = Flag(g["see"]?["history"], "grant.see.history", true);
+        if (g["changes"] is { } cn && !(cn is JsonValue cv && cv.TryGetValue<string>(out var cs) && Permissions.ChangeLevels.Contains(cs)))
+            throw RpcError.Params("grant.changes", "changes must be off, ask or fix.");
+        var changes = ChangesOf(g["changes"], g["canRequestChanges"]) ?? "off";
+        var scripts = Flag(g["scripts"], "grant.scripts", false);
+        if (scripts && changes != "fix") throw RpcError.Params("grant.scripts", "scripts needs changes set to fix.");
+        var web = Flag(g["web"], "grant.web", false);
+        var admin = Flag(g["admin"], "grant.admin", false); // m9 §17.1: absent = false (the pairing panel's grant included)
+        return new Grant(diagnostics.Distinct().ToList(), names, limits, idle, changes, specs, history, scripts, web, Admin: admin);
     }
 }
 
@@ -107,7 +176,7 @@ public sealed record Grant(IReadOnlyList<string> Diagnostics, bool ShareNames, L
 public sealed partial class AgentService
 {
     public const string TaskStreamPrefix = "task:";
-    public static readonly string[] RecipientKinds = ["anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp", "codex_mcp"];
+    public static readonly string[] RecipientKinds = ["anthropic_api", "openai_api", "chatgpt_plan", "claude_code_mcp"];
     public static readonly string[] InAppKinds = ["anthropic_api", "openai_api", "chatgpt_plan"];
 
     /// <summary>In-app kinds configured with an API key (provider.setKey). chatgpt_plan signs in through the browser instead.</summary>
@@ -134,6 +203,7 @@ public sealed partial class AgentService
         public bool Cancelled;
         public bool Answering;
         public bool Revoked; // the task ended (stop, expiry, recipient change): no answer, whatever the run says
+        public string? TurnId; // the turn this run answers (set with the ask, under _gate)
         public readonly TaskCompletionSource Done = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
@@ -146,6 +216,7 @@ public sealed partial class AgentService
         AskRun? run;
         lock (_gate) _asking.Remove(taskId, out run);
         run?.Done.TrySetResult();
+        ScheduleContinuation(taskId); // m9 §17.2: a continuation that waited for this turn starts now
     }
 
     /// <summary>
@@ -246,6 +317,7 @@ public sealed partial class AgentService
         _log = log;
         _credentials = options.Credentials ?? new MemoryCredentialStore();
         _project = options.Project ?? ((body, aliases, share, declared, stats) => EvidenceProjection.ProjectStored(body, aliases, share, declaredSensitivity: declared, stats));
+        store.EventCommitted += OnStoreEvent; // m9 §6.1: research starts when a scan finishes
     }
 
 
@@ -289,20 +361,38 @@ public sealed partial class AgentService
         }
     }
 
+    /// <summary>Set (under <c>_gate</c>) before shutdown cancels anything: no continuation or read session is admitted after it.</summary>
+    private bool _shuttingDown;
+
     internal async Task StopAllAsync()
     {
         string[] ids;
-        Task[] running;
+        CancellationTokenSource[] reads;
         lock (_gate)
         {
+            _shuttingDown = true;
             ids = [.. _taskTokens.Keys];
-            running = [.. _background];
+            reads = [.. _checkStops.Values];
         }
         foreach (var id in ids) CancelTask(id);
+        foreach (var stop in reads) // m9 §17.2: a running helper session gets stop
+            try { stop.Cancel(); } catch (ObjectDisposedException) { }
+        StopResearch(); // m9 §6.3: host shutdown cancels a running research run (marked first, then its calls)
         await _sweep.CancelAsync().ConfigureAwait(false);
         try { await _sweepTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
-        try { await Task.WhenAll(running).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
-        catch (Exception ex) { _log($"agent shutdown: {ex.GetType().Name}"); }
+        // Drain until nothing runs: work that ends now may still add a task (one that admits nothing new), so look again.
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (true)
+        {
+            Task[] running;
+            lock (_gate) running = [.. _background.Where(t => !t.IsCompleted)];
+            if (running.Length == 0) break;
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero) { _log("agent shutdown: TimeoutException"); break; }
+            try { await Task.WhenAll(running).WaitAsync(left).ConfigureAwait(false); }
+            catch (TimeoutException ex) { _log($"agent shutdown: {ex.GetType().Name}"); break; }
+            catch (Exception ex) { _log($"agent shutdown: {ex.GetType().Name}"); } // a faulted task is done: look again
+        }
     }
 
     // ---------------------------------------------------------------- tasks
@@ -331,6 +421,7 @@ public sealed partial class AgentService
         SaveTask(db, task);
         db.AppendEvent(Stream(task.Text("taskId")), "agent.task", new JsonObject { ["status"] = status, ["used"] = Used(task).DeepClone() });
         if (status == "active") return;
+        EndTaskChecks(db, task.Text("taskId"), "task_ended"); // m9 §17.2: open administrator checks are cancelled (a running session gets stop)
         RevokeRun(task.Text("taskId")); // synchronously: an answer finishing right now cannot be published after this
         CancelTask(task.Text("taskId"));
         db.Exec("DELETE FROM agent_transcripts WHERE task_id = $t", ("$t", task.Text("taskId"))); // a finished task's history goes with it
@@ -338,7 +429,7 @@ public sealed partial class AgentService
         // A native client's pairing ends with its task: the bridge pairs again for the next task.
         if (task["pairing"]?["pairingId"]?.GetValue<string>() is { } pairingId && PairingRow(db, pairingId) is { Status: "approved" } pairing)
             SetPairing(db, pairing, "expired");
-        RefreshProviders(db, task["recipient"].Text("kind")); // an MCP kind goes back to waiting/idle
+        if (ProviderKinds.Contains(task["recipient"].Text("kind"))) RefreshProviders(db, task["recipient"].Text("kind")); // an MCP kind goes back to waiting/idle
     }
 
     /// <summary>Loads a task and applies lazy idle expiry.</summary>
@@ -375,7 +466,8 @@ public sealed partial class AgentService
         if (scope["findingIds"] is JsonArray fa)
             findingIds = fa.Select(x => x is JsonValue v && v.TryGetValue<string>(out var s) ? s : throw RpcError.Params("scope.findingIds", "findingIds must be strings.")).Distinct().ToList();
         else if (scope["findingIds"] is not null) throw RpcError.Params("scope.findingIds", "findingIds must be an array or null.");
-        var grant = Grant.Parse(p["grant"]);
+        // m9 §1.3: the grant is optional; without one the host builds it from the permissions record (in the transaction).
+        var explicitGrant = p["grant"] is null ? null : Grant.Parse(p["grant"]);
 
         var inApp = InAppKinds.Contains(kind);
         IProviderAdapter? adapter = null;
@@ -383,7 +475,7 @@ public sealed partial class AgentService
         {
             adapter = Adapter(kind) ?? throw RpcError.State("provider_unavailable", "That provider is not available in this build.");
             if (!HasCredential(kind)) throw RpcError.State("provider_not_configured", "Connect that provider first.");
-            if (ToolsDisabled(kind) && (grant.Diagnostics.Count > 0 || grant.CanRequestChanges))
+            if (ToolsDisabled(kind) && explicitGrant is { } g && (g.Diagnostics.Count > 0 || g.CanRequestChanges || g.Scripts || g.Web || g.Admin))
                 throw RpcError.State("tools_unavailable", "Report review available: this account cannot use tools, so start without diagnostics.");
         }
         // M5 §3: an MCP kind without a pairing is an in-app (headless) task, allowed while its CLI is connected.
@@ -417,10 +509,14 @@ public sealed partial class AgentService
                 pairing = new JsonObject { ["pairingId"] = pairingId, ["client"] = row.Client, ["companionPid"] = row.CompanionPid };
             }
 
+            // In-app and headless tasks go only to the chosen AI (a paired outside window is the user's own).
+            if (pairingId is null) RequireChosen(db, kind);
+
             // One active task per recipient kind: starting another stops the previous one.
             foreach (var previous in db.Query("SELECT task_id FROM agent_tasks WHERE status = 'active' AND recipient_kind = $k", r => r.GetString(0), ("$k", kind)))
                 SetStatus(db, LoadTask(db, previous), "stopped");
 
+            var grant = explicitGrant ?? GrantFromPermissions(ReadPermissions(db), inApp && ToolsDisabled(kind));
             var taskId = "task-" + Ids.RandomHex();
             var now = Time.Format(Now());
             var task = new JsonObject
@@ -430,9 +526,11 @@ public sealed partial class AgentService
                 {
                     ["kind"] = kind, ["label"] = RecipientLabel(kind), ["model"] = inApp ? model ?? ModelFor(kind, adapter!) : null,
                 },
-                ["clientSession"] = null, // headless: the client's session (Claude Code) or thread (Codex) ID, for resuming
+                ["clientSession"] = null, // headless: the Claude Code session ID, for resuming
                 ["scope"] = new JsonObject { ["reportId"] = reportId, ["findingIds"] = findingIds is null ? null : Json.Array(findingIds) },
                 ["grant"] = grant.ToJson(),
+                ["everSharedNames"] = grant.ShareNames, // m9 §1.2 sticky exposure mark: set once names were shared, never cleared
+                ["webTainted"] = false, // m9 §5.5: set once web-derived text reached this task, never cleared
                 ["status"] = "active",
                 ["used"] = new JsonObject { ["diagnosticCalls"] = 0, ["bytesShared"] = 0, ["turns"] = 0, ["inputTokens"] = 0, ["outputTokens"] = 0 },
                 ["createdAt"] = now, ["lastActivityAt"] = now, ["pairing"] = pairing,
@@ -493,7 +591,9 @@ public sealed partial class AgentService
         _store.Write(db =>
         {
             var task = LoadLive(db, taskId);
-            if (task.Text("status") == "active") SetStatus(db, task, "stopped");
+            if (task.Text("status") != "active") return;
+            if (TaskRequests(db, taskId, "running").Count > 0) StartCooldown(db); // m9 §17.2: the user stopped checks that were running
+            SetStatus(db, task, "stopped");
         });
         CancelTask(taskId);
         return Get(p);
@@ -510,13 +610,18 @@ public sealed partial class AgentService
     {
         var taskId = P.Req(p, "taskId", 64);
         _store.Read(db => LoadTask(db, taskId)); // not_found for an unknown task
-        AskRun? run;
-        bool answering;
-        lock (_gate)
+        AskRun? run = null;
+        var answering = false;
+        // In a store transaction: serialised with a web lookup's store and release transactions (their fence reads the flag).
+        _store.Write(db =>
         {
-            answering = _asking.TryGetValue(taskId, out run) && run.Answering;
-            if (run is not null && !answering) run.Cancelled = true;
-        }
+            lock (_gate)
+            {
+                answering = _asking.TryGetValue(taskId, out run) && run.Answering;
+                if (run is not null && !answering) run.Cancelled = true;
+            }
+            return 0;
+        });
         if (answering) return new JsonObject { ["taskId"] = taskId, ["cancelled"] = false }; // the answer is being published
         if (run is null)
         {
@@ -533,13 +638,14 @@ public sealed partial class AgentService
 
     private static string RecipientLabel(string kind) => kind switch
     {
-        "anthropic_api" => "Claude (API)", "openai_api" => "OpenAI (API)", "claude_code_mcp" => "Claude Code", "codex_mcp" => "Codex", _ => kind,
+        "anthropic_api" => "Claude (API)", "openai_api" => "OpenAI (API)", "claude_code_mcp" => "Claude", _ => kind,
     };
 
     // ---------------------------------------------------------------- pairing (§6)
 
     public const int PairingMinutes = 5;
-    public static readonly string[] PairClients = ["claude_code", "codex", "unknown"];
+    /// <summary>Clients that may pair. "unknown": an MCP client that did not name itself (counts as Claude Code).</summary>
+    public static readonly string[] PairClients = ["claude_code", "unknown"];
 
     private sealed record Pairing(string Id, string Client, string Status, string ConnectionId, long CompanionPid, string Code, string ExpiresAt);
 
@@ -552,7 +658,7 @@ public sealed partial class AgentService
             ("$p", pairingId)).FirstOrDefault();
 
     private static bool PairingMatches(string client, string kind) =>
-        client == "unknown" || (client == "claude_code" && kind == "claude_code_mcp") || (client == "codex" && kind == "codex_mcp");
+        client is "unknown" or "claude_code" && kind == "claude_code_mcp";
 
     private void SetPairing(Db db, Pairing pairing, string status)
     {
@@ -587,6 +693,9 @@ public sealed partial class AgentService
     /// <summary>agent.pair (agent connections): a 4-digit code the user compares in the app. Bound to the verified client PID.</summary>
     public JsonNode Pair(JsonObject p, CallContext ctx)
     {
+        // M9: a retired client is refused before anything is stored: no pairing, no card, no status change.
+        if (p["client"] is JsonValue cv && cv.TryGetValue<string>(out var named) && named == RetiredClient)
+            throw RpcError.State(ClientNotSupported, RetiredClientMessage);
         var client = P.OneOf(p, "client", PairClients);
         P.Str(p, "clientVersion", required: false, maxLength: 64);
         if (P.Int(p, "companionPid", required: false) is { } claimed && claimed != ctx.ProcessId)
@@ -697,6 +806,7 @@ public sealed partial class AgentService
     /// <summary>On startup: pairings and native-client tasks whose bridge process has exited end.</summary>
     internal void RecoverAfterRestart()
     {
+        RetireDroppedProvider(); // M9: first, so what the dropped provider left active ends quietly (no pairing events)
         var pids = _store.Read(db => db.Query("SELECT DISTINCT companion_pid FROM agent_pairings WHERE status IN ('pending','approved')", r => r.GetInt64(0)));
         foreach (var pid in pids.Where(pid => !ProcessAlive(pid))) EndBridge(pid);
         var bound = _store.Read(db => db.Query("SELECT DISTINCT connection_id FROM agent_tasks WHERE status = 'active' AND connection_id LIKE 'pid:%'", r => r.GetString(0)));
@@ -705,6 +815,11 @@ public sealed partial class AgentService
         // An ask cut off by the host stopping never ended its turn: close it as interrupted (m5-chat §8).
         foreach (var id in _store.Read(db => db.Query("SELECT task_id FROM agent_tasks WHERE status = 'active'", r => r.GetString(0))))
             _store.Write(db => InterruptUnfinished(db, id));
+        // m9 §17.6: a fix attempt whose turn died with the host ends as no_fix.
+        var stale = _store.Write(db => FixAttempts.RecoverWorking(db));
+        if (stale > 0) _log($"fix attempts: {stale} interrupted, now no_fix");
+        RecoverChecks(); // m9 §17.2: a helper session cannot survive the host
+        RecoverResearch(); // m9 §6.3: an interrupted research run is cancelled, never resumed
         StartStatusSweep();
     }
 

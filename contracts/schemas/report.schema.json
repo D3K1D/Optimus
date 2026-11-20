@@ -64,6 +64,17 @@
         "counterevidence": { "type": "array", "items": { "type": "string", "pattern": "^ev-" } },
         "actionEligibility": { "enum": ["manual_review", "preview_available"] },
         "settingsUri": { "type": ["string", "null"], "pattern": "^(ms-settings|windowsdefender):" },
+        "settingsPath": { "type": "string", "description": "Design v59: the page as Windows names it in English (e.g. Settings › Apps › Startup), sent beside settingsUri only when Windows’ display language is English and the page has a known path; absent otherwise." },
+        "research": {
+          "description": "m9 §6.2 read side: the research label applied to this finding in this report (overlaid when read; absent when none).",
+          "type": "object",
+          "required": ["verdict", "researchedAt"],
+          "additionalProperties": false,
+          "properties": {
+            "verdict": { "enum": ["considered_safe", "worth_a_look"] },
+            "researchedAt": { "$ref": "scan.schema.json#/$defs/timestamp" }
+          }
+        },
         "disposition": {
           "oneOf": [
             { "type": "null" },

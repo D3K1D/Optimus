@@ -464,6 +464,8 @@
       if (x.state === 'cancelled' && cancelAsked.current[x.runId]) { delete cancelAsked.current[x.runId]; setToast('Cancelled'); }
       else if (x.state === 'stopped_on_battery') setToast('Stopped · on battery');
       else if (x.state === 'failed' || x.state === 'interrupted' || x.state === 'cancelled') setWarn('Stopped');
+      // An error (not a cancel): the app offers Report it (report-problem.js).
+      if ((x.state === 'failed' || x.state === 'interrupted') && opts && opts.onFailed) opts.onFailed(x);
       loadCaps();
     }
     function refresh() {

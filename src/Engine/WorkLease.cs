@@ -4,7 +4,7 @@ namespace OptimizationTool.Engine;
 
 /// <summary>
 /// The one per-user lease shared by work that loads the PC or changes what it measures (contracts/m6-benchmark.md §2):
-/// scans, benchmarks, sensors.snapshot and executing performance-affecting actions (power.select_scheme, defender.*).
+/// scans, benchmarks, sensors.snapshot and executing actions whose handler declares TakesLease (power.select_scheme, defender.*, setting.set).
 /// Whoever comes second gets a busy result. Acquire and release are atomic under one lock, so the lease is symmetric:
 /// a scan blocks a benchmark exactly as a benchmark blocks a scan.
 /// </summary>
@@ -65,8 +65,4 @@ public sealed class WorkLease
         Action => new RpcError(ErrorCodes.InvalidState, "A change is being applied.", new JsonObject { ["reason"] = "action_active", ["operationId"] = h.Id }),
         _ => new RpcError(ErrorCodes.InvalidState, "A sensor reading is running.", new JsonObject { ["reason"] = "snapshot_active" }),
     };
-
-    /// <summary>Actions whose execution takes the lease: power.select_scheme and the Defender scan and update actions.</summary>
-    public static bool AffectsPerformance(string actionId) =>
-        actionId == "power.select_scheme" || actionId.StartsWith("defender.", StringComparison.Ordinal);
 }

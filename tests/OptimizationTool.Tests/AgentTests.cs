@@ -137,6 +137,7 @@ public class AgentTests
         await using var _ = host;
         await AgentSetup.SetKey(c, "anthropic_api");
         await AgentSetup.SetKey(c, "openai_api");
+        await AgentSetup.ChooseLegacyApi(c); // an older "api" profile with both keys: either API kind, so both tasks stay active
         var a = (await AgentSetup.StartTask(c, reportId, "anthropic_api")).Str("taskId");
         var b = (await AgentSetup.StartTask(c, reportId, "openai_api")).Str("taskId");
         var agent = host.Server.Engine.Agent;
@@ -320,6 +321,7 @@ public class AgentTests
         await using var _ = host;
         await AgentSetup.SetKey(c);
 
+        await AgentSetup.Choose(c, "anthropic_api");
         var preview = await c.Call("review.preview", new JsonObject { ["recipientKind"] = "anthropic_api", ["reportId"] = reportId });
         Assert.Equal("2026-11-03T12:10:00.000Z", preview.Str("expiresAt"));
         Assert.Equal(["findings", "measurements", "names", "paths_accounts_addresses"], preview["fieldClasses"]!.AsArray().Select(f => f.Str("id")));
@@ -445,9 +447,9 @@ public class AgentTests
         Assert.Equal("revoked", (await again.Call("tool.call", new JsonObject { ["name"] = "list_capabilities" }))["error"].Str("code"));
 
         // Deny, expire, unknown.
-        var denied = await again.Call("agent.pair", new JsonObject { ["client"] = "codex" });
+        var denied = await again.Call("agent.pair", new JsonObject { ["client"] = "claude_code" });
         Assert.Equal("denied", (await desktop.Call("agent.approvePairing", new JsonObject { ["pairingId"] = denied.Str("pairingId"), ["approve"] = false })).Str("status"));
-        var expiring = await again.Call("agent.pair", new JsonObject { ["client"] = "codex" });
+        var expiring = await again.Call("agent.pair", new JsonObject { ["client"] = "claude_code" });
         time.Advance(TimeSpan.FromMinutes(6));
         // The approval is the first call to notice: its refusal keeps the expiry (and its one event).
         Assert.Equal("expired", (await desktop.Fails("agent.approvePairing", new JsonObject { ["pairingId"] = expiring.Str("pairingId"), ["approve"] = true })).ErrorData.Str("reason"));
@@ -457,7 +459,7 @@ public class AgentTests
         var unknown = await again.Fails("agent.pairStatus", new JsonObject { ["pairingId"] = "pair-0" });
         Assert.Equal(ErrorCodes.NotFound, unknown.Code);
         Assert.Equal("pairing", unknown.ErrorData.Str("kind"));
-        Assert.Equal(ErrorCodes.InvalidParams, (await again.Fails("agent.pair", new JsonObject { ["client"] = "codex", ["companionPid"] = 1 })).Code);
+        Assert.Equal(ErrorCodes.InvalidParams, (await again.Fails("agent.pair", new JsonObject { ["client"] = "claude_code", ["companionPid"] = 1 })).Code);
     }
 
     [Fact]
@@ -567,7 +569,7 @@ public class AgentTests
         Assert.Equal("grant.limits.turns", (await c.Fails("agent.start", StartParams(reportId, AgentSetup.Grant(limits: new JsonObject { ["turns"] = 99 })))).ErrorData.Str("field"));
         Assert.Equal(ErrorCodes.NotFound, (await c.Fails("agent.start", StartParams("report-0000000000000000", AgentSetup.Grant()))).Code);
         // m5 §3: an MCP kind without a pairing is a headless task; this build has no CLI runner.
-        Assert.Equal("provider_unavailable", (await c.Fails("agent.start", StartParams(reportId, AgentSetup.Grant(), "codex_mcp"))).ErrorData.Str("reason"));
+        Assert.Equal("provider_unavailable", (await c.Fails("agent.start", StartParams(reportId, AgentSetup.Grant(), "claude_code_mcp"))).ErrorData.Str("reason"));
 
         // One active task per recipient kind.
         var first = (await AgentSetup.StartTask(c, reportId)).Str("taskId");

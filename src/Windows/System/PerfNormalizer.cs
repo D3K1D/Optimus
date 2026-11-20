@@ -143,6 +143,9 @@ internal static class PerfNormalizer
             {
                 ["image"] = a.Image, ["pid"] = a.Key.Pid,
                 ["startTime"] = a.Key.CreateTime > 0 ? DateTime.FromFileTimeUtc(a.Key.CreateTime).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture) : null,
+                // Local only (m9 §3.1): the exact creation FILETIME, so process.end can tell this instance from a reused PID.
+                // The projector's allowlist never releases it (nor pid or startTime).
+                ["createTime"] = a.Key.CreateTime > 0 ? a.Key.CreateTime : null,
                 ["cpuAvgPercent"] = Sys.Round(a.CpuAvg), ["cpuMaxPercent"] = a.Cpu.Count > 0 ? a.Cpu.Max() : 0,
                 ["cpuAvgLogicalProcessors"] = Sys.Round(a.CpuAvg / 100 * raw.LogicalProcessors, 2),
                 ["cpuPercentSamples"] = Sys.Array(a.Cpu),["validIntervals"] = a.Cpu.Count, ["totalIntervals"] = intervals,

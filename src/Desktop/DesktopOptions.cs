@@ -2,7 +2,7 @@ using System.Text.RegularExpressions;
 
 namespace OptimizationTool.Desktop;
 
-/// <summary>Command line: --ui-dir &lt;path&gt;, --fixture-speed &lt;value&gt;, --sample-seconds &lt;1-600&gt;, --source windows|fixture, --dev-allow-any-host, --pipe-name &lt;name&gt;.</summary>
+/// <summary>Command line: --ui-dir &lt;path&gt;, --fixture-speed &lt;value&gt;, --sample-seconds &lt;1-600&gt;, --source windows|fixture, --dev-allow-any-host, --pipe-name &lt;name&gt;, --dev-log.</summary>
 public sealed partial record DesktopOptions
 {
     public string? UiDir { get; init; }
@@ -12,6 +12,8 @@ public sealed partial record DesktopOptions
     public string? Source { get; init; }
     public bool DevAllowAnyHost { get; init; }
     public string? PipeName { get; init; }
+    /// <summary>Developer log on (dev.log); passed on to the host.</summary>
+    public bool DevLog { get; init; }
 
     public static DesktopOptions Parse(IReadOnlyList<string> args)
     {
@@ -44,6 +46,9 @@ public sealed partial record DesktopOptions
                 case "--dev-allow-any-host":
                     o = o with { DevAllowAnyHost = true };
                     break;
+                case DevLogSwitch.Argument:
+                    o = o with { DevLog = true };
+                    break;
                 case "--pipe-name":
                     var name = Value(args, ref i, a);
                     if (!TokenPattern().IsMatch(name) || name.Length > 200) throw new ArgumentException($"Invalid value for {a}.");
@@ -63,6 +68,7 @@ public sealed partial record DesktopOptions
         if (FixtureSpeed is not null) args.AddRange(["--fixture-speed", FixtureSpeed]);
         if (SampleSeconds is { } s) args.AddRange(["--sample-seconds", s.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         if (Source is not null) args.AddRange(["--source", Source]);
+        if (DevLog) args.Add(DevLogSwitch.Argument);
         return args;
     }
 

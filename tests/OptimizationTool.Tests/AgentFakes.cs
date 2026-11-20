@@ -135,8 +135,40 @@ public static class AgentSetup
     public static async Task SetKey(Client c, string kind = "anthropic_api") =>
         Assert.Equal("connected", (await c.Call("provider.setKey", new JsonObject { ["kind"] = kind, ["apiKey"] = FakeProvider.GoodKey, ["remember"] = false })).Str("status"));
 
+    /// <summary>The onboarding provider value each recipient kind is chosen under.</summary>
+    public static string ProviderValue(string kind) => kind switch
+    {
+        "claude_code_mcp" => "claude-code", "chatgpt_plan" => "chatgpt", _ => "api",
+    };
+
+    /// <summary>Makes <paramref name="kind"/> the chosen AI (onboarding provider.kind), unless it already is.</summary>
+    public static async Task Choose(Client c, string kind)
+    {
+        var current = await c.Call("onboarding.get");
+        var provider = current["profile"]?["provider"];
+        if (provider?["kind"]?.GetValue<string>() == kind) return;
+        if (provider?["kind"] is null && provider?["value"]?.GetValue<string>() == "api" && kind is "anthropic_api" or "openai_api") return; // an older profile: either API kind
+        await c.Call("onboarding.save", new JsonObject
+        {
+            ["expectedRevision"] = (long)current["revision"]!,
+            ["patch"] = new JsonObject { ["provider"] = new JsonObject { ["value"] = ProviderValue(kind), ["kind"] = kind } },
+        });
+    }
+
+    /// <summary>An older profile: provider "api" without a kind (saved before the exact kind was recorded).</summary>
+    public static async Task ChooseLegacyApi(Client c)
+    {
+        var current = await c.Call("onboarding.get");
+        await c.Call("onboarding.save", new JsonObject
+        {
+            ["expectedRevision"] = (long)current["revision"]!,
+            ["patch"] = new JsonObject { ["provider"] = new JsonObject { ["value"] = "api" } },
+        });
+    }
+
     public static async Task<JsonObject> StartTask(Client c, string reportId, string kind = "anthropic_api", JsonObject? grant = null, string? pairingId = null, string goal = "Why is my PC loud?")
     {
+        if (pairingId is null) await Choose(c, kind); // in-app and headless tasks go only to the chosen AI
         var p = new JsonObject
         {
             ["idempotencyKey"] = Guid.NewGuid().ToString(), ["goal"] = goal, ["recipientKind"] = kind,
