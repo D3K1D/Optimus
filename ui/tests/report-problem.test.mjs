@@ -102,6 +102,32 @@ test('the preview: title, line, footer and each state’s exact wording', () => 
   const failed = OT.ReportProblemPanel(Object.assign({ state: 'browserFailed' }, base));
   assert.equal(status(failed), 'Couldn’t open your browser. Copy the report and paste it at github.com/D3K1D/Optimus/issues/new.');
   assert.ok(has(nodes(failed).find((n) => has(n, 'ot-rp-status')), 'is-warn'));
+  // v86: copyFailed, stale (orange), opening.
+  const cf = OT.ReportProblemPanel(Object.assign({ state: 'copyFailed' }, base));
+  assert.equal(status(cf), 'Couldn’t copy. Select the text above and copy it yourself.');
+  assert.ok(has(nodes(cf).find((n) => has(n, 'ot-rp-status')), 'is-warn'));
+  assert.equal(nodes(cf).find((n) => n.type === 'pre').props.tabIndex, 0);
+  assert.ok(!button(cf, 'Copy').props.disabled && !button(cf, 'Open GitHub').props.disabled);
+  const stale = OT.ReportProblemPanel(Object.assign({ state: 'stale' }, base));
+  assert.equal(status(stale), 'This report is too old to open. Copy it, or close and report again.');
+  assert.ok(has(nodes(stale).find((n) => has(n, 'ot-rp-status')), 'is-warn'));
+  assert.equal(button(stale, 'Open GitHub').props.disabled, true);
+  assert.ok(!button(stale, 'Copy').props.disabled);
+  const opening = OT.ReportProblemPanel(Object.assign({ state: 'opening' }, base));
+  assert.equal(status(opening), 'Opening your browser…');
+  assert.ok(!has(nodes(opening).find((n) => has(n, 'ot-rp-status')), 'is-warn'));
+  assert.equal(button(opening, 'Opening…').props.disabled, true);
+  assert.equal(button(opening, 'Open GitHub'), undefined);
+  // failed: the box and buttons go; the line, Close and Try again.
+  let retried = 0;
+  const bad = OT.ReportProblemPanel(Object.assign({ state: 'failed', onRetry: () => retried++ }, base));
+  assert.ok(text(bad).startsWith('Report a problem'));
+  assert.equal(status(bad), 'Optimus couldn’t build the report.');
+  assert.ok(has(nodes(bad).find((n) => has(n, 'ot-rp-status')), 'is-warn'));
+  assert.equal(nodes(bad).find((n) => n.type === 'pre'), undefined);
+  assert.deepEqual(buttons(bad).map((b) => b.props['aria-label'] || text(b).trim()), ['Close', 'Close', 'Try again']);
+  button(bad, 'Try again').props.onClick();
+  assert.equal(retried, 1);
 });
 
 test('trimmed: the shorter-link line with any state, never while building', () => {
@@ -143,7 +169,7 @@ test('the preview from the menu: building, then the fixture’s report; Copy cop
   assert.equal(c.get().panel, null);
 });
 
-test('Copy copies the full text even when the link is trimmed; a refused clipboard flashes Copy failed', async () => {
+test('Copy copies the full text even when the link is trimmed; a refused clipboard says so in the panel (copyFailed)', async () => {
   const long = 'line\n'.repeat(3000);
   const be = spy({ 'shell.problemReport': { reportId: 'r1', text: long, title: 'Problem', trimmed: true } });
   const got = [], flashes = [];
@@ -155,17 +181,29 @@ test('Copy copies the full text even when the link is trimmed; a refused clipboa
   const c2 = RP.createReportController(be, { clipboard: { writeText: () => Promise.reject(new Error('denied')) }, flash: (w) => flashes.push(w) });
   await c2.open();
   await c2.copy();
-  assert.deepEqual(flashes, ['Copy failed']);
-  assert.equal(c2.get().panel.state, 'ready');
+  assert.deepEqual(flashes, []);                       // v86: the orange line replaces the toast
+  assert.equal(c2.get().panel.state, 'copyFailed');
+  assert.equal(c2.get().panel.text, 'line\n'.repeat(3000));   // the text stays there to select
+  // No clipboard at all, or one that throws: the same.
+  for (const clipboard of [{}, { writeText: () => { throw new Error('x'); } }]) {
+    const c3 = RP.createReportController(be, { clipboard, flash: (w) => flashes.push(w) });
+    await c3.open(); await c3.copy();
+    assert.equal(c3.get().panel.state, 'copyFailed');
+  }
+  assert.deepEqual(flashes, []);
 });
 
-test('Open GitHub sends only the reportId: opened, failed or unknown → browserFailed; too soon changes nothing', async () => {
+test('Open GitHub sends only the reportId: Opening… until the answer; opened; failed → browserFailed; unknown → stale; too soon changes nothing', async () => {
   let answer = { status: 'opened' };
   const be = spy({ 'shell.problemReport': { reportId: 'rpt-1', text: 'T', title: 'Problem', trimmed: false }, 'shell.openIssue': () => answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer) });
   const c = RP.createReportController(be, {});
   await c.open('fix');
   assert.deepEqual(be.calls[0].params, { operation: 'fix' });
-  await c.openIssue();
+  const first = c.openIssue();
+  assert.equal(c.get().panel.state, 'opening');
+  await c.openIssue();                                 // a second press while opening sends nothing
+  assert.equal(be.calls.filter((x) => x.method === 'shell.openIssue').length, 1);
+  await first;
   assert.deepEqual(be.calls.find((x) => x.method === 'shell.openIssue').params, { reportId: 'rpt-1' });
   assert.equal(c.get().panel.state, 'opened');
   answer = Object.assign(new Error('rate'), { code: -32013, data: { reason: 'rate_limited' } });
@@ -177,15 +215,67 @@ test('Open GitHub sends only the reportId: opened, failed or unknown → browser
   await c.open();
   answer = { status: 'unknown' };
   await c.openIssue();
+  assert.equal(c.get().panel.state, 'stale');
+  // Copy still works; the report stays too old to open (no second call).
+  const n = be.calls.length;
+  const cc = RP.createReportController(be, { clipboard: { writeText: () => Promise.resolve() } });
+  await cc.open(); answer = { status: 'unknown' }; await cc.openIssue(); await cc.copy();
+  assert.equal(cc.get().panel.state, 'copied');
+  const m = be.calls.filter((x) => x.method === 'shell.openIssue').length;
+  await cc.openIssue();
+  assert.equal(cc.get().panel.state, 'stale');
+  assert.equal(be.calls.filter((x) => x.method === 'shell.openIssue').length, m);
+  assert.ok(be.calls.length > n);
+  // A rejected call other than too soon: browserFailed.
+  await c.open(); answer = Object.assign(new Error('x'), { code: -32603 }); await c.openIssue();
   assert.equal(c.get().panel.state, 'browserFailed');
 });
 
-test('a report that can’t be built: the panel closes with Not available', async () => {
+test('a report that can’t be built: the panel stays open (failed); Try again builds it again', async () => {
   const flashes = [];
-  const c = RP.createReportController(spy({ 'shell.problemReport': () => Promise.reject(new Error('x')) }), { flash: (w) => flashes.push(w) });
-  await c.open();
-  assert.equal(c.get().panel, null);
-  assert.deepEqual(flashes, ['Not available']);
+  let ok = false;
+  const be = spy({ 'shell.problemReport': () => ok ? Promise.resolve({ reportId: 'r2', text: 'T', title: 'P', trimmed: false }) : Promise.reject(new Error('x')) });
+  const c = RP.createReportController(be, { flash: (w) => flashes.push(w) });
+  await c.open('scan');
+  assert.equal(c.get().panel.state, 'failed');
+  assert.deepEqual(flashes, []);
+  await c.copy(); await c.openIssue();                 // nothing to copy or open
+  assert.equal(c.get().panel.state, 'failed');
+  ok = true;
+  await c.retry();
+  assert.equal(c.get().panel.state, 'ready');
+  assert.deepEqual(be.calls.filter((x) => x.method === 'shell.problemReport').map((x) => x.params), [{ operation: 'scan' }, { operation: 'scan' }]);
+});
+
+test('Report it from a prompt: not dismissed, and a crash’s markers kept, until a report is built', async () => {
+  let ok = false;
+  const be = spy({ 'shell.crashStatus': { crashed: true, process: 'host', at: 'b' }, 'shell.crashDismiss': { status: 'cleared' },
+    'shell.problemReport': () => ok ? Promise.resolve({ reportId: 'r3', text: 'T', title: 'P', trimmed: false }) : Promise.reject(new Error('x')) });
+  const c = RP.createReportController(be, {});
+  await c.checkCrash();
+  await c.report();
+  assert.equal(c.get().panel.state, 'failed');
+  assert.equal(c.get().prompt, null);
+  assert.ok(!be.calls.some((x) => x.method === 'shell.crashDismiss'));
+  // Closed without a report: the prompt is still there, and the same crash can still raise it.
+  c.close();
+  assert.equal(c.get().prompt.key, 'crash:b');
+  // Report it again, Try again builds it: now the prompt is gone for good and the markers are cleared.
+  await c.report();
+  ok = true;
+  await c.retry();
+  await tick();
+  assert.equal(c.get().panel.state, 'ready');
+  assert.ok(be.calls.some((x) => x.method === 'shell.crashDismiss'));
+  c.close();
+  assert.equal(c.get().prompt, null);
+  assert.equal(c.raise('crash', 'crash:b'), false);
+  // A scan problem whose report fails: Close brings its prompt back; a newer problem in the meantime wins.
+  ok = false;
+  c.raise('scan', 'scan:9'); await c.report();
+  c.raise('fix', 'fix:1');
+  c.close();
+  assert.equal(c.get().prompt.key, 'fix:1');
 });
 
 test('crash on start: the prompt; Not now clears the markers and it stays gone', async () => {
@@ -256,9 +346,11 @@ test('which endings are errors: scan, fix, benchmark, AI', () => {
   assert.equal(F.benchmark({ state: 'interrupted' }), true);
   assert.equal(F.benchmark({ state: 'cancelled' }), false);
   assert.equal(F.benchmark({ state: 'stopped_on_battery' }), false);
-  assert.equal(F.aiTurn({ status: 'failed', code: 'internal' }), true);
-  assert.equal(F.aiTurn({ status: 'failed', code: 'cancelled' }), false);
-  assert.equal(F.aiTurn({ status: 'failed', code: 'tool_blocked' }), false);
+  // design v86: a failed turn offers it with no code or internal, client_error, bad_request, timeout; never for the rest.
+  assert.equal(F.aiTurn({ status: 'failed' }), true);
+  for (const code of ['internal', 'client_error', 'bad_request', 'timeout']) assert.equal(F.aiTurn({ status: 'failed', code }), true, code);
+  for (const code of ['cancelled', 'stopped', 'busy', 'rate_limited', 'tool_blocked', 'not_allowed', 'auth', 'expired', 'exhausted', 'quota', 'network',
+    'not_eligible', 'overloaded', 'unavailable', 'incomplete', 'interrupted', 'revoked']) assert.equal(F.aiTurn({ status: 'failed', code }), false, code);
   assert.equal(F.aiTurn({ status: 'finished' }), false);
   assert.equal(F.aiTask({ status: 'failed' }), true);
   assert.equal(F.aiTask({ status: 'stopped' }), false);

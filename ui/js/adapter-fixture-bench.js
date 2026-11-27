@@ -11,7 +11,7 @@
   'use strict';
 
   var ORDER = ['ram', 'cpu', 'gpu', 'disk'];
-  var DEVICES = { cpu: 'Ryzen 7 7700', gpu: 'GeForce RTX 4060 Ti', ram: '32 GB DDR5-5600', disk: 'C: · NVMe SSD 1 TB' };
+  var DEVICES = { cpu: '8-core desktop CPU', gpu: '12 GB graphics card', ram: '32 GB memory', disk: 'C: · 1 TB NVMe SSD' };
   var PART_MS = 6500, COOL_MS = 1000, TICK = 250, WINDOW = 60;
   var BENCH_VERSION = '1', CONFIG_ID = 'cfg-f1c7a9e000000001', EST_SECONDS = 120, PART_SECONDS = 30;
 

@@ -97,6 +97,9 @@ public static class ErrorSites
     public const string CliLaunchFailed = "E-PRV-006";
     public const string CliExitNonZero = "E-PRV-007";
     public const string CliRunFailed = "E-PRV-008";
+    public const string ChatRunFailed = "E-PRV-009";
+    public const string ChatToolBlocked = "E-PRV-010";
+    public const string ChatNotStarted = "E-PRV-011";
 
     // RES: research (labels phase and chat web_lookup)
     public const string LookupRefused = "E-RES-001";
@@ -123,6 +126,14 @@ public static class ErrorSites
     public const string ResearchSubjectsSkipped = "E-RES-022";
     public const string UrlRefused = "E-RES-023";
     public const string SourceOpenBlocked = "E-RES-024";
+    public const string ResearchCliUnavailable = "E-RES-025";
+    public const string ResearchCliNotSignedIn = "E-RES-026";
+    public const string ResearchCliSearchLimit = "E-RES-027";
+    public const string ResearchCliToolBlocked = "E-RES-028";
+    public const string ResearchCliNotStarted = "E-RES-029";
+    public const string ResearchCliNoAnswer = "E-RES-030";
+    public const string ResearchCliFolderAcl = "E-RES-031";
+    public const string ResearchCliCleanup = "E-RES-032";
 
     // CHK: check-up
     public const string CheckupNotStarted = "E-CHK-001";
@@ -226,6 +237,9 @@ public static class ErrorSites
         new ErrorSite(CliLaunchFailed, "PRV", "Headless CLI: could not be started"),
         new ErrorSite(CliExitNonZero, "PRV", "Headless CLI: exited with a non-zero code"),
         new ErrorSite(CliRunFailed, "PRV", "Headless CLI: the run failed (read loop, broken pipe)"),
+        new ErrorSite(ChatRunFailed, "PRV", "Headless chat: the run failed with an exception (turn failed as internal)"),
+        new ErrorSite(ChatToolBlocked, "PRV", "Headless chat: the guard stopped the run, a tool outside its set (tool_blocked)"),
+        new ErrorSite(ChatNotStarted, "PRV", "Headless chat: the CLI did not start (launch error code)"),
 
         // RES
         new ErrorSite(LookupRefused, "RES", "web_lookup: refused before the call (limit, out of scope, not researchable, no subject name, release)"),
@@ -252,6 +266,14 @@ public static class ErrorSites
         new ErrorSite(ResearchSubjectsSkipped, "RES", "Research: findings skipped (no name that may leave this PC)"),
         new ErrorSite(UrlRefused, "RES", "URL hygiene refused a source URL"),
         new ErrorSite(SourceOpenBlocked, "RES", "research.source: the stored URL failed hygiene"),
+        new ErrorSite(ResearchCliUnavailable, "RES", "Headless research: the CLI cannot research (no_client, no_profile, no_capability)"),
+        new ErrorSite(ResearchCliNotSignedIn, "RES", "Headless research: the CLI is not signed in (reported, or a sign-in-looking failure)"),
+        new ErrorSite(ResearchCliSearchLimit, "RES", "Headless research: the call searched more than allowed and was killed (search_limit)"),
+        new ErrorSite(ResearchCliToolBlocked, "RES", "Headless research: the guard killed the call, something outside the profile (tool_blocked)"),
+        new ErrorSite(ResearchCliNotStarted, "RES", "Headless research: the CLI did not start (launch error code)"),
+        new ErrorSite(ResearchCliNoAnswer, "RES", "Headless research: the CLI gave no answer (exit code, stderr length)"),
+        new ErrorSite(ResearchCliFolderAcl, "RES", "Headless research: restricting the run folder failed"),
+        new ErrorSite(ResearchCliCleanup, "RES", "Headless research: deleting the run folder failed"),
 
         // CHK
         new ErrorSite(CheckupNotStarted, "CHK", "Check-up: not started (refused or web \"no\")"),

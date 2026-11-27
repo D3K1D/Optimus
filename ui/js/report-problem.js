@@ -11,8 +11,11 @@
   // Operation states that ended without the change (as app-flow's FAILED_OP); a stop is never one.
   var FAILED_OP = { failed: 1, indeterminate: 1, rolled_back_failed: 1 };
   var STOP_CODES = { cancelled: 1, stopped: 1 };
-  // A failed AI turn that is a stop, a refusal or something the user acts on (sign in, permissions), not an error.
-  var AI_NOT_ERROR = { cancelled: 1, stopped: 1, busy: 1, rate_limited: 1, tool_blocked: 1, not_allowed: 1, auth: 1, expired: 1, exhausted: 1 };
+  // design v86 (ReportProblem): a failed AI turn offers a report only when it looks like a fault in Optimus: no code, or
+  // one of these. Every other code (cancelled, stopped, busy, rate_limited, tool_blocked, not_allowed, auth, expired,
+  // exhausted, quota, network, not_eligible, overloaded, unavailable, incomplete, interrupted, revoked, …) is a normal
+  // outcome the pill or the chat already explains.
+  var AI_ERROR = { internal: 1, client_error: 1, bad_request: 1, timeout: 1 };
   var failed = {
     // scan.finished / scan.get: the scan itself ended failed (a stop ends cancelled).
     scan: function (payload) { return !!payload && payload.status === 'failed'; },
@@ -25,8 +28,8 @@
     },
     // A benchmark run that ended failed or interrupted (cancelled and on battery are stops).
     benchmark: function (run) { return !!run && (run.state === 'failed' || run.state === 'interrupted'); },
-    // agent.turn failed with an error code, or agent.task failed.
-    aiTurn: function (pl) { return !!pl && pl.status === 'failed' && !AI_NOT_ERROR[pl.code]; },
+    // agent.turn failed with no code or an error code, or agent.task failed.
+    aiTurn: function (pl) { return !!pl && pl.status === 'failed' && (!pl.code || !!AI_ERROR[pl.code]); },
     aiTask: function (pl) { return !!pl && pl.status === 'failed'; }
   };
 
@@ -37,6 +40,7 @@
     var state = { prompt: null, panel: null, version: null };
     var dismissed = {};   // problem key → true: once dismissed or reported, that problem's prompt never returns
     var seq = 0;
+    var asked = null;     // the prompt whose Report it is building: dismissed only once its report is built
     function set(patch) { state = Object.assign({}, state, patch); if (opts.onChange) opts.onChange(state); }
     function putPanel(patch) { if (state.panel) set({ panel: Object.assign({}, state.panel, patch) }); }
     function flash(w) { if (opts.flash) opts.flash(w); }
@@ -46,6 +50,7 @@
     function raise(cause, key, ai) {
       key = key || cause;
       if (dismissed[key]) return false;
+      asked = null;
       set({ prompt: { cause: cause, key: key, ai: ai || null } });
       return true;
     }
@@ -61,51 +66,68 @@
       set({ prompt: null });
       if (p.cause === 'crash') crashDismiss();
     }
-    // The preview builds the report; a crash's markers are cleared once its report was built.
+    // The preview builds the report; the prompt that asked for it is dismissed, and a crash's markers are cleared, only
+    // once its report was built. A build that fails keeps the panel open (failed: Close / Try again).
     function open(operation) {
       var n = ++seq;
       set({ panel: { state: 'building', text: '', reportId: null, trimmed: false, operation: operation || null } });
       return backend.call('shell.problemReport', operation ? { operation: operation } : {}).then(function (r) {
         if (n !== seq || !state.panel) return;
         putPanel({ state: 'ready', text: (r && r.text) || '', reportId: (r && r.reportId) || null, trimmed: !!(r && r.trimmed) });
+        var p = asked; asked = null;
+        if (p) dismissed[p.key] = true;
         if (operation === 'crash') crashDismiss();
       }, function () {
-        if (n !== seq) return;
-        set({ panel: null });
-        flash('Not available');
+        if (n !== seq || !state.panel) return;
+        putPanel({ state: 'failed' });
       });
     }
     function report() {
       var p = state.prompt; if (!p) return;
-      dismissed[p.key] = true;
+      asked = p;
       set({ prompt: null });
       return open(p.cause);
     }
-    function close() { seq++; set({ panel: null }); }
+    // Try again (failed): the same report once more.
+    function retry() { var pn = state.panel; if (!pn || pn.state !== 'failed') return Promise.resolve(); return open(pn.operation); }
+    // Closed before its report was built: the prompt that asked for it is still there.
+    function close() {
+      seq++;
+      var p = asked; asked = null;
+      set(p && !state.prompt && !dismissed[p.key] ? { panel: null, prompt: p } : { panel: null });
+    }
     // Copy: the full text, always (the GitHub link may carry a shorter one).
+    // Blocked copying: the panel says so (copyFailed) and the text stays there to select by hand.
     function copy() {
-      var pn = state.panel; if (!pn || pn.state === 'building') return Promise.resolve();
+      var pn = state.panel; if (!pn || pn.state === 'building' || pn.state === 'failed') return Promise.resolve();
       var cb = opts.clipboard || (root && root.navigator && root.navigator.clipboard) || (typeof navigator !== 'undefined' ? navigator.clipboard : null);
-      var fail = function () { flash('Copy failed'); };
+      var fail = function () { if (state.panel && state.panel.reportId === pn.reportId) putPanel({ state: 'copyFailed' }); };
       if (!cb || !cb.writeText) { fail(); return Promise.resolve(); }
       var done;
       try { done = Promise.resolve(cb.writeText(pn.text)); } catch (e) { fail(); return Promise.resolve(); }
       return done.then(function () { if (state.panel && state.panel.reportId === pn.reportId) putPanel({ state: 'copied' }); }, fail);
     }
-    // Open GitHub: only the report's id goes back; the shell builds the page from the report it holds.
+    // Open GitHub: only the report's id goes back; the shell builds the page from the report it holds. Opening… until
+    // the answer: opened, stale (the shell no longer has this report: unknown) or browserFailed (anything else).
     function openIssue() {
-      var pn = state.panel; if (!pn || pn.state === 'building' || !pn.reportId) return Promise.resolve();
+      var pn = state.panel; if (!pn || !pn.reportId || pn.state === 'building' || pn.state === 'failed' || pn.state === 'opening') return Promise.resolve();
+      // Once stale, it stays too old to open (Copy may have changed the line since).
+      if (pn.stale) { putPanel({ state: 'stale' }); return Promise.resolve(); }
+      var before = pn.state;
+      putPanel({ state: 'opening' });
       var mine = function () { return state.panel && state.panel.reportId === pn.reportId; };
+      var answer = function (patch) { if (mine() && state.panel.state === 'opening') putPanel(patch); };
       return backend.call('shell.openIssue', { reportId: pn.reportId }).then(function (r) {
-        if (mine()) putPanel({ state: r && r.status === 'opened' ? 'opened' : 'browserFailed' });
+        var st = r && r.status;
+        answer(st === 'opened' ? { state: 'opened' } : st === 'unknown' ? { state: 'stale', stale: true } : { state: 'browserFailed' });
       }, function (err) {
-        // Pressed again too soon: the page was just opened, nothing changes.
-        if (err && err.code === -32013) return;
-        if (mine()) putPanel({ state: 'browserFailed' });
+        // Pressed again too soon (rate limited): the page was just opened; no words, the panel goes back as it was.
+        if (err && err.code === -32013) { answer({ state: before }); return; }
+        answer({ state: 'browserFailed' });
       });
     }
     return { get: function () { return state; }, raise: raise, checkCrash: checkCrash, dismiss: dismiss, report: report,
-      open: open, close: close, copy: copy, openIssue: openIssue };
+      open: open, retry: retry, close: close, copy: copy, openIssue: openIssue };
   }
 
   var api = { failed: failed, createReportController: createReportController };
@@ -118,11 +140,26 @@
 
   /* The report preview: exactly the text that would leave the PC. The user opens a prefilled GitHub page and submits it there. */
   var REPORT_ISSUES_URL = 'github.com/D3K1D/Optimus/issues/new';
+  // design v86 states: building | failed (Close, Try again → onRetry) | ready | copied | copyFailed | opening | opened |
+  // browserFailed | stale. App additions: tabIndex -1, data-rp and onKeyDown on the panel (focus on open, Escape closes).
   function ReportProblemPanel(p) {
     var st = p.state || 'ready', building = st === 'building';
     var status = st === 'copied' ? 'Copied. You can paste it anywhere.'
       : st === 'opened' ? 'Opened in your browser. Say what you were doing, then press Submit there.'
-        : st === 'browserFailed' ? 'Couldn’t open your browser. Copy the report and paste it at ' + (p.issuesUrl || REPORT_ISSUES_URL) + '.' : '';
+        : st === 'browserFailed' ? 'Couldn’t open your browser. Copy the report and paste it at ' + (p.issuesUrl || REPORT_ISSUES_URL) + '.'
+          : st === 'copyFailed' ? 'Couldn’t copy. Select the text above and copy it yourself.'
+            : st === 'stale' ? 'This report is too old to open. Copy it, or close and report again.'
+              : st === 'opening' ? 'Opening your browser…' : '';
+    var warn = st === 'browserFailed' || st === 'copyFailed' || st === 'stale';
+    if (st === 'failed') return h(GlassPanel, { strong: true, className: cx('ot-rp', p.className), role: 'region', 'aria-labelledby': 'ot-rp-t', tabIndex: -1, 'data-rp': true, onKeyDown: p.onKeyDown },
+      h('div', { className: 'ot-rp-head' },
+        h('h2', { id: 'ot-rp-t', className: 'text-headline' }, 'Report a problem'),
+        p.onClose && h('button', { type: 'button', className: 'ot-rp-x', 'aria-label': 'Close', onClick: p.onClose }, h(Icon, { name: 'close', size: 18 }))),
+      h('p', { className: 'text-callout ot-rp-status is-warn', role: 'alert' }, 'Optimus couldn’t build the report.'),
+      h('div', { className: 'ot-rp-foot' }, h('span', null),
+        h('div', { className: 'ot-approval-actions' },
+          p.onClose && h(Button, { variant: 'ghost', onClick: p.onClose }, 'Close'),
+          h(Button, { variant: 'primary', icon: 'repeat', onClick: p.onRetry }, 'Try again'))));
     return h(GlassPanel, { strong: true, className: cx('ot-rp', p.className), role: 'region', 'aria-labelledby': 'ot-rp-t', tabIndex: -1, 'data-rp': true, onKeyDown: p.onKeyDown },
       h('div', { className: 'ot-rp-head' },
         h('h2', { id: 'ot-rp-t', className: 'text-headline' }, 'Report a problem'),
@@ -131,13 +168,13 @@
       building ? h('div', { className: 'ot-rp-box is-building text-mono-sm', role: 'status' }, h(Logo, { size: 16, mono: true, decorative: true, spin: true }), 'Building the report…')
         : h('pre', { className: 'ot-rp-box text-mono-sm', tabIndex: 0, role: 'region', 'aria-label': 'Report text' }, p.text || ''),
       p.trimmed && !building && h('p', { className: 'text-mono-sm ot-muted ot-rp-note' }, h(Icon, { name: 'alert', size: 14 }), 'Too long for GitHub’s link, so the page gets a shorter version. Copy gives you all of it.'),
-      h('p', { className: cx('text-callout ot-rp-status', st === 'browserFailed' && 'is-warn'), role: 'status' }, status),
+      h('p', { className: cx('text-callout ot-rp-status', warn && 'is-warn'), role: 'status' }, status),
       h('div', { className: 'ot-rp-foot' },
         h('span', { className: 'text-mono-sm ot-muted ot-rp-hint' }, 'Sending needs a free GitHub account.'),
         h('div', { className: 'ot-approval-actions' },
           p.onClose && h(Button, { variant: 'ghost', onClick: p.onClose }, 'Close'),
           h(Button, { variant: 'neu', icon: st === 'copied' ? 'check' : 'copy', disabled: building, onClick: p.onCopy }, st === 'copied' ? 'Copied' : 'Copy'),
-          h(Button, { variant: 'primary', icon: 'external', disabled: building, onClick: p.onOpen }, 'Open GitHub'))));
+          h(Button, { variant: 'primary', icon: 'external', disabled: building || st === 'opening' || st === 'stale', onClick: p.onOpen }, st === 'opening' ? 'Opening…' : 'Open GitHub'))));
   }
 
   /* After a crash or a failed operation: a light, non-blocking prompt. It never takes focus. */
@@ -206,7 +243,7 @@
       panel: function (className) {
         var pn = st.panel; if (!pn) return null;
         return h(ReportProblemPanel, { key: 'rp', className: className, state: pn.state, text: pn.text, trimmed: pn.trimmed,
-          onClose: closePanel, onCopy: c.copy, onOpen: c.openIssue,
+          onClose: closePanel, onCopy: c.copy, onOpen: c.openIssue, onRetry: c.retry,
           onKeyDown: function (e) { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); e.stopPropagation(); closePanel(); } } });
       }
     };

@@ -801,7 +801,7 @@
        failed | timeout | malformed | interrupted | mixed | unread; hold keeps them running until fixture.finishChecks
        {requestId, mode?}; mixed: the first check read, the others not (failed access_denied, failed unsupported, …) while the
        request completes; unread: none read, the request still complete, as the host keeps each check's own state),
-       fixture.expireChecks {requestId}, fixture.endCooldown {}. ---------- */
+       fixture.expireChecks {requestId}, fixture.endCooldown {}, fixture.checksTick {} (the status sweep now). ---------- */
     var ADMIN_CHECKS = {
       'security.defender_history': { label: 'Defender detection history', window: [1, 90, 30], version: '1', category: 'security',
         description: 'Administrator check: threats Microsoft Defender found and what it did, over a window of days (1-90, default 30). Runs after the user approves it.' },
@@ -822,7 +822,66 @@
     function CK() { var a = A(); if (!a.checks) a.checks = { requests: {}, ops: {}, continuations: {}, cooldownUntil: 0, next: { mode: 'complete', hold: false } }; return a.checks; }
     function checksAvailable() { return adminFlag(); }
     function hostLabel(id, w) { var d = ADMIN_CHECKS[id]; return d.window && w ? d.label + ' · last ' + (w === 1 ? 'day' : w + ' days') : d.label; }
-    function retryAt() { var u = CK().cooldownUntil; return u > Date.now() ? new Date(u).toISOString() : null; }
+    /* The cooldown as the host runs it: the time left counts on the monotonic clock (performance.now), so moving the wall
+       clock neither shortens nor extends it; cooldownUntil (saved with the state) is its wall-clock end, clamped to 60 s
+       and normalised after a reload. retryAt is the wall clock plus the time left, kept stable and recomputed only when
+       the wall clock moved. The sweep (every 2 s while a cooldown runs, or fixture.checksTick) clears a passed cooldown
+       and sends the waiting requests again (retryAt null), and after a wall-clock move stores the corrected end and sends
+       them again with the corrected retryAt. */
+    var cd = null; // {until, monoEnd, shown, moved}: the cooldown in this page, or null
+    var cdSweep = null;
+    function mono() { return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now(); }
+    function setCooldown(left) {
+      var until = Date.now() + left;
+      CK().cooldownUntil = until;
+      cd = { until: until, monoEnd: mono() + left, shown: until, moved: false };
+      ctx.save();
+      sweepSoon();
+    }
+    // The time left (ms), 0 when none; a saved end this page has not seen (a reload) is resumed, clamped to 60 s.
+    function cooldownLeft() {
+      var u = CK().cooldownUntil;
+      if (!u) { cd = null; return 0; }
+      if (!cd || cd.until !== u) {
+        var rest = Math.min(u - Date.now(), COOLDOWN_MS);
+        if (rest <= 0) { CK().cooldownUntil = 0; cd = null; ctx.save(); return 0; }
+        setCooldown(rest);
+      }
+      return Math.max(0, cd.monoEnd - mono());
+    }
+    function retryAt() {
+      var left = cooldownLeft();
+      if (!left) return null;
+      var expected = Date.now() + left;
+      if (Math.abs(cd.shown - expected) > 1000) { cd.shown = expected; cd.moved = true; }
+      return new Date(cd.shown).toISOString();
+    }
+    function emitWaiting() { Object.keys(CK().requests).forEach(function (k) { var q = CK().requests[k]; if (q.state === 'awaiting_user') emitChecks(q); }); }
+    // The sweep's look at the cooldown: true when it sent the waiting requests again.
+    function sweepCooldown() {
+      if (!CK().cooldownUntil) return false;
+      if (!cooldownLeft()) {
+        if (!CK().cooldownUntil) return false; // a passed end from before a reload: cleared, nothing shown counted down
+        CK().cooldownUntil = 0; cd = null; ctx.save();
+        emitWaiting();
+        return true;
+      }
+      retryAt();
+      if (!cd.moved) return false;
+      cd.moved = false;
+      CK().cooldownUntil = cd.shown; cd.until = cd.shown; ctx.save();
+      emitWaiting();
+      return true;
+    }
+    function sweepSoon() {
+      if (cdSweep) return;
+      cdSweep = setTimeout(function () {
+        cdSweep = null;
+        sweepCooldown();
+        if (CK().cooldownUntil) sweepSoon();
+      }, 2000);
+      if (cdSweep && cdSweep.unref) cdSweep.unref(); // never keeps a test process alive
+    }
     function reqOps(q) { var ops = CK().ops; return Object.keys(ops).map(function (k) { return ops[k]; }).filter(function (o) { return o.requestId === q.requestId; }).sort(function (x, y) { return x.n - y.n; }); }
     function allReqs(states) {
       var r = CK().requests;
@@ -845,9 +904,8 @@
     function checksRunning(t) { return taskReqs(t.taskId, ['running']).length > 0; }
     // A decline or cancel by the user (in the app, at UAC, Stop): cooldownUntil is saved with the state, so it survives a reload.
     function startCooldown() {
-      CK().cooldownUntil = Date.now() + COOLDOWN_MS;
-      ctx.save();
-      Object.keys(CK().requests).forEach(function (k) { var q = CK().requests[k]; if (q.state === 'awaiting_user') emitChecks(q); });
+      setCooldown(COOLDOWN_MS);
+      emitWaiting();
     }
     function expireChecks() {
       Object.keys(CK().requests).forEach(function (k) {
@@ -1115,9 +1173,14 @@
         return checksView(q);
       },
       'fixture.endCooldown': function () {
-        CK().cooldownUntil = 0;
-        Object.keys(CK().requests).forEach(function (k) { var q = CK().requests[k]; if (q.state === 'awaiting_user') emitChecks(q); });
+        CK().cooldownUntil = 0; cd = null;
+        emitWaiting();
         ctx.save(); return { retryAt: null };
+      },
+      // The status sweep's tick now (as the host's CheckRequestsTick): expiry, then the cooldown's end or a wall-clock move.
+      'fixture.checksTick': function () {
+        expireChecks();
+        return { sent: sweepCooldown(), retryAt: retryAt() };
       }
     };
 
@@ -1786,6 +1849,7 @@
       'fixture.finishChecks': checksMethods['fixture.finishChecks'],
       'fixture.expireChecks': checksMethods['fixture.expireChecks'],
       'fixture.endCooldown': checksMethods['fixture.endCooldown'],
+      'fixture.checksTick': checksMethods['fixture.checksTick'],
       'agent.stop': function (p) {
         var t = getTask(p.taskId);
         if (t.status === 'active') {

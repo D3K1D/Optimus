@@ -88,7 +88,9 @@
       else if (bad && d === 'not_eligible') err('not_eligible', 'Not available', 'updateKey', 'This account can’t use it here.');
       else if (bad && d === 'storage') { err('storage', 'Not saved', 'addKey', 'This PC didn’t let the app save the key. Try again.'); out.disconnect = false; }
       else if (bad && d === 'unavailable') err('busy', 'Busy', 'retry', 'The service didn’t answer. Try again in a moment.');
-      else if (bad) err('offline', 'Offline', 'retry', 'Can’t reach it. Check your internet and try again.');
+      else if (bad && d === 'network') err('offline', 'Offline', 'retry', 'Can’t reach it. Check your internet and try again.');
+      // design v87/v88: an error Optimus doesn't recognise, or with no reason: Not working (pill, panel, tile, chat answer).
+      else if (bad) err('unknown_error', 'Not working', 'retry', 'Something went wrong, and Optimus doesn’t know why. Try again, or pick another AI.');
       else { out.row = 'not_configured'; out.word = 'Not set up'; out.action = 'addKey'; out.disconnect = false; }
     } else if (isMcp(kind)) {
       var ms = e.status, md = e.detail;
@@ -524,8 +526,8 @@
   //   tile 'claude': cs is shell.clientStatus (undefined: not checked yet), st its connectionState row.
   //   other tiles:   st only (ChatGPT, API keys): the m3 §9 rows from connectionState.
   // Rows with no designed word (busy, a sign-in that was cancelled, timed out or not saved, not set up) show none.
-  var PLAN_WORD = { auth: 'Signed out', quota: 'Limit reached', not_eligible: 'Not available for this account', offline: 'Offline' };
-  var KEY_WORD = { auth: 'Key rejected', quota: 'No credit', not_eligible: 'Not available for this account', offline: 'Offline' };
+  var PLAN_WORD = { auth: 'Signed out', quota: 'Limit reached', not_eligible: 'Not available for this account', offline: 'Offline', unknown_error: 'Not working' };
+  var KEY_WORD = { auth: 'Key rejected', quota: 'No credit', not_eligible: 'Not available for this account', offline: 'Offline', unknown_error: 'Not working' };
   function tileStatus(tile, cs, st) {
     var row = st && st.row;
     if (row === 'connected' || row === 'paired' || row === 'active' || row === 'client_closed') return 'Connected';
@@ -551,11 +553,12 @@
   //   auth (the saved sign-in was rejected)                       → signedout     “Signed out of ChatGPT” [Sign in]
   //   quota                                                       → limit         “ChatGPT plan limit reached”, no button
   //   not_eligible                                                → notavailable  “Not available for this account”, no button
+  //   unknown_error (an error Optimus doesn't recognise)          → unknown       “Not working” [Try again] (failed's button and note)
   //   callback_timeout, cancelled, storage, busy (unavailable),
   //   offline (network)                                           → failed        “Sign-in didn’t finish” [Try again]
   //   not_configured, unknown, no row                             → new           “Sign in with ChatGPT” [Sign in]
   var CHATGPT_FAILED = { callback_timeout: 1, cancelled: 1, storage: 1, busy: 1, offline: 1 };
-  var CHATGPT_ROW = { auth: 'signedout', quota: 'limit', not_eligible: 'notavailable' };
+  var CHATGPT_ROW = { auth: 'signedout', quota: 'limit', not_eligible: 'notavailable', unknown_error: 'unknown' };
   function chatgptState(st, signing) {
     var row = st && st.row;
     if (row === 'connected') return 'signedin';
@@ -589,46 +592,57 @@
     return gs === 'signingin' ? 'waiting' : CHATGPT_NO_PRIMARY[gs] ? 'none' : null;
   }
 
-  /* ---------- design v73 (PillPanelStates): the AI pill panel's state ---------- */
-  // One of the design's twelve states for a connection. s: connectionState's input; working: a run is going on the
-  // active task. → { state, code?, own?, detail?, hint?, primary?, tone? }.
-  // A row the design has no state for keeps its own word, hint and action (own:true): detail, hint (null = none),
-  // primary (the button's name, null = none) and tone override the nearest state's, inside its layout.
-  //   local / later                                       → local
-  //   a run going (working), MCP active                   → live
-  //   connected                                           → connected      (not_saved: + its hint, own)
-  //   API not_configured                                  → nokey
-  //   API error auth                                      → badkey
-  //   ChatGPT not_configured, auth, cancelled; MCP signed_out → signedout
-  //   error network                                       → offline
-  //   error unavailable (API, ChatGPT)                    → busy
-  //   MCP pending (+ code)                                → pairing
-  //   MCP paired                                          → paired
-  //   MCP waiting never_seen                              → setup
-  //   MCP waiting idle / pairing_expired / denied         → manual
-  //   own: checking, no entry yet, Reconnecting…, quota, not_eligible, storage, callback_timeout, MCP client_closed,
-  //        bridge_rejected (manual's layout, “Setup issue”), error unavailable (outdated / blocked: “Can’t run”).
-  var PANEL_ACTION = { addKey: 'Add key', updateKey: 'Update key', retry: 'Retry', signIn: 'Sign in', install: 'Set up', start: 'Start', approve: 'Approve', activity: 'Activity', askAgain: 'Activity' };
-  var PANEL_TONE = { connected: 'ok', live: 'live', expired: 'warn', local: 'muted' };
-  var PANEL_ROW = { connected: 'connected', offline: 'offline', busy: 'busy', pending: 'pairing', paired: 'paired', active: 'live', signed_out: 'signedout', not_set_up: 'setup', waiting: 'manual' };
+  /* ---------- design v86 (PillPanelStates): the AI pill panel's state, which the toolbar pill shows too ---------- */
+  // The one mapping from a connection (contracts m3-agent.md §9, m5-chat.md §1) to the design's AIPillPanel state; the
+  // toolbar pill's word is the panel's status word for it (components.js pillStatus). s: connectionState's input;
+  // working: a run is going on the active task. → { state, kind?, notSaved?, code?, activity? }
+  //   kind: the design's per-kind words: 'claude' (Claude Code) | 'chatgpt' | 'api' (Anthropic / OpenAI key).
+  //   local / later (also while reconnecting)                          → local
+  //   any kind: backend connection lost                                → reconnecting
+  //   a run going (headless Claude, in-app API / ChatGPT); MCP active  → live
+  //   no entry yet; API / ChatGPT checking                             → checking
+  //   connected (API, ChatGPT, MCP headless)                           → connected (detail not_saved: notSaved)
+  //   ChatGPT not_configured, error cancelled                          → signin
+  //   ChatGPT error auth; MCP error signed_out                         → signedout
+  //   ChatGPT error callback_timeout                                   → notfinished
+  //   API / ChatGPT error storage                                      → notsaved
+  //   ChatGPT error quota                                              → limit
+  //   API error quota                                                  → nocredit
+  //   API / ChatGPT error not_eligible                                 → noteligible
+  //   MCP waiting never_seen                                           → setup
+  //   MCP error unavailable (outdated or blocked CLI)                  → cantrun
+  //   API not_configured                                               → nokey
+  //   API error auth                                                   → badkey
+  //   API / ChatGPT error network                                      → offline
+  //   API / ChatGPT error unavailable                                  → busy
+  //   API / ChatGPT error with another or no detail (v87)              → unknown
+  //   MCP pending (+ code)                                             → pairing
+  //   MCP paired                                                       → paired
+  //   MCP waiting idle, error pairing_expired / denied                 → manual
+  //   MCP error bridge_rejected                                        → rejected
+  //   MCP client_closed                                                → closed (activity: a task is open)
+  // Outside the contracts: an MCP entry with another status or error detail → manual (design v87: “Not connected yet”).
+  var PANEL_KIND = { claude_code_mcp: 'claude', chatgpt_plan: 'chatgpt' };
+  var PANEL_ROW = {
+    connected: 'connected', checking: 'checking', unknown: 'checking', storage: 'notsaved', not_eligible: 'noteligible',
+    offline: 'offline', busy: 'busy', pending: 'pairing', paired: 'paired', active: 'live', signed_out: 'signedout',
+    not_set_up: 'setup', unavailable: 'cantrun', waiting: 'manual', bridge_rejected: 'rejected', client_closed: 'closed',
+    callback_timeout: 'notfinished', cancelled: 'signin', unknown_error: 'unknown'
+  };
+  var PANEL_ROW_PLAN = { not_configured: 'signin', auth: 'signedout', quota: 'limit' };
+  var PANEL_ROW_KEY = { not_configured: 'nokey', auth: 'badkey', quota: 'nocredit' };
   function pillPanelState(s, working) {
-    var st = connectionState(s), kind = s.local ? null : s.kind;
+    var kind = s.local ? null : s.kind;
     if (!kind) return { state: 'local' };
-    var own = function (base, x) {
-      return Object.assign({ state: base || 'connected', own: true, detail: st.word, hint: st.hint || null,
-        primary: st.action === 'askAgain' && !s.task ? null : PANEL_ACTION[st.action] || null, tone: PANEL_TONE[st.tone] || 'muted' }, x || {});
-    };
-    if (s.backend === 'reconnecting') return own(null, { primary: null });
-    if (working) return { state: 'live' };
-    var row = st.row, plan = kind === 'chatgpt_plan';
-    if (row === 'connected') return st.hint ? own('connected') : { state: 'connected' };
-    if (row === 'not_configured') return { state: plan ? 'signedout' : 'nokey' };
-    if (row === 'auth') return { state: plan ? 'signedout' : 'badkey' };
-    if (row === 'cancelled') return { state: 'signedout' };
-    if (row === 'pending') return { state: 'pairing', code: (s.entry && s.entry.code) || null };
-    if (row === 'bridge_rejected') return own('manual', { hint: undefined, primary: undefined, tone: 'warn' });
-    if (PANEL_ROW[row]) return { state: PANEL_ROW[row] };
-    return own(null);
+    var out = { state: 'connected', kind: PANEL_KIND[kind] || 'api' };
+    if (s.backend === 'reconnecting') { out.state = 'reconnecting'; return out; }
+    if (working) { out.state = 'live'; return out; }
+    var row = connectionState(s).row, e = s.entry || {};
+    out.state = (out.kind === 'chatgpt' ? PANEL_ROW_PLAN[row] : out.kind === 'api' ? PANEL_ROW_KEY[row] : null) || PANEL_ROW[row] || 'manual';
+    if (out.state === 'connected' && e.status === 'connected' && e.detail === 'not_saved') out.notSaved = true;
+    if (out.state === 'pairing') out.code = e.code || null;
+    if (out.state === 'closed') out.activity = !!s.task;
+    return out;
   }
   // design v70 (PermissionsStep skipNote): the “change these settings any time from the AI pill” note shows only the first
   // time the page is finished (the save that sets set:true, in onboarding or a first connect). A record already set (the

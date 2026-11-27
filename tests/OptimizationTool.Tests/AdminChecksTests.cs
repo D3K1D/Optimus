@@ -521,11 +521,14 @@ public sealed class AdminChecksTests
         Assert.Equal("cooldown", (await r.C.Fails("checks.approve", new JsonObject { ["idempotencyKey"] = "c", ["requestId"] = next, ["revision"] = 1 })).ErrorData.Str("reason"));
     }
 
-    /// <summary>The system clocks, with a wall clock the test can move (a user changing the time); the monotonic clock is untouched.</summary>
+    /// <summary>The system clocks, with a wall clock the test can move (a user changing the time); the monotonic clock only runs
+    /// ahead when a test sets <see cref="Ahead"/> (time passing without waiting for it).</summary>
     private sealed class MovableClock : TimeProvider
     {
         public TimeSpan Offset;
+        public TimeSpan Ahead;
         public override DateTimeOffset GetUtcNow() => System.GetUtcNow() + Offset;
+        public override long GetTimestamp() => System.GetTimestamp() + (long)(Ahead.TotalSeconds * TimestampFrequency);
     }
 
     /// <summary>A new task asks for a check: its request's retryAt (null: no cooldown) and whether checks.approve is refused cooldown.</summary>
@@ -603,6 +606,72 @@ public sealed class AdminChecksTests
         var view = (await c.WaitForEvent(e => e.Str("type") == AgentService.ChecksEvent && e["payload"].Str("requestId") == next))["payload"]!;
         Assert.True(DateTimeOffset.Parse(view.Str("retryAt"), System.Globalization.CultureInfo.InvariantCulture) > DateTimeOffset.UtcNow.AddSeconds(30));
         Assert.Equal("cooldown", (await c.Fails("checks.approve", new JsonObject { ["idempotencyKey"] = "r", ["requestId"] = next, ["revision"] = 1 })).ErrorData.Str("reason"));
+    }
+
+    /// <summary>A new task's request waiting out the cooldown: its id and the retryAt its first agent.checks showed.</summary>
+    private static async Task<(string RequestId, DateTimeOffset RetryAt)> Waiting(Rig r)
+    {
+        var taskId = (await AgentSetup.StartTask(r.C, r.ReportId, grant: AdminGrant())).Str("taskId");
+        var op = await r.Agent.CallToolAsync(taskId, "run_diagnostic", new JsonObject { ["diagnosticId"] = Defender }, "in_app", null, default);
+        var requestId = RequestOf(r, op.Str("operationId"));
+        var view = (await r.C.WaitForEvent(e => e.Str("type") == AgentService.ChecksEvent && e["payload"].Str("requestId") == requestId))["payload"]!;
+        return (requestId, ParseAt(view.Str("retryAt")!));
+    }
+
+    private static DateTimeOffset ParseAt(string s) => DateTimeOffset.Parse(s, System.Globalization.CultureInfo.InvariantCulture);
+
+    private static List<JsonNode> ViewsOf(Rig r, string requestId) =>
+        [.. r.C.Events.Where(e => e.Str("type") == AgentService.ChecksEvent && e["payload"].Str("requestId") == requestId).Select(e => e["payload"]!)];
+
+    [Fact]
+    public async Task TheCooldownsEnd_SendsTheWaitingRequestsAgain_WithRetryAtNull_AndTheSweepDeletesTheStoredEnd()
+    {
+        var clock = new MovableClock();
+        await using var r = await Start(time: clock);
+        await Decline(r);
+        var (requestId, _) = await Waiting(r);
+        string? Stored() => r.Store.Read(db => Settings.Get(db, AgentService.CooldownSetting)?.GetValue<string>());
+        Assert.NotNull(Stored());
+
+        r.Agent.CheckRequestsTick(); // still cooling, the clock unmoved: nothing is sent again
+        Assert.Single(ViewsOf(r, requestId));
+        Assert.NotNull(Stored());
+
+        clock.Ahead = TimeSpan.FromSeconds(61); // the 60 s pass on the monotonic clock
+        r.Agent.CheckRequestsTick();
+        var again = await r.C.WaitForEvent(e => e.Str("type") == AgentService.ChecksEvent && e["payload"].Str("requestId") == requestId && e["payload"]!["retryAt"] is null);
+        Assert.Equal("awaiting_user", again["payload"].Str("state"));
+        Assert.Null(Stored()); // deleted once passed: a later clock rollback can't bring it back
+        r.Agent.CheckRequestsTick(); // once only
+        await Task.Delay(300);
+        Assert.Equal(2, ViewsOf(r, requestId).Count);
+    }
+
+    [Fact]
+    public async Task AWallClockMove_SendsTheWaitingRequestsAgain_WithTheCorrectedRetryAt_AndStoresTheCorrectedEnd()
+    {
+        var clock = new MovableClock();
+        await using var r = await Start(time: clock);
+        await Decline(r);
+        var (requestId, shown) = await Waiting(r);
+
+        clock.Offset = TimeSpan.FromDays(-1); // the clock is set back a day: the countdown shown would say a day and a minute
+        r.Agent.CheckRequestsTick();
+        var corrected = (await r.C.WaitForEvent(e => e.Str("type") == AgentService.ChecksEvent && e["payload"].Str("requestId") == requestId
+            && e["payload"].Str("retryAt") is { } at && at != Time.Format(shown)))["payload"]!;
+        var retryAt = ParseAt(corrected.Str("retryAt")!);
+        var now = clock.GetUtcNow();
+        Assert.InRange(retryAt, now.AddSeconds(30), now.AddSeconds(61));
+        Assert.InRange(shown - retryAt, TimeSpan.FromDays(1) - TimeSpan.FromSeconds(5), TimeSpan.FromDays(1) + TimeSpan.FromSeconds(5));
+        var stored = ParseAt(r.Store.Read(db => Settings.Get(db, AgentService.CooldownSetting)!.GetValue<string>()));
+        Assert.Equal(retryAt, stored);
+
+        r.Agent.CheckRequestsTick(); // nothing moved since: not sent again
+        await Task.Delay(300);
+        Assert.Equal(2, ViewsOf(r, requestId).Count);
+        // A refused approve shows the same corrected retryAt.
+        var refused = await r.C.Fails("checks.approve", new JsonObject { ["idempotencyKey"] = "m", ["requestId"] = requestId, ["revision"] = 1 });
+        Assert.Equal(corrected.Str("retryAt"), refused.ErrorData.Str("retryAt"));
     }
 
     [Fact]

@@ -164,7 +164,7 @@ public sealed partial class ClientConnector
         }
 
         // The installer has its own one-at-a-time gate so its confirm dialog does not block status checks.
-        // Status checks queue instead (the chooser asks about both clients at once); a change while another runs is refused.
+        // Status checks queue instead (several can arrive at once); a change while another runs is refused.
         var gate = method is InstallMethod or OpenMethod or SignInMethod ? _installGate : _gate;
         if (method == StatusMethod) await gate.WaitAsync(ct);
         else if (!await gate.WaitAsync(0, ct))

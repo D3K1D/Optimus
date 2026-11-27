@@ -57,6 +57,7 @@ export async function startFullApp(o = {}) {
   const calls = [], toasts = [];
   let gate = null, held = [], holdPred = null;
   const listeners = [], stateListeners = [];
+  inner.onState((st, info) => stateListeners.forEach((f) => f(st, info)));
   inner.onEvent((ev) => {
     if (holdPred && holdPred(ev)) { held.push(ev); return; }
     listeners.forEach((f) => f(ev));
@@ -64,7 +65,7 @@ export async function startFullApp(o = {}) {
   const backend = {
     kind: 'fixture', state: () => inner.state(), detail: () => (inner.detail ? inner.detail() : null),
     onEvent: (f) => { listeners.push(f); return () => { const i = listeners.indexOf(f); if (i >= 0) listeners.splice(i, 1); }; },
-    onState: (f) => { stateListeners.push(f); return inner.onState(f); },
+    onState: (f) => { stateListeners.push(f); return () => { const i = stateListeners.indexOf(f); if (i >= 0) stateListeners.splice(i, 1); }; },
     call(method, params) {
       const rec = { method, params: params || {} };
       calls.push(rec);
@@ -73,7 +74,7 @@ export async function startFullApp(o = {}) {
       return p.then((r) => { rec.result = r; return r; }, (e) => { rec.error = e; throw e; });
     }
   };
-  const R = createMiniReact(), OT = load(R);
+  let R = createMiniReact(), OT = load(R);
   let tree = null;
   const renderOnce = () => {
     tree = R.render(() => R.React.createElement(OT.AppFlow, { backend }));
@@ -110,7 +111,13 @@ export async function startFullApp(o = {}) {
       while (Date.now() < end) { await settle(15); if (pred()) return; }
       assert.fail('timed out waiting for ' + what);
     },
-    async click(b) { click(b); await settle(); }
+    async click(b) { click(b); await settle(); },
+    // The window reloaded: a fresh AppFlow (new page state, empty storage) on the same host; the old page hears nothing more.
+    async reload() {
+      listeners.length = 0; stateListeners.length = 0;
+      R = createMiniReact(); OT = load(R); app.OT = OT;
+      await settle(200);
+    }
   };
   // Claude Code chosen and signed in (headless in the app): the deck with Fix for me on its cards.
   await app.until(() => !!app.reportCardId() && !!button(app.card(app.reportCardId()), 'Fix for me'), 'the deck with Fix for me');

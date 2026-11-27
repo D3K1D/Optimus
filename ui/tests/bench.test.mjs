@@ -50,8 +50,8 @@ test('observation and reason words; missing sensors', () => {
 
 test('share text: three lines, (partial), model names only', () => {
   const result = { score: 11382, partial: false, parts: [{ part: 'ram', score: 982 }, { part: 'cpu', score: 1045 }, { part: 'disk', score: 812 }, { part: 'gpu', score: 2014 }] };
-  const dev = { cpu: 'Ryzen 7 7700', gpu: 'GeForce RTX 4060 Ti', ram: '32 GB DDR5-5600', disk: 'C: · NVMe SSD' };
-  assert.equal(B.shareText(result, dev), 'Optimus benchmark: 11,382\nCPU 1,045 · GPU 2,014 · RAM 982 · Disk 812\nRyzen 7 7700 · GeForce RTX 4060 Ti · 32 GB DDR5-5600');
+  const dev = { cpu: '8-core desktop CPU', gpu: '12 GB graphics card', ram: '32 GB memory', disk: 'C: · 1 TB NVMe SSD' };
+  assert.equal(B.shareText(result, dev), 'Optimus benchmark: 11,382\nCPU 1,045 · GPU 2,014 · RAM 982 · Disk 812\n8-core desktop CPU · 12 GB graphics card · 32 GB memory');
   const partial = Object.assign({}, result, { partial: true, parts: result.parts.map((p) => (p.part === 'disk' ? { part: 'disk', score: null } : p)) });
   const lines = B.shareText(partial, dev).split('\n');
   assert.equal(lines.length, 3);

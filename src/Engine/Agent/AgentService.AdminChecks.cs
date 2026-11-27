@@ -81,10 +81,16 @@ public sealed partial class AgentService
         var expected = Now() + left;
         lock (_gate)
         {
-            if ((_cooldownRetryAt - expected).Duration() > TimeSpan.FromSeconds(1)) _cooldownRetryAt = expected;
+            if ((_cooldownRetryAt - expected).Duration() > TimeSpan.FromSeconds(1))
+            {
+                _cooldownRetryAt = expected;
+                _cooldownMoved = true; // the views shown so far carry the old retryAt: the status sweep sends them again
+            }
             return _cooldownRetryAt;
         }
     }
+
+    private bool _cooldownMoved; // retryAt was recomputed (the wall clock moved) since the waiting views were last sent. Guarded by _gate.
 
     private string? RetryAt() => CooldownUntil() is { } until ? Time.Format(until) : null;
 
@@ -101,18 +107,42 @@ public sealed partial class AgentService
             // GetElapsedTime(now, end) == left: the end as a timestamp of this process's monotonic clock.
             _cooldownEnd = _time.GetTimestamp() + (long)(left.TotalSeconds * _time.TimestampFrequency);
             _cooldownRetryAt = until;
+            _cooldownMoved = false;
         }
     }
 
-    /// <summary>Once the cooldown has passed, its stored end is cleared (it can't come back after a clock rollback).</summary>
-    private void ClearPassedCooldown(Db db)
+    /// <summary>
+    /// The status sweep's look at the cooldown. Once it has passed, its stored end is cleared (it can't come back after a
+    /// clock rollback) and the waiting requests are sent again with retryAt null. While it runs, a wall clock that moved
+    /// (retryAt recomputed, here or by any read since) stores the corrected end and sends the waiting requests again with
+    /// the corrected retryAt, so a countdown already shown is corrected.
+    /// </summary>
+    private void SweepCooldown(Db db)
     {
+        bool passed;
         lock (_gate)
         {
-            if (_cooldownEnd == 0 || _time.GetElapsedTime(_time.GetTimestamp(), _cooldownEnd) > TimeSpan.Zero) return;
-            _cooldownEnd = 0;
+            if (_cooldownEnd == 0) return;
+            passed = _time.GetElapsedTime(_time.GetTimestamp(), _cooldownEnd) <= TimeSpan.Zero;
+            if (passed)
+            {
+                _cooldownEnd = 0;
+                _cooldownMoved = false;
+            }
         }
-        db.Exec("DELETE FROM settings WHERE key = $k", ("$k", CooldownSetting));
+        if (passed) db.Exec("DELETE FROM settings WHERE key = $k", ("$k", CooldownSetting));
+        else
+        {
+            if (CooldownUntil() is not { } until) return; // ended between the two reads: the next tick clears it
+            lock (_gate)
+            {
+                if (!_cooldownMoved) return;
+                _cooldownMoved = false;
+            }
+            Settings.Set(db, CooldownSetting, Time.Format(until));
+        }
+        foreach (var waiting in db.Query($"SELECT {RequestColumns} FROM check_requests WHERE state = 'awaiting_user'", RequestRow))
+            EmitChecks(db, waiting);
     }
 
     /// <summary>
@@ -153,11 +183,11 @@ public sealed partial class AgentService
             EndRequest(db, q, "expired", null, _ => ("expired", null));
     }
 
-    /// <summary>The status sweep's tick (every 2 s): expiry, and a cooldown that has passed is cleared.</summary>
-    private void CheckRequestsTick() => _store.Write(db =>
+    /// <summary>The status sweep's tick (every 2 s): expiry, and the cooldown's end or a wall-clock move re-sends the waiting requests.</summary>
+    internal void CheckRequestsTick() => _store.Write(db =>
     {
         ExpireDueChecks(db);
-        ClearPassedCooldown(db);
+        SweepCooldown(db);
     });
 
     /// <summary>

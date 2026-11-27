@@ -361,7 +361,7 @@
   }
 
   // Tile status words that need attention (shown with an alert mark).
-  var PROVIDER_WARN = ['Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not available for this account'];
+  var PROVIDER_WARN = ['Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not working', 'Not available for this account'];
   function ProviderOption(p) {
     var sel = !!p.selected;
     return h('button', {
@@ -1108,8 +1108,8 @@
       h(Button, { variant: 'ghost', size: 'sm', icon: copied ? 'check' : 'file', onClick: copy }, copied ? 'Copied' : 'Copy'));
   }
 
-  // Design PairingCard (v51): an outside Claude Code window asks to pair; its code must match. App addition: `busy`
-  // (the answer is on its way) disables both buttons.
+  // Design PairingCard (v86): an outside Claude Code window asks to pair; its code must match. `busy` (the answer is on
+  // its way) disables both buttons and Pair reads “Pairing…”. Not shown while the pill's panel shows pairing (app-flow).
   function PairingCard(p) {
     var code = String(p.code || '').split('');
     return h(GlassPanel, { strong: true, className: cx('ot-pair', p.className), role: 'dialog', 'aria-labelledby': 'ot-pair-t' },
@@ -1120,8 +1120,8 @@
         h('span', { className: 'ot-pair-digits', role: 'text', 'aria-labelledby': 'ot-pair-l', 'aria-label': 'Code ' + code.join(' ') },
           code.map(function (c, i) { return h('span', { key: i, className: 'ot-pair-digit', 'aria-hidden': true }, c); }))),
       h('div', { className: 'ot-login-actions' },
-        h(Button, { variant: 'ghost', disabled: !!p.busy, onClick: p.onCancel }, 'Not now'),
-        h(Button, { variant: 'primary', disabled: !!p.busy, onClick: p.onPair }, 'Pair')));
+        h(Button, { variant: 'ghost', disabled: !!p.busy, onClick: p.onCancel }, 'Deny'),
+        h(Button, { variant: 'primary', disabled: !!p.busy, onClick: p.onPair }, p.busy ? 'Pairing…' : 'Pair')));
   }
 
   // Picker tile → provider kind (the mapping and its tests live in connection-state.js, loaded after this file).
@@ -1181,6 +1181,8 @@
     new: { title: 'Sign in with ChatGPT', action: 'Sign in', note: 'Opens your browser.' },
     signingin: { title: 'Sign in with ChatGPT', action: 'Signing in…', busy: true, note: 'Finish signing in in your browser.' },
     failed: { title: 'Sign-in didn’t finish', action: 'Try again', warn: true, note: 'Opens your browser.' },
+    // designer (v87): an error Optimus doesn't recognise says Not working; the rest is failed's.
+    unknown: { title: 'Not working', action: 'Try again', warn: true, note: 'Opens your browser.' },
     signedout: { title: 'Signed out of ChatGPT', action: 'Sign in', warn: true, note: 'Sign in again to keep using it.' },
     limit: { title: 'ChatGPT plan limit reached', action: null, warn: true, note: 'Try again later, or choose another AI.' },
     notavailable: { title: 'Not available for this account', action: null, warn: true, note: 'Choose another AI.' }
@@ -2097,40 +2099,63 @@
         h(Button, { variant: 'primary', iconRight: 'chevron', disabled: !p.done, onClick: p.onContinue }, 'Continue')));
   }
 
-  /* Design AIPillPanel (v73, PillPanelStates): one status per state. Head: the dot, the AI's name and a status word;
-     then an optional grey hint; for pairing the code with its “Code” label; for manual the command with Copy and a grey
-     line after it; the actions: Change and Permissions (secondary), the state's extra, then its one primary at the right;
-     Disconnect as a small text button on its own row, which asks first, in place: “Sign <AI> out of Optimus? …”
-     [Cancel] [Disconnect]. Hidden for Local only and while something runs (`busy` or live). `onAction(name)` gets the
-     button's name (Local only's Connect an AI calls onChange, as in the design).
-     App additions (no designed place): `hint`, `primary` and `tone` override the state's (undefined keeps the design's,
-     null drops it) for a connection the design has no state for (connection-state.js pillPanelState own); Change and
-     Permissions show only with their handlers; `onCopy` may return a promise (Copied once it resolves); `onDisconnect`
-     may return a promise: Disconnect is sent once and waits for it (it comes back if the disconnect fails). */
+  /* Design AIPillPanel (v86, PillPanelStates): one status per state. Head: the dot, the AI's name and a status word;
+     then an optional grey hint (per AI `kind` where the design words differ; connected + `notSaved` has its own); for
+     pairing the code with its “Code” label; for manual and rejected the command with Copy and a grey line after it; the
+     actions: Change and Permissions (secondary), the state's extra, then its one primary at the right; Disconnect as a
+     small text button on its own row, which asks first, in place: “Sign <AI> out of Optimus? …” [Cancel] [Disconnect].
+     Hidden where the state says so and while something runs (`busy`). `onAction(name)` gets the button's name
+     (pairing's Pair sends 'Approve'; `pairBusy` disables Pair and Deny and Pair reads “Pairing…”; Local only's
+     Connect an AI calls onChange, as in the design). The toolbar pill shows the same word (pillStatus).
+     App additions (no designed place): closed + `activity` (a task is open) has Activity as its primary (design table:
+     “Activity only if a task is open”); Change and Permissions show only with their handlers; `onCopy` may return a
+     promise (Copied once it resolves); `onDisconnect` may return a promise: Disconnect is sent once and waits for it
+     (it comes back if the disconnect fails). */
+  // hint / primary may be per AI kind: { chatgpt, api } (api is the fallback).
   var PILL_STATES = {
     connected: { tone: 'ok', word: 'Connected' },
     live: { tone: 'live', word: 'Working…', primary: 'Activity', extra: 'Stop', noDisconnect: true, noChange: true },
+    checking: { tone: 'muted', word: 'Checking…', noDisconnect: true },
+    reconnecting: { tone: 'muted', word: 'Reconnecting…', hint: 'Optimus is reconnecting to its background service.', noChange: true, noPermissions: true, noDisconnect: true },
+    signin: { tone: 'warn', word: 'Not signed in', primary: 'Sign in', noDisconnect: true },
     signedout: { tone: 'warn', word: 'Signed out', primary: 'Sign in' },
-    setup: { tone: 'warn', word: 'Not set up', hint: 'Claude Code isn’t installed or can’t start on this PC.', primary: 'Set up' },
-    nokey: { tone: 'warn', word: 'Needs a key', primary: 'Add key' },
+    notfinished: { tone: 'warn', word: 'Sign-in didn’t finish', hint: 'The browser didn’t come back to Optimus. Try again, or pick another AI.', primary: 'Sign in', noDisconnect: true },
+    notsaved: { tone: 'warn', word: 'Not saved', hint: { chatgpt: 'You signed in, but this PC didn’t let Optimus save it. Try again.', api: 'This PC didn’t let Optimus save the key. Try again.' }, primary: { chatgpt: 'Sign in', api: 'Add key' }, noDisconnect: true },
+    limit: { tone: 'warn', word: 'Limit reached', hint: 'Your ChatGPT plan’s limit is used up for now. Try again later.', primary: 'Retry' },
+    nocredit: { tone: 'warn', word: 'No credit', hint: 'This account has no credit left. Add credit, or use another key.', primary: 'Update key' },
+    noteligible: { tone: 'warn', word: 'Not available', hint: { chatgpt: 'This ChatGPT account can’t be used here. Sign in with another account, or pick another AI.', api: 'This account can’t use it here. Use another key, or pick another AI.' }, primary: { chatgpt: 'Sign in', api: 'Update key' } },
+    setup: { tone: 'warn', word: 'Not set up', hint: 'Claude Code isn’t installed or can’t start on this PC.', primary: 'Set up', noDisconnect: true },
+    cantrun: { tone: 'warn', word: 'Can’t run', hint: 'This Claude Code is too old or blocked on this PC. Update it, or pick another AI.', primary: 'Set up', noDisconnect: true },
+    nokey: { tone: 'warn', word: 'Needs a key', primary: 'Add key', noDisconnect: true },
     badkey: { tone: 'warn', word: 'Key rejected', hint: 'The key was turned down. Check it and add it again.', primary: 'Update key' },
     offline: { tone: 'warn', word: 'Can’t reach it', hint: 'Check your internet connection.', primary: 'Retry' },
     busy: { tone: 'warn', word: 'Busy right now', hint: 'Try again in a minute.', primary: 'Retry' },
-    pairing: { tone: 'live', word: 'Wants to pair', hint: 'Check this code matches the one in Claude Code’s window.', primary: 'Approve', extra: 'Deny', code: true },
+    unknown: { tone: 'warn', word: 'Not working', hint: 'Something went wrong, and Optimus doesn’t know why. Try again, or pick another AI.', primary: 'Retry' },
+    pairing: { tone: 'live', word: 'Wants to pair', hint: 'Check this code matches the one in Claude Code’s window.', primary: 'Pair', primaryKey: 'Approve', extra: 'Deny', code: true },
     paired: { tone: 'ok', word: 'Paired', hint: 'Claude Code can now work in its own window.', primary: 'Start' },
-    manual: { tone: 'warn', word: 'Not added yet', hint: 'Run this in a terminal to add Optimus to Claude Code:', command: true, after: 'Then run claude mcp list to check.', primary: 'Check again' },
+    manual: { tone: 'warn', word: 'Not connected yet', hint: 'To add Optimus to Claude Code, run this in a terminal:', command: true, after: 'Then run claude mcp list to check.', primary: 'Check again' },
+    rejected: { tone: 'warn', word: 'Couldn’t connect', hint: 'Claude Code turned the connection down. Add Optimus again by running this in a terminal:', command: true, after: 'Then run claude mcp list to check.', primary: 'Check again' },
+    closed: { tone: 'warn', word: 'Window closed', hint: 'The Claude Code window was closed. Open Claude Code and ask it again.' },
     local: { tone: 'muted', word: 'No AI connected', primary: 'Connect an AI', noPermissions: true, noDisconnect: true, noChange: true }
   };
+  var PILL_NOT_SAVED = { chatgpt: 'Works now, but this PC didn’t save your sign-in. You’ll sign in again next time.', api: 'Works now, but this PC didn’t save the key. You’ll add it again next time.' };
+  function pillPick(v, kind) { return v && typeof v === 'object' ? (v[kind] || v.api) : v; }
+  // The toolbar pill: the same word as the panel's status. Local only has no word.
+  function pillStatus(state) {
+    if (state === 'local') return { status: 'local', detail: null };
+    var st = PILL_STATES[state] || PILL_STATES.connected;
+    return { status: st.tone === 'ok' ? 'connected' : st.tone === 'live' ? 'live' : st.tone === 'muted' ? 'local' : 'expired', detail: st.word };
+  }
   function AIPillPanel(p) {
     var c = React.useState(!!p.confirming), confirm = c[0], setConfirm = c[1];
     var b = React.useState(false), sending = b[0], setSending = b[1];
     var cp = React.useState(false), copied = cp[0], setCopied = cp[1];
     var sent = React.useRef(false), moved = React.useRef(false), confirmRef = React.useRef(null), offRef = React.useRef(null);
     var st = PILL_STATES[p.state] || PILL_STATES.connected;
+    var hint = p.notSaved && p.state === 'connected' ? pillPick(PILL_NOT_SAVED, p.kind) : pillPick(st.hint, p.kind), primary = pillPick(st.primary, p.kind);
+    if (p.state === 'closed' && p.activity) primary = 'Activity';
     var who = p.state === 'local' ? 'Local only' : (p.provider || 'Claude');
-    var hint = p.hint === undefined ? st.hint : p.hint, primary = p.primary === undefined ? st.primary : p.primary;
-    var extra = p.primary === undefined ? st.extra : null, tone = p.tone || st.tone;
-    var canDisconnect = !!p.onDisconnect && !st.noDisconnect && !p.busy;
+    var canDisconnect = !!p.onDisconnect && !st.noDisconnect && !p.busy, pairBusy = !!(st.code && p.pairBusy);
     // Focus follows the swap: Cancel when the question opens, Disconnect again after Cancel.
     React.useEffect(function () {
       if (!moved.current) { moved.current = true; return; }
@@ -2148,7 +2173,7 @@
     var digits = String(p.code || '').split('');
     return h(GlassPanel, { strong: true, className: cx('ot-pillpanel', p.className), role: 'dialog', 'aria-label': who },
       h('div', { className: 'ot-pillpanel-head' },
-        h('span', { className: cx('ot-pill-dot', 'is-' + tone), 'aria-hidden': true }),
+        h('span', { className: cx('ot-pill-dot', 'is-' + st.tone), 'aria-hidden': true }),
         h('span', { className: 'text-headline' }, who),
         h('span', { className: 'text-mono-sm ot-muted' }, p.detail || st.word)),
       hint && h('p', { className: 'text-callout ot-muted ot-pillpanel-hint' }, hint),
@@ -2169,17 +2194,17 @@
           h('div', { key: 'a', className: 'ot-pillpanel-actions' },
             !st.noChange && p.onChange && h(Button, { variant: 'neu', size: 'sm', icon: 'repeat', 'aria-label': 'Change AI', onClick: p.onChange }, 'Change'),
             !st.noPermissions && p.onPermissions && h(Button, { variant: 'neu', size: 'sm', icon: 'sliders', onClick: p.onPermissions }, 'Permissions'),
-            extra && h(Button, { variant: 'neu', size: 'sm', icon: extra === 'Stop' ? 'stop' : 'close', onClick: act(extra) }, extra),
-            primary && h(Button, { variant: 'primary', size: 'sm', className: 'ot-pillpanel-primary', onClick: primary === 'Connect an AI' ? p.onChange : act(primary) }, primary)),
+            st.extra && h(Button, { variant: 'neu', size: 'sm', icon: st.extra === 'Stop' ? 'stop' : 'close', disabled: pairBusy, onClick: act(st.extra) }, st.extra),
+            primary && h(Button, { variant: 'primary', size: 'sm', className: 'ot-pillpanel-primary', disabled: pairBusy, onClick: primary === 'Connect an AI' ? p.onChange : act(st.primaryKey || primary) }, pairBusy ? 'Pairing…' : primary)),
           canDisconnect && h('button', { key: 'd', ref: offRef, type: 'button', className: 'ot-pillpanel-off text-callout', onClick: function () { setConfirm(true); } }, 'Disconnect')
         ]);
   }
   // The app's pill panel: AIPillPanel with the connection's panel state (connection-state.js pillPanelState).
-  // panel: { state, code?, detail?, hint?, primary?, tone? }; label: the AI's name.
+  // panel: { state, kind?, notSaved?, code?, activity? }; label: the AI's name.
   function ConnectionDetail(p) {
     var ps = p.panel || { state: 'connected' };
-    return h(AIPillPanel, { className: p.className, state: ps.state, provider: p.label, detail: ps.detail, hint: ps.hint, primary: ps.primary, tone: ps.tone,
-      code: ps.code, command: p.command, onCopy: p.onCopy, busy: p.busy, onAction: p.onAction, confirming: p.confirming,
+    return h(AIPillPanel, { className: p.className, state: ps.state, kind: ps.kind, notSaved: ps.notSaved, activity: ps.activity, provider: p.label,
+      code: ps.code, command: p.command, onCopy: p.onCopy, busy: p.busy, pairBusy: p.pairBusy, onAction: p.onAction, confirming: p.confirming,
       onChange: p.onChange, onPermissions: p.onPermissions, onDisconnect: p.onDisconnect });
   }
 
@@ -2341,7 +2366,7 @@
     ConnectionPill: ConnectionPill, PermissionGrant: PermissionGrant, AgentActivity: AgentActivity, AgentActivityLive: AgentActivityLive, runAnswer: runAnswer, ApprovalCard: ApprovalCard, ScriptApproval: ScriptApproval,
     CheckRow: CheckRow, AskField: AskField, ChoicePanel: ChoicePanel, SpecScanPanel: SpecScanPanel, PromptBox: PromptBox,
     StarterPrompt: StarterPrompt, ScanStatus: ScanStatus, CopyField: CopyField, PairingCard: PairingCard, ToolbarStatus: ToolbarStatus, checkupPartial: checkupPartial, GuideAnswer: GuideAnswer, PickChoice: PickChoice,
-    CardGrid: CardGrid, ActivityPanel: ActivityPanel, AgentAnswers: AgentAnswers, AnswerPanel: AnswerPanel, RiskNote: RiskNote, Popover: Popover, SuggestionList: SuggestionList, HistoryList: HistoryList, AiScanPanel: AiScanPanel, EvidencePeek: EvidencePeek, ContinuePanel: ContinuePanel, ConnectionDetail: ConnectionDetail, AIPillPanel: AIPillPanel, InsightCard: InsightCard, CheckupCard: CheckupCard, FixButton: FixButton, FixPanel: FixPanel, AdminChecks: AdminChecks, ReviewComplete: ReviewComplete, SharePreview: SharePreview, ReportSheet: ReportSheet,
+    CardGrid: CardGrid, ActivityPanel: ActivityPanel, AgentAnswers: AgentAnswers, AnswerPanel: AnswerPanel, RiskNote: RiskNote, Popover: Popover, SuggestionList: SuggestionList, HistoryList: HistoryList, AiScanPanel: AiScanPanel, EvidencePeek: EvidencePeek, ContinuePanel: ContinuePanel, ConnectionDetail: ConnectionDetail, AIPillPanel: AIPillPanel, pillStatus: pillStatus, InsightCard: InsightCard, CheckupCard: CheckupCard, FixButton: FixButton, FixPanel: FixPanel, AdminChecks: AdminChecks, ReviewComplete: ReviewComplete, SharePreview: SharePreview, ReportSheet: ReportSheet,
     LoginPanel: LoginPanel, LoginScreen: LoginScreen, ProviderDetails: ProviderDetails,
     PermissionsStep: PermissionsStep, PermissionsPanel: PermissionsPanel, PermissionsSummary: PermissionsSummary,
     ResearchTag: ResearchTag, ResearchNote: ResearchNote, SourceList: SourceList,

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Engine.Agent;
 
@@ -224,6 +225,7 @@ public sealed partial class AgentService
         catch (Exception ex)
         {
             _log($"task {taskId} headless run failed: {ex.GetType().Name}");
+            AppLog.Current.Warn($"chat: task {taskId} headless run failed {ex.GetType().Name}", ErrorSites.ChatRunFailed);
             TryEvent(taskId, "agent.turn", new JsonObject { ["turnId"] = turnId, ["n"] = 1, ["status"] = "failed", ["code"] = "internal" });
         }
         finally
@@ -316,17 +318,20 @@ public sealed partial class AgentService
             catch (Exception ex) when (ex is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
                 _log($"task {taskId} headless run: {ex.GetType().Name}");
+                AppLog.Current.Warn($"chat: task {taskId} headless run stopped reason=internal {ex.GetType().Name}", ErrorSites.ChatRunFailed);
                 stopped = "internal";
             }
             if (stream.Blocked is { } blockedTool)
             {
                 // Even if the CLI ended before the kill landed, the run is refused: no answer, code tool_blocked.
                 _log($"task {taskId} headless run stopped: tool blocked ({blockedTool})");
+                AppLog.Current.Warn($"chat: task {taskId} headless run stopped reason=tool_blocked what={HeadlessResearcher.LogToken(blockedTool)}", ErrorSites.ChatToolBlocked);
                 if (stopped is null or "timeout" or "internal") stopped = "tool_blocked";
             }
             if (exit is { Started: false })
             {
                 _log($"task {taskId} headless run did not start ({exit.LaunchError ?? "launch_failed"})");
+                AppLog.Current.Warn($"chat: task {taskId} headless run did not start reason={HeadlessResearcher.LaunchCode(exit.LaunchError)}", ErrorSites.ChatNotStarted);
                 ReserveTurns(taskId, -allowance); // never launched: nothing to count
                 TurnFailed(taskId, turnId, n, "unavailable");
                 return;

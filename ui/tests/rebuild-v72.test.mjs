@@ -188,15 +188,14 @@ test('Disconnect asks first: Cancel leaves it connected; Disconnect calls provid
   assert.ok(!btn(t, 'Disconnect').props.disabled);
 });
 
-// v73: each state's buttons come from the design's state table (rebuild-v73.test.mjs); a state the design has none for
-// keeps its own word, hint and action.
-test('the pill panel keeps a state’s own word, hint and action where the design has none', () => {
+// v86: every connection has a designed state (rebuild-v73.test.mjs, rebuild-v86.test.mjs); ChatGPT not available
+// uses the design's ChatGPT words and its Sign in.
+test('the pill panel: ChatGPT not available has the design’s ChatGPT words and Sign in', () => {
   const panel = CS.pillPanelState({ kind: 'chatgpt_plan', entry: { kind: 'chatgpt_plan', status: 'error', detail: 'not_eligible' } });
-  const s2 = plan('error', 'not_eligible');
   fresh();
-  const t2 = render(() => OT.ConnectionDetail({ panel, label: s2.label, onChange: noop, onAction: noop }));
-  assert.deepEqual(buttons(t2), ['Change']);
-  assert.ok(text(t2).includes(s2.hint) && text(t2).includes('Not available'));
+  const t2 = render(() => OT.ConnectionDetail({ panel, label: 'ChatGPT', onChange: noop, onAction: noop }));
+  assert.deepEqual(buttons(t2), ['Change', 'Sign in']);
+  assert.ok(text(t2).includes('This ChatGPT account can’t be used here. Sign in with another account, or pick another AI.') && text(t2).includes('Not available'));
 });
 
 const STEPS = [{ origin: 'client', tool: 'read_report', title: 'Read the report', state: 'done' },

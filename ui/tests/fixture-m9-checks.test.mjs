@@ -413,3 +413,93 @@ test('a completed request with checks left unread (mixed, unread): each check ke
     validEvents(evs);
   }
 });
+
+// ---- the cooldown on the monotonic clock, and the sweep that corrects a countdown already shown (as the host:
+// AdminChecksTests.TheCooldownsEnd_SendsTheWaitingRequestsAgain… and AWallClockMove_SendsTheWaitingRequestsAgain…) ----
+function movableClocks() {
+  const realNow = Date.now, realMono = performance.now;
+  const c = { wall: 0, ahead: 0, restore() { Date.now = realNow; performance.now = realMono; } };
+  Date.now = () => realNow.call(Date) + c.wall;
+  performance.now = () => realMono.call(performance) + c.ahead;
+  return c;
+}
+const views = (evs, rid) => evs.filter((e) => e.type === 'agent.checks' && e.payload.requestId === rid).map((e) => e.payload);
+async function waitingRequest(be, evs, t) {
+  const b = await check(be, t, DISK);
+  const rid = await requestOf(evs, b.operationId);
+  return { rid, shown: (await lastChecks(evs, rid)).retryAt };
+}
+
+test('the cooldown\'s end sends the waiting requests again with retryAt null, and the sweep clears the saved end (as the host)', async () => {
+  const clocks = movableClocks();
+  try {
+    const storage = memStore();
+    const { be, evs, t, reportId } = await world(null, true, storage);
+    await be.call('checks.decline', { requestId: await requestOf(evs, (await check(be, t, DEF)).operationId) });
+    const { rid, shown } = await waitingRequest(be, evs, t);
+    assert.ok(Date.parse(shown) > Date.now() + 30000);
+
+    assert.equal((await be.call('fixture.checksTick', {})).sent, false); // still cooling, the clock unmoved
+    await sleep(30);
+    assert.equal(views(evs, rid).length, 1);
+
+    clocks.ahead = 61000; // the 60 s pass on the monotonic clock
+    assert.equal((await be.call('fixture.checksTick', {})).sent, true);
+    const again = await lastChecks(evs, rid);
+    assert.deepEqual([again.state, again.retryAt], ['awaiting_user', null]);
+    validEvents(evs);
+    assert.equal((await be.call('fixture.checksTick', {})).sent, false); // once only
+    await sleep(30);
+    assert.equal(views(evs, rid).length, 2);
+
+    // The saved end was cleared: a reload with the clock set back shows no cooldown.
+    clocks.ahead = 0; clocks.wall = -10 * 60 * 1000;
+    const be2 = setup(storage);
+    const evs2 = [];
+    be2.onEvent((e) => { if (e.type === 'agent.checks') evs2.push(e); });
+    await be2.call('fixture.setAdminAvailable', { available: true });
+    const t2 = await be2.call('agent.start', { idempotencyKey: key(), goal: 'Again', recipientKind: 'anthropic_api', scope: { reportId },
+      grant: { diagnostics: ADMIN_IDS.slice(), changes: 'fix', admin: true } });
+    assert.equal((await waitingRequest(be2, evs2, t2)).shown, null);
+  } finally { clocks.restore(); }
+});
+
+test('a wall-clock move sends the waiting requests again with the corrected retryAt, saved normalised (as the host)', async () => {
+  const clocks = movableClocks();
+  try {
+    const storage = memStore();
+    const { be, evs, t, reportId } = await world(null, true, storage);
+    await be.call('checks.decline', { requestId: await requestOf(evs, (await check(be, t, DEF)).operationId) });
+    const { rid, shown } = await waitingRequest(be, evs, t);
+
+    clocks.wall = -24 * 3600 * 1000; // set back a day: the countdown shown would say a day and a minute
+    assert.equal((await be.call('fixture.checksTick', {})).sent, true);
+    const corrected = await lastChecks(evs, rid);
+    const at = Date.parse(corrected.retryAt);
+    assert.ok(at > Date.now() + 30000 && at <= Date.now() + 61000, 'retryAt: the wall clock now plus the time left');
+    assert.ok(Math.abs(Date.parse(shown) - at - 24 * 3600 * 1000) < 5000);
+    assert.equal(views(evs, rid).length, 2);
+
+    assert.equal((await be.call('fixture.checksTick', {})).sent, false); // nothing moved since
+    await sleep(30);
+    assert.equal(views(evs, rid).length, 2);
+    // A refused approve shows the same corrected retryAt; the list too.
+    await rejects(be.call('checks.approve', { idempotencyKey: key(), requestId: rid, revision: 1 }), -32013, { reason: 'cooldown', retryAt: corrected.retryAt });
+    assert.equal((await be.call('checks.list', {})).requests.find((q) => q.requestId === rid).retryAt, corrected.retryAt);
+
+    clocks.wall = 5 * 60 * 1000; // moved forward to 5 minutes ahead: still the same 60 s, corrected once more
+    assert.equal((await be.call('fixture.checksTick', {})).sent, true);
+    const ahead = Date.parse((await lastChecks(evs, rid)).retryAt);
+    assert.ok(Math.abs(ahead - Date.parse(shown) - 5 * 60 * 1000) < 5000);
+
+    // The corrected end was saved: after a reload the cooldown goes on (an uncorrected end would be 5 minutes past).
+    const be2 = setup(storage);
+    const evs2 = [];
+    be2.onEvent((e) => { if (e.type === 'agent.checks') evs2.push(e); });
+    await be2.call('fixture.setAdminAvailable', { available: true });
+    const t2 = await be2.call('agent.start', { idempotencyKey: key(), goal: 'Again', recipientKind: 'anthropic_api', scope: { reportId },
+      grant: { diagnostics: ADMIN_IDS.slice(), changes: 'fix', admin: true } });
+    const resumed = (await waitingRequest(be2, evs2, t2)).shown;
+    assert.ok(resumed && Math.abs(Date.parse(resumed) - ahead) < 2000, 'the saved end, normalised');
+  } finally { clocks.restore(); }
+});

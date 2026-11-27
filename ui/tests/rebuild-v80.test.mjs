@@ -60,17 +60,18 @@ const noop = () => {};
 
 /* ---------- pure: card.fix → FixPanel ---------- */
 const FIXMAP = { working: 'working', waiting_checks: 'checks', checking: 'checksRunning', plan_ready: 'plan', running: 'applying', fixed: 'verified',
-  done_reduced: 'doneLeftOut', partly_fixed: 'partial', finished: 'finished', failed: 'failed', unclear: 'unclear', stopped: 'stopped', blocked: 'blocked',
+  done_reduced: 'doneLeftOut', partly_fixed: 'partial', finished: 'finished', failed: 'failed', unclear: 'unclear', stopped: 'scriptOnly', blocked: 'blocked',
   needs_you: 'needsYou', nothing_to_fix: 'nothing', no_fix: 'noFix' };
 test('fixPanelState: every card.fix state of fix.schema.json maps onto a FixPanel state; null is the card’s normal state', () => {
   const schema = JSON.parse(fs.readFileSync(new URL('../../contracts/schemas/fix.schema.json', import.meta.url), 'utf8'));
   for (const st of schema.$defs.state.enum) assert.ok(st in FIXMAP, st);   // stopped is new on the host (design v82)
-  const designed = ['working', 'checks', 'checksRunning', 'plan', 'blocked', 'finished', 'doneLeftOut', 'unclear', 'stopped', 'script', 'applying', 'verified', 'partial', 'failed', 'needsYou', 'nothing', 'noFix'];
+  // scriptOnly (stopped): no design state of its own, the script pointer or no panel.
+  const designed = ['working', 'checks', 'checksRunning', 'plan', 'blocked', 'finished', 'doneLeftOut', 'unclear', 'scriptOnly', 'script', 'applying', 'verified', 'partial', 'failed', 'needsYou', 'nothing', 'noFix'];
   for (const [host, want] of Object.entries(FIXMAP)) {
     const v = FIX.fixPanelState({ state: host });
     assert.equal(v.state, want, host);
     assert.ok(designed.includes(v.state));
-    assert.equal(v.withPlan, ['plan', 'applying', 'verified', 'doneLeftOut', 'partial', 'finished', 'failed', 'unclear', 'stopped'].includes(want), host);
+    assert.equal(v.withPlan, ['plan', 'applying', 'verified', 'doneLeftOut', 'partial', 'finished', 'failed', 'unclear', 'scriptOnly'].includes(want), host);
   }
   assert.equal(FIX.fixPanelState(null), null);
   assert.equal(FIX.fixPanelState({ state: 'something_new' }), null);

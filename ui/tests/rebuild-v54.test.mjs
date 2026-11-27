@@ -175,7 +175,7 @@ test('6: a script that didn’t start because the Windows prompt closed, or the 
 test('7: tile status words: warnings get the alert mark and bold; Not installed and Connected stay plain', () => {
   const tile = (status) => OT.ProviderOption({ value: 'claude', title: 'Claude', glyph: 'C', status });
   const status = (t) => nodes(t).filter((n) => /ot-provider-status/.test(n.props.className || ''))[0];
-  for (const w of ['Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not available for this account']) {
+  for (const w of ['Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not working', 'Not available for this account']) {
     const s = status(tile(w));
     assert.match(s.props.className, /is-warn/, w);
     assert.equal(text(s), w);
@@ -183,7 +183,8 @@ test('7: tile status words: warnings get the alert mark and bold; Not installed 
   for (const w of ['Not installed', 'Connected']) assert.doesNotMatch(status(tile(w)).props.className, /is-warn/, w);
   assert.match(status(tile({ text: 'Anything', warn: true })).props.className, /is-warn/);
   // Every word the app's helper gives is one of the design's.
-  const designed = ['Not installed', 'Connected', 'Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not available for this account'];
+  const designed = ['Not installed', 'Connected', 'Couldn’t check', 'Update needed', 'Signed out', 'Blocked on this PC', 'Needs repair', 'Limit reached', 'No credit', 'Key rejected', 'Offline', 'Not available for this account',
+    'Not working'];   // designer, after v87: an error Optimus doesn't recognise
   const st = (kind, status, detail) => CS.connectionState({ kind, entry: { kind, status, detail } });
   const words = [];
   for (const d of ['auth', 'quota', 'not_eligible', 'network', 'unavailable', 'storage', 'cancelled', 'callback_timeout']) {

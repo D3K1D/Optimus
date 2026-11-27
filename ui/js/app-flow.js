@@ -315,7 +315,7 @@
     var ckEvents = React.useRef({}), ckBusy = React.useRef({});
     // Review 1: the open requests are read again (checks.list) at start and after a reconnect.
     // Review 3: the latest card.fix event per card ({seq, fix, reportId}); a deck snapshot asked for before it keeps it.
-    var fixEvents = React.useRef({}), fixSeq = React.useRef(0);
+    var fixEvents = React.useRef({}), fixSeq = React.useRef(0), deckGen = React.useRef(0), deckAccepted = React.useRef({});
     var fixGen = React.useRef({});   // re-check 5: per card, the count of its latest card.fix event (never retired)
     var ptk = React.useState(0), planTick = ptk[0], setPlanTick = ptk[1];   // review 7: retry card plans not read yet
     var rck = React.useState({}), rechecks = rck[0], setRechecks = rck[1];  // design v82: needs you's Check again (cardId → {checking, recheck})
@@ -329,6 +329,9 @@
       n[planId] = Object.assign({}, m[planId] || {}, patch);
       plansRef.current = n; setPlans(n);
     }
+    // Show script on a script that was closed: it opens again, and is found once it is rendered.
+    var pendingShow = React.useRef(null);
+    React.useEffect(function () { var pid = pendingShow.current; if (pid) { pendingShow.current = null; showScript(pid); } });
     var startedAt = React.useRef({});          // invocation id → when it started (event time, else first seen)
     var wk = React.useState(0), workedAt = wk[0], setWorkedAt = wk[1];
     function workPulse() { setWorkedAt(Date.now()); }
@@ -358,13 +361,20 @@
     // A deck snapshot from the host (re-check 4): since = the card.fix event count when it was asked for. Events after it
     // still win; events up to it are superseded by the snapshot and retired. Every asynchronous deck request captures it
     // (deckSince) before it is sent; a local patch (patchCardFix) is not a snapshot (setDeck).
+    // A token from deckSince also carries the request's generation: a reply older than the newest accepted one for its
+    // report is dropped (a newer snapshot already retired the events it would have needed to stay current).
     function setFu(f, since) {
-      var s = typeof since === 'number' ? since : -1;
+      var tok = since && typeof since === 'object' ? since : null;
+      var s = tok ? tok.seq : typeof since === 'number' ? since : -1;
+      if (tok && f && f.reportId) {
+        if (tok.gen < (deckAccepted.current[f.reportId] || 0)) return fuRef.current;
+        deckAccepted.current[f.reportId] = tok.gen;
+      }
       f = overlayFix(f, s);
       Object.keys(fixEvents.current).forEach(function (k) { if (fixEvents.current[k].seq <= s) delete fixEvents.current[k]; });
       return setDeck(f);
     }
-    function deckSince() { return fixSeq.current; }
+    function deckSince() { return { seq: fixSeq.current, gen: ++deckGen.current }; }
     function setDeck(f) {
       fuRef.current = f; setFuState(f);
       if (f && f.card) cardFinding.current[f.card.id] = f.card.findingId;
@@ -757,7 +767,7 @@
     function refreshDeck() {
       var f = fuRef.current; if (!f) return;
       var run = function () {
-        var since = fixSeq.current;
+        var since = deckSince();
         return backend.call('followup.get', { reportId: f.reportId }).then(function (cur) {
           if (fuRef.current && fuRef.current.reportId === cur.reportId) setFu(cur, since);
           setPlanTick(function (n) { return n + 1; });   // review 7: card plans not read yet are tried again
@@ -844,12 +854,19 @@
       agentAsk(text || '', cid, null, extra);
     }
     // [Close] on an ended fix: fix.dismiss; the card is back to normal.
-    function dismissFix(cid) {
+    function dismissFix(cid, done) {
       // Re-check 5: the reply counts only when no card.fix event for the card came after the dismissal began.
       var f = fuRef.current, gen = fixGen.current[cid] || 0;
       backend.call('fix.dismiss', { cardId: cid }).then(function (r) {
         if ((fixGen.current[cid] || 0) === gen) patchCardFix(cid, f && f.reportId, r ? r.fix || null : null, true);
-      }, function () { refreshDeck(); });
+        if (done) done(true);
+      }, function () { if (done) done(false); refreshDeck(); });
+    }
+    // The plan the card's current fix points to (the deck as the user sees it), or null.
+    function cardFixPlan(cid) {
+      var f = fuRef.current; if (!f || !cid) return null;
+      var c = [f.card].concat(f.upcoming || []).find(function (x) { return x && x.id === cid; });
+      return c && c.fix ? c.fix.planId || null : null;
     }
     // needs you, on a report card: Check again re-reads the card's finding (the card closes when the issue is gone).
     // Design v82: Checking… while it runs; still there → the line under the note; gone → the green line for about 2 seconds,
@@ -865,6 +882,8 @@
     }
     // Design v82: Show script brings the script waiting beside the chat into view and focuses it.
     function showScript(planId) {
+      var ent = plansRef.current[planId];
+      if (ent && ent.closed) { putPlan(planId, { closed: false }); pendingShow.current = planId; return; }
       var el = document.querySelector('.ot-plan-' + planId);
       if (!el) return;
       if (el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
@@ -1016,7 +1035,7 @@
       }).catch(function () {});
       var f = fuRef.current;
       loadChecks();
-      var since = fixSeq.current;
+      var since = deckSince();
       if (f) backend.call('followup.get', { reportId: f.reportId }).then(function (cur) { setFu(cur, since); setPlanTick(function (n) { return n + 1; }); }).catch(function () {});
       loadProviders();
       // A restarted host forgot which CLI the shell found: check both again, whatever the last answer said.
@@ -2045,7 +2064,11 @@
     // m9 §17.3: a plan bound to a card on screen is shown inside that card (a script stays here: the card has no script view).
     var deckIds = {}; cards.forEach(function (c) { deckIds[c.id] = true; });
     var inCard = function (e) { return !!(e.plan && e.plan.cardId && deckIds[e.plan.cardId] && e.plan.kind !== 'script'); };
+    // A script a card on screen points to is always here (whatever read it first: a reload's operations, the card's plan read),
+    // until closed; a script reopened from Activity too.
+    var pointed = {}; cards.forEach(function (c) { if (c.fix && c.fix.planId) pointed[c.fix.planId] = true; });
     var sidePlans = Object.keys(plans).map(function (k) { return Object.assign({ planId: k }, plans[k]); }).filter(function (e) {
+      if (e.plan && e.plan.kind === 'script' && (pointed[e.planId] || e.closed === false)) return !e.closed;
       return (e.kind === 'agent' || e.kind === 'undo') && e.plan && !e.closed && !inCard(e) && ((e.plan.status !== 'declined' && e.plan.status !== 'cancelled') || !!e.approveCause) &&
         // An expired fix stays until dismissed (it says so and offers Dismiss); other expired plans just go.
         (e.plan.status !== 'expired' || (e.plan.kind === 'fix' && !e.plan.undoOf && !e.op));
@@ -2201,6 +2224,11 @@
     }));
     // While the assistant or a native client works and Activity is closed, the pill says so.
     var working = taskActive && !showActivity && (!!workedAt || activity.some(function (a) { return a.status === 'running'; }) || taskWaiting);
+    // design v86 (PillPanelStates): the pill panel's state (pillPanelState), and the toolbar pill shows its status word.
+    var pillPanel = OT.pillPanelState({ kind: pillKind, local: !pillKind, entry: pillKind ? providers[pillKind] : null, label: conn.label, backend: bstate, task: task }, working);
+    var pillWord = OT.pillStatus(pillPanel.state);
+    // Pairing in one place: while the open panel shows pairing, the main-page PairingCard is not shown.
+    var pairInPanel = detailOpen && pillPanel.state === 'pairing';
     var TASK_WORD = { stopped: 'Stopped', expired: 'Expired', exhausted: 'Budget used', failed: 'Failed' };
     // M9 §6: labels by finding (design ResearchNote props) and the toolbar chip, for the current report only.
     var curResearch = research && report && research.reportId === report.reportId ? research : null;
@@ -2355,7 +2383,8 @@
       var pid = cf.planId;
       // Design v82/v84 (re-check 3): a card-bound script lives beside the chat in every state (it says truthfully how it went);
       // the card only points to it: waiting, running or ended. Never the generic plan card ("Nothing changed" is not known).
-      if (e.plan.kind === 'script') return Object.assign(base, { state: 'script', scriptState: FIX.scriptPointer(e.plan, e.op), onShowScript: function () { showScript(pid); } });
+      if (e.plan.kind === 'script') return Object.assign(base, { state: 'script', scriptState: ps.state === 'scriptOnly' ? 'ended' : FIX.scriptPointer(e.plan, e.op), onShowScript: function () { showScript(pid); } });
+      if (ps.state === 'scriptOnly') return null;   // stopped, not a script: no panel on the card
       var plan = planCardProps(Object.assign({ planId: pid }, e), {
         leftOut: FIX.leftOutView(e.plan), removed: FIX.removedLabels(e.plan),
         onPermissions: function () { openPermissions(id, true); },
@@ -2386,7 +2415,13 @@
         var close = function () { putPlan(e.planId, { closed: true }); };
         // ot-plan-<id>: a card's Show script finds it.
         // Re-check 3: closing a card's ended script also ends the card's fix (fix.dismiss); the card is back to normal.
-        var closeScript = pl.cardId && FIX.scriptPointer(pl, e.op) === 'ended' ? function () { close(); dismissFix(pl.cardId); } : close;
+        // It is hidden once the dismissal succeeded (a failed one leaves it shown). Review: only the card's current script
+        // ends the card's fix; an older one (reopened from Activity) only closes.
+        var closeScript = pl.cardId && FIX.scriptPointer(pl, e.op) === 'ended' && cardFixPlan(pl.cardId) === e.planId ? function () {
+          if ((plansRef.current[e.planId] || {}).closing) return;
+          putPlan(e.planId, { closing: true });
+          dismissFix(pl.cardId, function (ok) { putPlan(e.planId, ok ? { closing: false, closed: true } : { closing: false }); });
+        } : close;
         if (pl.kind === 'script') return h(ScriptApproval, scriptCardProps(e, { key: 'plan:' + e.planId, className: 'ot-enter ot-plan-' + e.planId, onClose: closeScript }));
         // A fix, or a single change an assistant asked for (or an Undo): the approval card (a single change is one step).
         var extra = { key: 'plan:' + e.planId, className: 'ot-enter', onClose: close };
@@ -2394,7 +2429,7 @@
         if (pl.kind !== 'fix') extra.onUndoStep = function () { close(); undoOperation(e.op); };
         return h(ApprovalCard, planCardProps(e, extra));
       }).concat([
-        pairing && id !== 'login' && h(PairingCard, { key: 'pair', className: 'ot-enter', client: WINDOW_NAME, code: pairing.code, busy: pairBusy,
+        pairing && id !== 'login' && !pairInPanel && h(PairingCard, { key: 'pair', className: 'ot-enter', client: WINDOW_NAME, code: pairing.code, busy: pairBusy,
           onPair: function () { decidePairing(true); }, onCancel: function () { decidePairing(false); } }),
         grantFor && h(PermissionGrant, { key: 'grant:' + grantFor.kind + ':' + (perm ? perm.permissions.revision : 0), className: 'ot-enter', client: grantName,
           preset: permToggles(perm ? perm.permissions : permDefaults()), webUnavailable: grantAvail.web === 'no', adminUnavailable: grantAvail.admin === false, provider: grantName,
@@ -2671,20 +2706,19 @@
         // M1 makes no AI connection, so the pill never says Connected.
         // Status only as the backend reports it (provider.list / provider.connect / pairing events).
         // A paired native client working on an active task is the live connection, whatever the chooser says.
-        // §9: label · word and tone come only from connectionState (provider.list + provider.status events).
-        h(ConnectionPill, { provider: pillState.label, status: working && bstate !== 'reconnecting' ? 'live' : pillState.tone,
-          detail: working && bstate !== 'reconnecting' ? 'Working' : pillState.word,
+        // §9: the label from connectionState; v86: the word and tone are the panel's (pillStatus of pillPanelState).
+        h(ConnectionPill, { provider: pillState.label, status: pillWord.status, detail: pillWord.detail,
           onOpen: function () { setDetailOpen(!detailOpen); }, open: detailOpen,
           // Change works anywhere except mid-scan; Back on the login returns to this exact step.
           onChange: id === 'scanning' || stage.leaving ? null : function () { setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } })),
-      // design v73 (PillPanelStates): the panel's state from the connection (pillPanelState); Local only opens it too.
+      // design v86 (PillPanelStates): the panel's state from the connection (pillPanelState); Local only opens it too.
       signedIn && detailOpen && h('div', { className: 'ot-conn-wrap' }, h(ConnectionDetail, { key: pillKind || 'local', className: 'ot-enter', label: pillState.label,
-        panel: OT.pillPanelState({ kind: pillKind, local: !pillKind, entry: pillKind ? providers[pillKind] : null, label: conn.label, backend: bstate, task: task }, working && bstate !== 'reconnecting'),
+        panel: pillPanel, pairBusy: pairBusy,
         command: pillState.command ? regs.current[pillKind] || null : null, onCopy: function () { return copyCommand(regs.current[pillKind]); },
         onAction: function (name) { pillAction(name, pillKind); },
-        // Disconnect asks first in the panel; the call is sent once. Hidden mid-scan and while something runs.
+        // Disconnect asks first in the panel; the call is sent once. Hidden where the state says so, mid-scan and while something runs.
         busy: id === 'scanning' || working,
-        onDisconnect: pillKind && pillState.disconnect ? function () { return disconnectKind(pillKind); } : null,
+        onDisconnect: pillKind ? function () { return disconnectKind(pillKind); } : null,
         // M9 §1.4: the permissions page, with Back, as Change opens the chooser.
         onPermissions: id === 'scanning' || !perm ? null : function () { openPermissions(id, true); },
         onChange: id === 'scanning' ? null : function () { setDetailOpen(false); setReturnTo(id); setWave({ speed: 0.7, words: [] }); go('login'); } })),

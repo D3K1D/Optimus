@@ -267,13 +267,16 @@ public sealed partial class BenchService
     private async Task<bool> CoolDownAsync(Run run)
     {
         var sw = Stopwatch.StartNew();
-        while (sw.Elapsed < T.CoolDown)
+        while (true)
         {
             if (run.StopKind is not null) return false;
             var power = SafePower(run.Hub);
             OnPower(run, power);
             if (run.StopKind is not null) return false;
+            // The clock is read once per pass: checking it and then reading it again could find the time up in between and
+            // hand Task.Delay a negative wait (ArgumentOutOfRangeException, which failed the whole run).
             var wait = T.CoolDown - sw.Elapsed;
+            if (wait <= TimeSpan.Zero) break;
             try { await Task.Delay(wait < T.SampleInterval ? wait : T.SampleInterval, run.StopCts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { return false; }
         }

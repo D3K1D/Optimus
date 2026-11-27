@@ -12,7 +12,7 @@ namespace OptimizationTool.Tests;
 /// </summary>
 public sealed partial class ResearchTests
 {
-    private static readonly IReadOnlyList<LocalIdentity> AndreNames = IdentityFilter.Local("jamie", "DESKTOP-K7Q2X", "WORKGROUP");
+    private static readonly IReadOnlyList<LocalIdentity> JamieNames = IdentityFilter.Local("jamie", "DESKTOP-K7Q2X", "WORKGROUP");
 
     private static World IdentityWorld() => new()
     {
@@ -41,7 +41,7 @@ public sealed partial class ResearchTests
         foreach (var call in probe.Calls)
         {
             Assert.Equal(ResearchPolicy.Prompt, call.System);
-            Assert.False(IdentityFilter.Contains(call.Subject, AndreNames), call.Subject);
+            Assert.False(IdentityFilter.Contains(call.Subject, JamieNames), call.Subject);
             Assert.DoesNotContain("VK7JG", call.Subject, StringComparison.OrdinalIgnoreCase);
         }
     }
@@ -53,7 +53,7 @@ public sealed partial class ResearchTests
     public async Task Automatic_research_skips_identifying_names_and_omits_identifying_publishers_and_products()
     {
         var log = new ConcurrentQueue<string>();
-        await using var rig = await Start(world: IdentityWorld(), names: AndreNames, log: log.Enqueue);
+        await using var rig = await Start(world: IdentityWorld(), names: JamieNames, log: log.Enqueue);
         KnowIdentities(rig.Identity);
 
         var (reportId, final) = await ScanAndResearch(rig.C);
@@ -102,7 +102,7 @@ public sealed partial class ResearchTests
     [Fact]
     public async Task Web_lookup_refuses_identifying_names_and_sends_no_identifying_publisher_or_product()
     {
-        await using var rig = await Start(world: IdentityWorld(), names: AndreNames);
+        await using var rig = await Start(world: IdentityWorld(), names: JamieNames);
         KnowIdentities(rig.Identity);
         var reportId = await ResearchedThenForgotten(rig);
         var f = await FindingsByImage(rig.C, reportId);
@@ -131,7 +131,7 @@ public sealed partial class ResearchTests
     [Fact]
     public async Task A_product_and_label_cached_under_the_old_policy_are_not_reused()
     {
-        await using var rig = await Start(world: IdentityWorld(), names: AndreNames);
+        await using var rig = await Start(world: IdentityWorld(), names: JamieNames);
         KnowIdentities(rig.Identity);
         var reportId = await ResearchedThenForgotten(rig);
         var syncer = (await FindingsByImage(rig.C, reportId))["syncer.exe"].Str("id");

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using OptimizationTool.Transport.Logging;
 
 namespace OptimizationTool.Engine.Agent;
 
@@ -444,15 +445,27 @@ internal sealed class HeadlessResearcher(ICliRunner runner, string dataDir, Func
     {
         var kind = credential.Kind;
         var client = clientOf(kind);
-        if (Unavailable(kind, client) is not null) throw new WebResearchUnsupportedException("not_available_yet"); // capability changed since the run began
-        if (client!.SignedIn == false) throw new ProviderException("auth", "Not signed in.", false);
+        if (Unavailable(kind, client) is { } why)
+        {
+            Warn($"unavailable reason={why} kind={LogToken(kind)}", ErrorSites.ResearchCliUnavailable);
+            throw new WebResearchUnsupportedException("not_available_yet"); // capability changed since the run began
+        }
+        if (client!.SignedIn == false)
+        {
+            Warn($"not signed in kind={LogToken(kind)}", ErrorSites.ResearchCliNotSignedIn);
+            throw new ProviderException("auth", "Not signed in.", false);
+        }
 
         var runDir = Path.Combine(dataDir, "research-runs", "r-" + Ids.RandomHex(8));
         try
         {
             Directory.CreateDirectory(runDir);
             try { Acl.RestrictDirectory(runDir); }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException) { log($"research run folder ACL: {ex.GetType().Name}"); }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or PlatformNotSupportedException) 
+            {
+                log($"research run folder ACL: {ex.GetType().Name}");
+                Warn($"run folder ACL failed {ex.GetType().Name}", ErrorSites.ResearchCliFolderAcl);
+            }
 
             File.WriteAllText(Path.Combine(runDir, ResearchCommand.McpConfigFile), ResearchCommand.EmptyMcpConfig);
             File.WriteAllText(Path.Combine(runDir, ResearchCommand.SystemFile), call.System);
@@ -471,18 +484,30 @@ internal sealed class HeadlessResearcher(ICliRunner runner, string dataDir, Func
             if (stream.OverSearchLimit)
             {
                 log($"research call stopped: more than {call.KillAboveSearches} searches");
+                Warn($"call stopped reason=search_limit searches={stream.Searches} limit={call.KillAboveSearches}", ErrorSites.ResearchCliSearchLimit);
                 throw new ProviderException("search_limit", "The research call searched more than allowed.", false);
             }
             if (stream.Blocked is { } blocked)
             {
                 log($"research call stopped: tool blocked ({blocked})");
+                Warn($"call stopped reason=tool_blocked what={LogToken(blocked)}", ErrorSites.ResearchCliToolBlocked);
                 throw new ProviderException("tool_blocked", "The research call used something it must not have.", false);
             }
-            if (exit is { Started: false }) throw new ProviderException("unavailable", "The CLI did not start.", false);
+            if (exit is { Started: false })
+            {
+                Warn($"CLI did not start reason={LaunchCode(exit.LaunchError)}", ErrorSites.ResearchCliNotStarted);
+                throw new ProviderException("unavailable", "The CLI did not start.", false);
+            }
             var answer = stream.Answer;
             if (answer is null)
             {
-                if (stream.LooksLikeAuth(exit?.StandardError ?? "")) throw new ProviderException("auth", "Not signed in.", false);
+                // The exit code, the stderr length and whether it looks like a sign-in problem: never the text itself.
+                var stderr = exit?.StandardError ?? "";
+                var auth = stream.LooksLikeAuth(stderr);
+                var code = exit is null ? "none" : exit.ExitCode.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                Warn($"no answer exit={code} stderr={stderr.Length}ch auth_like={(auth ? "yes" : "no")}",
+                    auth ? ErrorSites.ResearchCliNotSignedIn : ErrorSites.ResearchCliNoAnswer);
+                if (auth) throw new ProviderException("auth", "Not signed in.", false);
                 throw new ProviderException("client_error", "The CLI gave no answer.", true);
             }
             return new ResearchAnswer(answer, stream.Observed, stream.Searches,
@@ -491,7 +516,25 @@ internal sealed class HeadlessResearcher(ICliRunner runner, string dataDir, Func
         finally
         {
             try { if (Directory.Exists(runDir)) Directory.Delete(runDir, recursive: true); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { log($"research run cleanup: {ex.GetType().Name}"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) 
+            {
+                log($"research run cleanup: {ex.GetType().Name}");
+                Warn($"run folder cleanup failed {ex.GetType().Name}", ErrorSites.ResearchCliCleanup);
+            }
         }
     }
+
+    /// <summary>The developer log's "why" line (docs/error-logging.md): fixed words, codes, counts and type names only.</summary>
+    private static void Warn(string message, string site,
+        [System.Runtime.CompilerServices.CallerFilePath] string file = "", [System.Runtime.CompilerServices.CallerLineNumber] int line = 0,
+        [System.Runtime.CompilerServices.CallerMemberName] string member = "") =>
+        AppLog.Current.Write(LogLevel.Warn, "research: headless " + message, site, null, file, line, member);
+
+    /// <summary>A launch error is one of the fixed codes of <see cref="CliExit.LaunchError"/>; anything else logs as "other".</summary>
+    internal static string LaunchCode(string? code) =>
+        code is null ? "launch_failed" : code is "unsupported_path" or "policy" or "access_denied" or "launch_failed" ? code : "other";
+
+    /// <summary>A short plain token (letters, digits, space, <c>_ . -</c>) safe to log; anything else logs as "other".</summary>
+    internal static string LogToken(string? s) =>
+        s is { Length: > 0 and <= 80 } && s.All(c => char.IsAsciiLetterOrDigit(c) || c is '_' or '.' or '-' or ' ') ? s : "other";
 }

@@ -858,6 +858,17 @@ button.ot-source { width: 100%; border: 0; background: none; font: inherit; text
 .ot-pair-code.is-small { padding: var(--space-3); }
 .ot-pair-code.is-small .ot-pair-digit { width: 36px; height: 42px; font-size: 20px; }
 
+/* Pairing code fits from 320px: digits shrink with the row instead of overflowing it. */
+.ot-pair-code { box-sizing: border-box; max-width: 100%; min-width: 0; }
+.ot-pair-digits { width: 100%; max-width: 206px; justify-content: center; gap: clamp(4px, 2.5vw, 10px); }
+.ot-pair-digit { flex: 1 1 0; min-width: 0; max-width: 44px; }
+.ot-pair-code.is-small .ot-pair-digits { max-width: 174px; }
+.ot-pair-code.is-small .ot-pair-digit { width: auto; max-width: 36px; }
+@media (max-width: 400px) {
+  .ot-pair { padding: var(--space-4); }
+  .ot-pair-code { padding: var(--space-3); }
+}
+
 /* ---------- Fix for me (design v75–v80: FixButton, FixPanel, AdminChecks, ApprovalCard in a card) ---------- */
 .ot-fix-note { flex-basis: 100%; }
 .ot-fix-why { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--ink-muted); }

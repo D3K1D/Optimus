@@ -461,9 +461,12 @@
   // (the app decides that from the plan's kind).
   var FIX_PANEL = { working: 'working', waiting_checks: 'checks', checking: 'checksRunning', plan_ready: 'plan', blocked: 'blocked',
     running: 'applying', fixed: 'verified', done_reduced: 'doneLeftOut', partly_fixed: 'partial', finished: 'finished', failed: 'failed',
-    unclear: 'unclear', stopped: 'stopped', needs_you: 'needsYou', nothing_to_fix: 'nothing', no_fix: 'noFix' };
-  // The FixPanel states that show the plan (ApprovalCard props from the plan and its operation).
-  var FIX_WITH_PLAN = { plan: 1, applying: 1, verified: 1, doneLeftOut: 1, partial: 1, finished: 1, failed: 1, unclear: 1, stopped: 1 };
+    unclear: 'unclear', stopped: 'scriptOnly', needs_you: 'needsYou', nothing_to_fix: 'nothing', no_fix: 'noFix' };
+  // stopped (contract, the designer's cleanup round): no Stopped panel on a card. scriptOnly: a card-bound script shows its
+  // pointer as ended; anything else shows no panel (the card's normal state, no words).
+  // The FixPanel states that show the plan (ApprovalCard props from the plan and its operation); scriptOnly reads the plan
+  // only to know whether it is a script.
+  var FIX_WITH_PLAN = { plan: 1, applying: 1, verified: 1, doneLeftOut: 1, partial: 1, finished: 1, failed: 1, unclear: 1, scriptOnly: 1 };
   // → {state, withPlan} or null (no fix on the card: its normal state).
   function fixPanelState(fix) {
     var st = fix && FIX_PANEL[fix.state];
